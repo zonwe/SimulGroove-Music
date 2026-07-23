@@ -1,0 +1,30 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../core/auth/auth_repository.dart';
+import '../core/database/app_database.dart';
+import '../core/library/library_scanner.dart';
+import '../core/library/scanner_factory.dart';
+import '../core/player/music_audio_handler.dart';
+
+final databaseProvider = Provider<AppDatabase>(
+  (ref) => throw UnimplementedError(),
+);
+final audioHandlerProvider = Provider<MusicAudioHandler>(
+  (ref) => throw UnimplementedError(),
+);
+final scannerProvider = Provider<LibraryScanner>(
+  (ref) => createLibraryScanner(),
+);
+final authRepositoryProvider = Provider<AuthRepository>(
+  (ref) => MockAuthRepository(ref.watch(databaseProvider)),
+);
+
+final tracksProvider = StreamProvider<List<Track>>(
+  (ref) => ref.watch(databaseProvider).watchTracks(),
+);
+final accountProvider = StreamProvider<Account?>(
+  (ref) => ref.watch(databaseProvider).watchCurrentAccount(),
+);
+final playlistsProvider = StreamProvider<List<Playlist>>(
+  (ref) => ref.watch(databaseProvider).watchPlaylists(),
+);

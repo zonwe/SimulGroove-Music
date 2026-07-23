@@ -1,0 +1,196 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+
+import '../../core/window/desktop_window_controller.dart';
+import '../account/account_page.dart';
+import '../library/library_page.dart';
+import '../placeholders/online_search_page.dart';
+import '../placeholders/recognition_page.dart';
+import '../placeholders/settings_page.dart';
+import '../player/compact_player.dart';
+import '../player/mini_player_bar.dart';
+import '../playlists/playlists_page.dart';
+import 'app_destination.dart';
+import 'windows_title_bar.dart';
+
+class AppShell extends StatefulWidget {
+  const AppShell({super.key});
+
+  @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> {
+  AppDestination _destination = AppDestination.library;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: DesktopWindowController.compactMode,
+      builder: (context, compact, _) {
+        if (compact) {
+          return const Scaffold(
+            body: Column(
+              children: [
+                WindowsTitleBar(),
+                Expanded(child: CompactPlayer()),
+              ],
+            ),
+          );
+        }
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 900;
+            return Scaffold(
+              appBar: !wide && !WindowsTitleBar.isVisible
+                  ? AppBar(title: Text(_destination.label))
+                  : null,
+              drawer: wide
+                  ? null
+                  : Drawer(
+                      child: SafeArea(
+                        child: _DrawerNavigation(onSelect: _select),
+                      ),
+                    ),
+              body: Column(
+                children: [
+                  const WindowsTitleBar(),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        if (wide)
+                          _DesktopNavigation(
+                            selected: _destination,
+                            onSelect: _select,
+                          ),
+                        Expanded(child: _pageFor(_destination)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              bottomNavigationBar: const MiniPlayerBar(),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _select(AppDestination value) {
+    setState(() => _destination = value);
+    if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Widget _pageFor(AppDestination destination) => switch (destination) {
+    AppDestination.library => const LibraryPage(),
+    AppDestination.playlists => const PlaylistsPage(),
+    AppDestination.onlineSearch => const OnlineSearchPage(),
+    AppDestination.recognition => const RecognitionPage(),
+    AppDestination.account => const AccountPage(),
+    AppDestination.settings => const SettingsPage(),
+  };
+}
+
+class _DesktopNavigation extends StatelessWidget {
+  const _DesktopNavigation({required this.selected, required this.onSelect});
+
+  final AppDestination selected;
+  final ValueChanged<AppDestination> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 224,
+      color: const Color(0xFF101219),
+      child: SafeArea(
+        top: !WindowsTitleBar.isVisible,
+        child: Column(
+          children: [
+            if (!WindowsTitleBar.isVisible)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 20, 20, 14),
+                child: Row(
+                  children: [
+                    Icon(Icons.music_note_rounded),
+                    SizedBox(width: 10),
+                    Text(
+                      'Flutter Music',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 10),
+            for (final destination in AppDestination.values)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 2,
+                ),
+                child: ListTile(
+                  minTileHeight: 48,
+                  selected: selected == destination,
+                  selectedTileColor: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.15),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  leading: Icon(
+                    selected == destination
+                        ? destination.selectedIcon
+                        : destination.icon,
+                  ),
+                  title: Text(destination.label),
+                  onTap: () => onSelect(destination),
+                ),
+              ),
+            const Spacer(),
+            if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Windows 本地模式',
+                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DrawerNavigation extends StatelessWidget {
+  const _DrawerNavigation({required this.onSelect});
+
+  final ValueChanged<AppDestination> onSelect;
+
+  @override
+  Widget build(BuildContext context) => ListView(
+    padding: const EdgeInsets.all(12),
+    children: [
+      const ListTile(
+        leading: Icon(Icons.music_note_rounded),
+        title: Text(
+          'Flutter Music',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+      const Divider(),
+      for (final destination in AppDestination.values)
+        ListTile(
+          minTileHeight: 48,
+          leading: Icon(destination.icon),
+          title: Text(destination.label),
+          onTap: () {
+            Navigator.of(context).pop();
+            onSelect(destination);
+          },
+        ),
+    ],
+  );
+}

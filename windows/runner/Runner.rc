@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "top.zonwe.music_player" "\0"
-            VALUE "FileDescription", "flutter_music" "\0"
+            VALUE "FileDescription", "Flutter Music" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "flutter_music" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 top.zonwe.music_player. All rights reserved." "\0"
             VALUE "OriginalFilename", "flutter_music.exe" "\0"
-            VALUE "ProductName", "flutter_music" "\0"
+            VALUE "ProductName", "Flutter Music" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
