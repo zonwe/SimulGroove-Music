@@ -13,5 +13,11 @@ class UnsupportedLibraryScanner implements LibraryScanner {
   bool get isSupported => false;
 
   @override
+  bool get supportsFullDeviceScan => false;
+
+  @override
   Future<ScanResult?> scan() async => null;
+
+  @override
+  Future<ScanResult?> scanFullDevice() async => null;
 }

@@ -1,44 +1,93 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/theme/app_appearance.dart';
 import '../features/shell/app_shell.dart';
+import 'providers.dart';
 
-class MusicApp extends StatelessWidget {
+class MusicApp extends ConsumerWidget {
   const MusicApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF536DFE),
-      brightness: Brightness.dark,
-      surface: const Color(0xFF11131A),
-    );
+  Widget build(BuildContext context, WidgetRef ref) {
+    final appearance = ref.watch(appearanceProvider).value;
+    final seedColor = appearance?.seedColor ?? defaultThemeColor;
     return MaterialApp(
       title: 'Flutter Music',
       debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.dark,
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorScheme: colorScheme,
-        scaffoldBackgroundColor: const Color(0xFF0B0D12),
-        cardTheme: const CardThemeData(
-          color: Color(0xFF171A22),
-          elevation: 0,
-          margin: EdgeInsets.zero,
-        ),
-        navigationRailTheme: NavigationRailThemeData(
-          backgroundColor: const Color(0xFF101219),
-          indicatorColor: colorScheme.primary.withValues(alpha: 0.2),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF171A22),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-        ),
-      ),
+      themeMode: appearance?.themeMode ?? ThemeMode.system,
+      theme: _theme(Brightness.light, seedColor),
+      darkTheme: _theme(Brightness.dark, seedColor),
       home: const AppShell(),
     );
   }
+}
+
+ThemeData _theme(Brightness brightness, Color seedColor) {
+  final scheme = ColorScheme.fromSeed(
+    seedColor: seedColor,
+    brightness: brightness,
+  );
+  const controlShape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.all(Radius.circular(8)),
+  );
+  return ThemeData(
+    useMaterial3: true,
+    brightness: brightness,
+    colorScheme: scheme,
+    scaffoldBackgroundColor: scheme.surface,
+    cardTheme: CardThemeData(
+      color: scheme.surfaceContainerLow,
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(10)),
+      ),
+    ),
+    navigationRailTheme: NavigationRailThemeData(
+      backgroundColor: scheme.surfaceContainerLow,
+      indicatorColor: scheme.secondaryContainer,
+    ),
+    drawerTheme: DrawerThemeData(backgroundColor: scheme.surfaceContainerLow),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: scheme.surfaceContainerHighest,
+      border: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(8)),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(8)),
+        borderSide: BorderSide.none,
+      ),
+    ),
+    filledButtonTheme: const FilledButtonThemeData(
+      style: ButtonStyle(shape: WidgetStatePropertyAll(controlShape)),
+    ),
+    outlinedButtonTheme: const OutlinedButtonThemeData(
+      style: ButtonStyle(shape: WidgetStatePropertyAll(controlShape)),
+    ),
+    textButtonTheme: const TextButtonThemeData(
+      style: ButtonStyle(shape: WidgetStatePropertyAll(controlShape)),
+    ),
+    segmentedButtonTheme: const SegmentedButtonThemeData(
+      style: ButtonStyle(shape: WidgetStatePropertyAll(controlShape)),
+    ),
+    chipTheme: ChipThemeData(
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(8)),
+      ),
+      side: BorderSide(color: scheme.outlineVariant),
+    ),
+    dialogTheme: const DialogThemeData(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(12)),
+      ),
+    ),
+    bottomSheetTheme: const BottomSheetThemeData(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+    ),
+  );
 }

@@ -78,7 +78,9 @@ class _WindowButton extends StatelessWidget {
     message: tooltip,
     child: InkWell(
       onTap: onPressed,
-      hoverColor: isClose ? const Color(0xFFC42B1C) : Colors.white10,
+      hoverColor: isClose
+          ? const Color(0xFFC42B1C)
+          : Theme.of(context).colorScheme.surfaceContainerHighest,
       child: SizedBox(width: 48, height: 38, child: Icon(icon, size: 18)),
     ),
   );

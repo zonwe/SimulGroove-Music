@@ -33,6 +33,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
   Widget build(BuildContext context) {
     final scanner = ref.watch(scannerProvider);
     final tracks = ref.watch(tracksProvider);
+    final sources = ref.watch(scanSourcesProvider);
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
       child: Column(
@@ -51,7 +52,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
               ),
               if (scanner.isSupported)
                 FilledButton.icon(
-                  onPressed: _scanning ? null : _scan,
+                  onPressed: _scanning ? null : () => _scan(),
                   icon: _scanning
                       ? const SizedBox.square(
                           dimension: 18,
@@ -60,8 +61,22 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                       : const Icon(Icons.library_add_outlined),
                   label: Text(_scanning ? '正在扫描…' : scanner.actionLabel),
                 ),
+              if (scanner.supportsFullDeviceScan)
+                OutlinedButton.icon(
+                  onPressed: _scanning ? null : () => _scan(fullDevice: true),
+                  icon: const Icon(Icons.phone_android_outlined),
+                  label: const Text('扫描整台设备'),
+                ),
             ],
           ),
+          if (scanner.isSupported) ...[
+            const SizedBox(height: 14),
+            sources.when(
+              loading: () => const LinearProgressIndicator(minHeight: 2),
+              error: (error, _) => Text('搜索位置读取失败：$error'),
+              data: (values) => _ScanSources(values: values),
+            ),
+          ],
           const SizedBox(height: 16),
           TextField(
             controller: _search,
@@ -134,13 +149,16 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     };
   }
 
-  Future<void> _scan() async {
+  Future<void> _scan({bool fullDevice = false}) async {
     setState(() {
       _scanning = true;
       _error = null;
     });
     try {
-      final result = await ref.read(scannerProvider).scan();
+      final scanner = ref.read(scannerProvider);
+      final result = fullDevice
+          ? await scanner.scanFullDevice()
+          : await scanner.scan();
       if (result == null) return;
       final database = ref.read(databaseProvider);
       await database.upsertTracks(result.tracks.map(_toCompanion));
@@ -182,6 +200,90 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     modifiedAt: Value(track.modifiedAt),
     updatedAt: DateTime.now(),
   );
+}
+
+class _ScanSources extends StatelessWidget {
+  const _ScanSources({required this.values});
+
+  final List<ScanSource> values;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colors.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.folder_open_outlined,
+                  size: 20,
+                  color: colors.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '搜索位置',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            if (values.isEmpty)
+              Text(
+                '尚未指定目录；点击“添加音乐文件夹”选择要搜索的位置。',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              )
+            else
+              for (final source in values)
+                Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(width: 28),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(source.label),
+                            Text(
+                              _sourceLocation(source),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: colors.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _sourceLocation(ScanSource source) {
+  if (source.uri == 'media-store://external') {
+    return 'Android MediaStore · 整台设备';
+  }
+  if (source.uri.startsWith('content://')) return 'Android 已授权目录';
+  return source.uri;
 }
 
 class _SongList extends ConsumerWidget {
@@ -308,10 +410,10 @@ class _EmptyLibrary extends StatelessWidget {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(
+        Icon(
           Icons.library_music_outlined,
           size: 64,
-          color: Colors.white30,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
         const SizedBox(height: 14),
         Text(

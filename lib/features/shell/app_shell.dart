@@ -21,61 +21,74 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  AppDestination _destination = AppDestination.library;
+  AppDestination _destination = AppDestination.playlists;
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: DesktopWindowController.compactMode,
-      builder: (context, compact, _) {
-        if (compact) {
-          return const Scaffold(
-            body: Column(
-              children: [
-                WindowsTitleBar(),
-                Expanded(child: CompactPlayer()),
-              ],
-            ),
-          );
-        }
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final wide = constraints.maxWidth >= 900;
-            return Scaffold(
-              appBar: !wide && !WindowsTitleBar.isVisible
-                  ? AppBar(title: Text(_destination.label))
-                  : null,
-              drawer: wide
-                  ? null
-                  : Drawer(
-                      child: SafeArea(
-                        child: _DrawerNavigation(onSelect: _select),
-                      ),
-                    ),
+    return PopScope(
+      canPop: _destination == AppDestination.playlists,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _goToPlaylists();
+      },
+      child: ValueListenableBuilder<bool>(
+        valueListenable: DesktopWindowController.compactMode,
+        builder: (context, compact, _) {
+          if (compact) {
+            return const Scaffold(
               body: Column(
                 children: [
-                  const WindowsTitleBar(),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        if (wide)
-                          _DesktopNavigation(
-                            selected: _destination,
-                            onSelect: _select,
-                          ),
-                        Expanded(child: _pageFor(_destination)),
-                      ],
-                    ),
-                  ),
+                  WindowsTitleBar(),
+                  Expanded(child: CompactPlayer()),
                 ],
               ),
-              bottomNavigationBar: const MiniPlayerBar(),
             );
-          },
-        );
-      },
+          }
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth >= 900;
+              return Scaffold(
+                appBar: !wide && !WindowsTitleBar.isVisible
+                    ? AppBar(
+                        title: Text(_destination.label),
+                        leading: _destination == AppDestination.playlists
+                            ? null
+                            : BackButton(onPressed: _goToPlaylists),
+                      )
+                    : null,
+                drawer: wide
+                    ? null
+                    : Drawer(
+                        child: SafeArea(
+                          child: _DrawerNavigation(onSelect: _select),
+                        ),
+                      ),
+                body: Column(
+                  children: [
+                    const WindowsTitleBar(),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          if (wide)
+                            _DesktopNavigation(
+                              selected: _destination,
+                              onSelect: _select,
+                            ),
+                          Expanded(child: _pageFor(_destination)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                bottomNavigationBar: MiniPlayerBar(onReturn: _goToPlaylists),
+              );
+            },
+          );
+        },
+      ),
     );
   }
+
+  void _goToPlaylists() => _select(AppDestination.playlists);
 
   void _select(AppDestination value) {
     setState(() => _destination = value);
@@ -104,7 +117,7 @@ class _DesktopNavigation extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: 224,
-      color: const Color(0xFF101219),
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
       child: SafeArea(
         top: !WindowsTitleBar.isVisible,
         child: Column(
@@ -135,9 +148,9 @@ class _DesktopNavigation extends StatelessWidget {
                   selected: selected == destination,
                   selectedTileColor: Theme.of(
                     context,
-                  ).colorScheme.primary.withValues(alpha: 0.15),
+                  ).colorScheme.secondaryContainer,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(8),
                   ),
                   leading: Icon(
                     selected == destination
@@ -150,11 +163,16 @@ class _DesktopNavigation extends StatelessWidget {
               ),
             const Spacer(),
             if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  'Windows 本地模式',
-                  style: TextStyle(color: Colors.white38, fontSize: 12),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Builder(
+                  builder: (context) => Text(
+                    'Windows 本地模式',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                    ),
+                  ),
                 ),
               ),
           ],

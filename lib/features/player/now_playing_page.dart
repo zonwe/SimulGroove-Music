@@ -62,7 +62,7 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                                     bytes:
                                         item.extras?['artwork'] as Uint8List?,
                                     size: size,
-                                    borderRadius: 20,
+                                    borderRadius: 12,
                                   ),
                                 );
                               },
@@ -84,9 +84,9 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                     '${item.artist ?? '未知艺术家'} · ${item.album ?? '未知专辑'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: Colors.white60),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 18),
                   StreamBuilder<Duration>(
@@ -200,7 +200,7 @@ class _LyricsPanel extends StatelessWidget {
                       .copyWith(
                         color: selected
                             ? Theme.of(context).colorScheme.primary
-                            : Colors.white54,
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
                         fontWeight: selected
                             ? FontWeight.w700
                             : FontWeight.w400,

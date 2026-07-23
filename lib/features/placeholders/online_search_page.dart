@@ -45,14 +45,18 @@ class _OnlineSearchPageState extends State<OnlineSearchPage> {
           onSubmitted: (_) => setState(() {}),
         ),
         const Spacer(),
-        const Center(
+        Center(
           child: Column(
             children: [
-              Icon(Icons.cloud_off_outlined, size: 62, color: Colors.white30),
-              SizedBox(height: 12),
-              Text('暂未接入在线音乐服务'),
-              SizedBox(height: 5),
-              Text('搜索接口已预留，当前不会发起网络请求。'),
+              Icon(
+                Icons.cloud_off_outlined,
+                size: 62,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(height: 12),
+              const Text('暂未接入在线音乐服务'),
+              const SizedBox(height: 5),
+              const Text('搜索接口已预留，当前不会发起网络请求。'),
             ],
           ),
         ),

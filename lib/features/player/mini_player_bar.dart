@@ -10,7 +10,9 @@ import '../library/artwork_view.dart';
 import 'now_playing_page.dart';
 
 class MiniPlayerBar extends ConsumerWidget {
-  const MiniPlayerBar({super.key});
+  const MiniPlayerBar({super.key, this.onReturn});
+
+  final VoidCallback? onReturn;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -26,11 +28,14 @@ class MiniPlayerBar extends ConsumerWidget {
           builder: (context, stateSnapshot) {
             final state = stateSnapshot.data!;
             return Material(
-              color: const Color(0xFF171A22),
+              color: Theme.of(context).colorScheme.surfaceContainerHigh,
               child: InkWell(
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const NowPlayingPage()),
-                ),
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const NowPlayingPage()),
+                  );
+                  onReturn?.call();
+                },
                 child: SafeArea(
                   top: false,
                   child: SizedBox(
@@ -46,7 +51,9 @@ class MiniPlayerBar extends ConsumerWidget {
                                   position.data ?? Duration.zero,
                                   item.duration,
                                 ),
-                                backgroundColor: Colors.white10,
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
                               ),
                         ),
                         Expanded(
@@ -127,7 +134,7 @@ class _NowPlayingText extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: lyric == null
-                    ? Colors.white54
+                    ? Theme.of(context).colorScheme.onSurfaceVariant
                     : Theme.of(context).colorScheme.primary,
               ),
             ),

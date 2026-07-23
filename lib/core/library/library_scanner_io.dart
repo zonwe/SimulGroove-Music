@@ -1,8 +1,8 @@
 import 'dart:io';
-
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as image;
 import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
@@ -22,16 +22,48 @@ class IoLibraryScanner implements LibraryScanner {
   bool get isSupported => Platform.isAndroid || Platform.isWindows;
 
   @override
-  String get actionLabel => Platform.isAndroid ? '扫描设备音乐' : '添加音乐文件夹';
+  bool get supportsFullDeviceScan => Platform.isAndroid;
+
+  @override
+  String get actionLabel => '添加音乐文件夹';
 
   @override
   Future<ScanResult?> scan() {
-    if (Platform.isAndroid) return _scanAndroid();
+    if (Platform.isAndroid) return _scanAndroidDirectory();
     if (Platform.isWindows) return _scanWindows();
     return Future.value();
   }
 
-  Future<ScanResult?> _scanAndroid() async {
+  @override
+  Future<ScanResult?> scanFullDevice() {
+    if (Platform.isAndroid) return _scanAndroidFullDevice();
+    return Future.value();
+  }
+
+  Future<ScanResult?> _scanAndroidDirectory() async {
+    final selected = await _mediaStore.invokeMapMethod<String, Object?>(
+      'pickAudioDirectory',
+    );
+    if (selected == null) return null;
+    final uri = selected['uri']! as String;
+    final label = selected['label'] as String? ?? '已授权音乐目录';
+    await Permission.notification.request();
+    final rawSongs =
+        await _mediaStore.invokeListMethod<Object?>('scanAudioTree', {
+          'uri': uri,
+        }) ??
+        const [];
+    return ScanResult(
+      tracks: await _mapAndroidTracks(
+        rawSongs,
+        sourceType: 'android_document_tree',
+      ),
+      sourceUri: uri,
+      sourceLabel: label,
+    );
+  }
+
+  Future<ScanResult?> _scanAndroidFullDevice() async {
     var permission = await Permission.audio.request();
     if (!permission.isGranted) {
       permission = await Permission.storage.request();
@@ -43,6 +75,20 @@ class IoLibraryScanner implements LibraryScanner {
 
     final rawSongs =
         await _mediaStore.invokeListMethod<Object?>('scanAudio') ?? const [];
+    return ScanResult(
+      tracks: await _mapAndroidTracks(
+        rawSongs,
+        sourceType: 'android_media_store',
+      ),
+      sourceUri: 'media-store://external',
+      sourceLabel: '整台设备',
+    );
+  }
+
+  Future<List<ScannedTrack>> _mapAndroidTracks(
+    List<Object?> rawSongs, {
+    required String sourceType,
+  }) async {
     final tracks = <ScannedTrack>[];
     for (final raw in rawSongs) {
       final song = Map<Object?, Object?>.from(raw! as Map);
@@ -51,8 +97,8 @@ class IoLibraryScanner implements LibraryScanner {
       tracks.add(
         ScannedTrack(
           id: _uuid.v5(Namespace.url.value, mediaUri),
-          sourceType: 'android_media_store',
-          sourceId: (song['id'] as int).toString(),
+          sourceType: sourceType,
+          sourceId: song['id'].toString(),
           uri: mediaUri,
           filePath: data,
           title: _clean(
@@ -63,9 +109,15 @@ class IoLibraryScanner implements LibraryScanner {
           album: _clean(song['album'] as String?, '未知专辑'),
           durationMs: song['duration'] as int?,
           artwork: song['artwork'] as Uint8List?,
-          lyrics: data == null ? null : await _tryReadSidecarLyrics(data),
+          lyrics:
+              _cleanLyrics(song['lyrics'] as String?) ??
+              (data == null ? null : await _tryReadSidecarLyrics(data)),
           fileSize: song['size'] as int?,
-          modifiedAt: song['dateModified'] == null
+          modifiedAt: song['dateModifiedMs'] != null
+              ? DateTime.fromMillisecondsSinceEpoch(
+                  song['dateModifiedMs'] as int,
+                )
+              : song['dateModified'] == null
               ? null
               : DateTime.fromMillisecondsSinceEpoch(
                   (song['dateModified'] as int) * 1000,
@@ -73,11 +125,7 @@ class IoLibraryScanner implements LibraryScanner {
         ),
       );
     }
-    return ScanResult(
-      tracks: tracks,
-      sourceUri: 'media-store://external',
-      sourceLabel: '设备音乐',
-    );
+    return tracks;
   }
 
   Future<ScanResult?> _scanWindows() async {
@@ -116,9 +164,11 @@ class IoLibraryScanner implements LibraryScanner {
           artist: _clean(metadata?.artist, '未知艺术家'),
           album: _clean(metadata?.album, '未知专辑'),
           durationMs: metadata?.duration?.inMilliseconds,
-          artwork: metadata?.pictures.isEmpty ?? true
-              ? null
-              : metadata!.pictures.first.bytes,
+          artwork: _compactArtwork(
+            metadata?.pictures.isEmpty ?? true
+                ? null
+                : metadata!.pictures.first.bytes,
+          ),
           lyrics:
               _cleanLyrics(metadata?.lyrics) ??
               await _tryReadSidecarLyrics(canonicalPath),
@@ -172,5 +222,27 @@ class IoLibraryScanner implements LibraryScanner {
   String? _cleanLyrics(String? value) {
     final trimmed = value?.trim();
     return trimmed == null || trimmed.isEmpty ? null : trimmed;
+  }
+
+  Uint8List? _compactArtwork(Uint8List? bytes) {
+    if (bytes == null || bytes.isEmpty) return null;
+    try {
+      final decoded = image.decodeImage(bytes);
+      if (decoded == null) return bytes.length <= 512 * 1024 ? bytes : null;
+      final longestSide = decoded.width > decoded.height
+          ? decoded.width
+          : decoded.height;
+      final thumbnail = longestSide > 320
+          ? image.copyResize(
+              decoded,
+              width: decoded.width >= decoded.height ? 320 : null,
+              height: decoded.height > decoded.width ? 320 : null,
+              interpolation: image.Interpolation.average,
+            )
+          : decoded;
+      return Uint8List.fromList(image.encodeJpg(thumbnail, quality: 70));
+    } catch (_) {
+      return bytes.length <= 512 * 1024 ? bytes : null;
+    }
   }
 }

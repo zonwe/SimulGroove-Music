@@ -134,6 +134,14 @@ class AppDatabase extends _$AppDatabase {
 
   Stream<List<ScanSource>> watchScanSources() => select(scanSources).watch();
 
+  Stream<Map<String, String>> watchSettings() => select(
+    appSettings,
+  ).watch().map((rows) => {for (final row in rows) row.key: row.value});
+
+  Future<void> setSetting(String key, String value) => into(
+    appSettings,
+  ).insertOnConflictUpdate(AppSettingsCompanion.insert(key: key, value: value));
+
   Stream<Account?> watchCurrentAccount() {
     final query = select(accounts)
       ..orderBy([(row) => OrderingTerm.desc(row.updatedAt)])

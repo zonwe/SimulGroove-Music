@@ -5,6 +5,7 @@ import '../core/database/app_database.dart';
 import '../core/library/library_scanner.dart';
 import '../core/library/scanner_factory.dart';
 import '../core/player/music_audio_handler.dart';
+import '../core/theme/app_appearance.dart';
 
 final databaseProvider = Provider<AppDatabase>(
   (ref) => throw UnimplementedError(),
@@ -27,4 +28,13 @@ final accountProvider = StreamProvider<Account?>(
 );
 final playlistsProvider = StreamProvider<List<Playlist>>(
   (ref) => ref.watch(databaseProvider).watchPlaylists(),
+);
+final scanSourcesProvider = StreamProvider<List<ScanSource>>(
+  (ref) => ref.watch(databaseProvider).watchScanSources(),
+);
+final appearanceProvider = StreamProvider<AppAppearance>(
+  (ref) => ref
+      .watch(databaseProvider)
+      .watchSettings()
+      .map(AppAppearance.fromSettings),
 );
