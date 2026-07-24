@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/database/app_database.dart';
 import '../../core/window/desktop_window_controller.dart';
 import '../account/account_page.dart';
 import '../library/library_page.dart';
@@ -9,6 +10,7 @@ import '../placeholders/recognition_page.dart';
 import '../placeholders/settings_page.dart';
 import '../player/compact_player.dart';
 import '../player/mini_player_bar.dart';
+import '../playlists/playlist_detail_page.dart';
 import '../playlists/playlists_page.dart';
 import 'app_destination.dart';
 import 'windows_title_bar.dart';
@@ -22,13 +24,15 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   AppDestination _destination = AppDestination.playlists;
+  Playlist? _selectedPlaylist;
 
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _destination == AppDestination.playlists,
+      canPop:
+          _destination == AppDestination.playlists && _selectedPlaylist == null,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _goToPlaylists();
+        if (!didPop) _navigateBack();
       },
       child: ValueListenableBuilder<bool>(
         valueListenable: DesktopWindowController.compactMode,
@@ -47,7 +51,10 @@ class _AppShellState extends State<AppShell> {
             builder: (context, constraints) {
               final wide = constraints.maxWidth >= 900;
               return Scaffold(
-                appBar: !wide && !WindowsTitleBar.isVisible
+                appBar:
+                    !wide &&
+                        !WindowsTitleBar.isVisible &&
+                        _selectedPlaylist == null
                     ? AppBar(
                         title: Text(_destination.label),
                         leading: _destination == AppDestination.playlists
@@ -88,10 +95,33 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  void _goToPlaylists() => _select(AppDestination.playlists);
+  void _goToPlaylists() {
+    setState(() {
+      _destination = AppDestination.playlists;
+      _selectedPlaylist = null;
+    });
+  }
+
+  void _navigateBack() {
+    if (_selectedPlaylist != null) {
+      setState(() => _selectedPlaylist = null);
+    } else {
+      _goToPlaylists();
+    }
+  }
+
+  void _openPlaylist(Playlist playlist) {
+    setState(() {
+      _destination = AppDestination.playlists;
+      _selectedPlaylist = playlist;
+    });
+  }
 
   void _select(AppDestination value) {
-    setState(() => _destination = value);
+    setState(() {
+      _destination = value;
+      _selectedPlaylist = null;
+    });
     if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
       Navigator.of(context).pop();
     }
@@ -99,7 +129,13 @@ class _AppShellState extends State<AppShell> {
 
   Widget _pageFor(AppDestination destination) => switch (destination) {
     AppDestination.library => const LibraryPage(),
-    AppDestination.playlists => const PlaylistsPage(),
+    AppDestination.playlists =>
+      _selectedPlaylist == null
+          ? PlaylistsPage(onOpenPlaylist: _openPlaylist)
+          : PlaylistDetailPage(
+              playlist: _selectedPlaylist!,
+              onBack: _navigateBack,
+            ),
     AppDestination.onlineSearch => const OnlineSearchPage(),
     AppDestination.recognition => const RecognitionPage(),
     AppDestination.account => const AccountPage(),

@@ -8,7 +8,9 @@ import '../../core/database/app_database.dart';
 import '../library/artwork_view.dart';
 
 class PlaylistsPage extends ConsumerWidget {
-  const PlaylistsPage({super.key});
+  const PlaylistsPage({super.key, required this.onOpenPlaylist});
+
+  final ValueChanged<Playlist> onOpenPlaylist;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -45,8 +47,10 @@ class PlaylistsPage extends ConsumerWidget {
                   : ListView.separated(
                       itemCount: values.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) =>
-                          _PlaylistCard(playlist: values[index]),
+                      itemBuilder: (context, index) => _PlaylistCard(
+                        playlist: values[index],
+                        onOpen: () => onOpenPlaylist(values[index]),
+                      ),
                     ),
             ),
           ),
@@ -96,66 +100,83 @@ class PlaylistsPage extends ConsumerWidget {
 }
 
 class _PlaylistCard extends ConsumerWidget {
-  const _PlaylistCard({required this.playlist});
+  const _PlaylistCard({required this.playlist, required this.onOpen});
 
   final Playlist playlist;
+  final VoidCallback onOpen;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => Card(
-    child: ExpansionTile(
-      leading: const SizedBox.square(
-        dimension: 48,
-        child: Icon(Icons.queue_music, size: 30),
-      ),
-      title: Text(playlist.name),
-      subtitle: const Text('展开查看歌曲'),
-      trailing: IconButton(
-        tooltip: '删除歌单',
-        icon: const Icon(Icons.delete_outline),
-        onPressed: () => ref.read(databaseProvider).deletePlaylist(playlist.id),
-      ),
-      children: [
-        StreamBuilder<List<Track>>(
-          stream: ref.read(databaseProvider).watchPlaylistTracks(playlist.id),
-          builder: (context, snapshot) {
-            final tracks = snapshot.data ?? const <Track>[];
-            if (tracks.isEmpty) {
-              return const Padding(
-                padding: EdgeInsets.all(20),
-                child: Text('歌单中还没有歌曲'),
-              );
-            }
-            return Column(
-              children: [
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: FilledButton.tonalIcon(
-                      onPressed: () =>
-                          ref.read(audioHandlerProvider).playTracks(tracks),
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text('播放全部'),
-                    ),
+  Widget build(BuildContext context, WidgetRef ref) {
+    return StreamBuilder<List<Track>>(
+      stream: ref.read(databaseProvider).watchPlaylistTracks(playlist.id),
+      builder: (context, snapshot) {
+        final tracks = snapshot.data ?? const <Track>[];
+        return Card(
+          clipBehavior: Clip.antiAlias,
+          child: ListTile(
+            minTileHeight: 72,
+            contentPadding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+            leading: ArtworkView(
+              bytes: tracks.firstOrNull?.artwork,
+              size: 52,
+              borderRadius: 8,
+            ),
+            title: Text(
+              playlist.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            subtitle: Text(tracks.isEmpty ? '暂无歌曲' : '${tracks.length} 首歌曲'),
+            trailing: PopupMenuButton<String>(
+              tooltip: '歌单操作',
+              onSelected: (value) {
+                if (value == 'delete') {
+                  _deletePlaylist(context, ref, playlist);
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'delete',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.delete_outline),
+                    title: Text('删除歌单'),
                   ),
                 ),
-                for (var index = 0; index < tracks.length; index++)
-                  ListTile(
-                    leading: ArtworkView(
-                      bytes: tracks[index].artwork,
-                      size: 42,
-                    ),
-                    title: Text(tracks[index].title),
-                    subtitle: Text(tracks[index].artist),
-                    onTap: () => ref
-                        .read(audioHandlerProvider)
-                        .playTracks(tracks, initialIndex: index),
-                  ),
               ],
-            );
-          },
+            ),
+            onTap: onOpen,
+          ),
+        );
+      },
+    );
+  }
+}
+
+Future<void> _deletePlaylist(
+  BuildContext context,
+  WidgetRef ref,
+  Playlist playlist,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('删除歌单'),
+      content: Text('确定删除“${playlist.name}”吗？歌曲文件不会被删除。'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('删除'),
         ),
       ],
     ),
   );
+  if (confirmed == true) {
+    await ref.read(databaseProvider).deletePlaylist(playlist.id);
+  }
 }
