@@ -152,67 +152,69 @@ class _DesktopNavigation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       width: 224,
-      color: Theme.of(context).colorScheme.surfaceContainerLow,
-      child: SafeArea(
-        top: !WindowsTitleBar.isVisible,
-        child: Column(
-          children: [
-            if (!WindowsTitleBar.isVisible)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 20, 20, 14),
-                child: Row(
-                  children: [
-                    Icon(Icons.music_note_rounded),
-                    SizedBox(width: 10),
-                    Text(
-                      'Flutter Music',
-                      style: TextStyle(fontWeight: FontWeight.w700),
+      child: Material(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        child: SafeArea(
+          top: !WindowsTitleBar.isVisible,
+          child: Column(
+            children: [
+              if (!WindowsTitleBar.isVisible)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 20, 20, 14),
+                  child: Row(
+                    children: [
+                      Icon(Icons.music_note_rounded),
+                      SizedBox(width: 10),
+                      Text(
+                        'Flutter Music',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 10),
+              for (final destination in AppDestination.values)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 2,
+                  ),
+                  child: ListTile(
+                    minTileHeight: 48,
+                    selected: selected == destination,
+                    selectedTileColor: Theme.of(
+                      context,
+                    ).colorScheme.secondaryContainer,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 10),
-            for (final destination in AppDestination.values)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 2,
-                ),
-                child: ListTile(
-                  minTileHeight: 48,
-                  selected: selected == destination,
-                  selectedTileColor: Theme.of(
-                    context,
-                  ).colorScheme.secondaryContainer,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    leading: Icon(
+                      selected == destination
+                          ? destination.selectedIcon
+                          : destination.icon,
+                    ),
+                    title: Text(destination.label),
+                    onTap: () => onSelect(destination),
                   ),
-                  leading: Icon(
-                    selected == destination
-                        ? destination.selectedIcon
-                        : destination.icon,
-                  ),
-                  title: Text(destination.label),
-                  onTap: () => onSelect(destination),
                 ),
-              ),
-            const Spacer(),
-            // if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
-            //   Padding(
-            //     padding: const EdgeInsets.all(16),
-            //     child: Builder(
-            //       builder: (context) => Text(
-            //         'Windows 本地模式',
-            //         style: TextStyle(
-            //           color: Theme.of(context).colorScheme.onSurfaceVariant,
-            //           fontSize: 12,
-            //         ),
-            //       ),
-            //     ),
-            //   ),
-          ],
+              const Spacer(),
+              // if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+              //   Padding(
+              //     padding: const EdgeInsets.all(16),
+              //     child: Builder(
+              //       builder: (context) => Text(
+              //         'Windows 本地模式',
+              //         style: TextStyle(
+              //           color: Theme.of(context).colorScheme.onSurfaceVariant,
+              //           fontSize: 12,
+              //         ),
+              //       ),
+              //     ),
+              //   ),
+            ],
+          ),
         ),
       ),
     );
