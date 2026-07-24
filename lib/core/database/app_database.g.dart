@@ -3344,6 +3344,226 @@ class PlaybackSnapshotsCompanion extends UpdateCompanion<PlaybackSnapshot> {
   }
 }
 
+class $LikedTracksTable extends LikedTracks
+    with TableInfo<$LikedTracksTable, LikedTrack> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LikedTracksTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _trackIdMeta = const VerificationMeta(
+    'trackId',
+  );
+  @override
+  late final GeneratedColumn<String> trackId = GeneratedColumn<String>(
+    'track_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES tracks (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _addedAtMeta = const VerificationMeta(
+    'addedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> addedAt = GeneratedColumn<DateTime>(
+    'added_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [trackId, addedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'liked_tracks';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LikedTrack> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('track_id')) {
+      context.handle(
+        _trackIdMeta,
+        trackId.isAcceptableOrUnknown(data['track_id']!, _trackIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_trackIdMeta);
+    }
+    if (data.containsKey('added_at')) {
+      context.handle(
+        _addedAtMeta,
+        addedAt.isAcceptableOrUnknown(data['added_at']!, _addedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_addedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {trackId};
+  @override
+  LikedTrack map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LikedTrack(
+      trackId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}track_id'],
+      )!,
+      addedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}added_at'],
+      )!,
+    );
+  }
+
+  @override
+  $LikedTracksTable createAlias(String alias) {
+    return $LikedTracksTable(attachedDatabase, alias);
+  }
+}
+
+class LikedTrack extends DataClass implements Insertable<LikedTrack> {
+  final String trackId;
+  final DateTime addedAt;
+  const LikedTrack({required this.trackId, required this.addedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['track_id'] = Variable<String>(trackId);
+    map['added_at'] = Variable<DateTime>(addedAt);
+    return map;
+  }
+
+  LikedTracksCompanion toCompanion(bool nullToAbsent) {
+    return LikedTracksCompanion(
+      trackId: Value(trackId),
+      addedAt: Value(addedAt),
+    );
+  }
+
+  factory LikedTrack.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LikedTrack(
+      trackId: serializer.fromJson<String>(json['trackId']),
+      addedAt: serializer.fromJson<DateTime>(json['addedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'trackId': serializer.toJson<String>(trackId),
+      'addedAt': serializer.toJson<DateTime>(addedAt),
+    };
+  }
+
+  LikedTrack copyWith({String? trackId, DateTime? addedAt}) => LikedTrack(
+    trackId: trackId ?? this.trackId,
+    addedAt: addedAt ?? this.addedAt,
+  );
+  LikedTrack copyWithCompanion(LikedTracksCompanion data) {
+    return LikedTrack(
+      trackId: data.trackId.present ? data.trackId.value : this.trackId,
+      addedAt: data.addedAt.present ? data.addedAt.value : this.addedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LikedTrack(')
+          ..write('trackId: $trackId, ')
+          ..write('addedAt: $addedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(trackId, addedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LikedTrack &&
+          other.trackId == this.trackId &&
+          other.addedAt == this.addedAt);
+}
+
+class LikedTracksCompanion extends UpdateCompanion<LikedTrack> {
+  final Value<String> trackId;
+  final Value<DateTime> addedAt;
+  final Value<int> rowid;
+  const LikedTracksCompanion({
+    this.trackId = const Value.absent(),
+    this.addedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LikedTracksCompanion.insert({
+    required String trackId,
+    required DateTime addedAt,
+    this.rowid = const Value.absent(),
+  }) : trackId = Value(trackId),
+       addedAt = Value(addedAt);
+  static Insertable<LikedTrack> custom({
+    Expression<String>? trackId,
+    Expression<DateTime>? addedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (trackId != null) 'track_id': trackId,
+      if (addedAt != null) 'added_at': addedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LikedTracksCompanion copyWith({
+    Value<String>? trackId,
+    Value<DateTime>? addedAt,
+    Value<int>? rowid,
+  }) {
+    return LikedTracksCompanion(
+      trackId: trackId ?? this.trackId,
+      addedAt: addedAt ?? this.addedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (trackId.present) {
+      map['track_id'] = Variable<String>(trackId.value);
+    }
+    if (addedAt.present) {
+      map['added_at'] = Variable<DateTime>(addedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LikedTracksCompanion(')
+          ..write('trackId: $trackId, ')
+          ..write('addedAt: $addedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3357,6 +3577,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $AppSettingsTable appSettings = $AppSettingsTable(this);
   late final $PlaybackSnapshotsTable playbackSnapshots =
       $PlaybackSnapshotsTable(this);
+  late final $LikedTracksTable likedTracks = $LikedTracksTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3369,6 +3590,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     playlistEntries,
     appSettings,
     playbackSnapshots,
+    likedTracks,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -3385,6 +3607,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         limitUpdateKind: UpdateKind.delete,
       ),
       result: [TableUpdate('playlist_entries', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'tracks',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('liked_tracks', kind: UpdateKind.delete)],
     ),
   ]);
 }
@@ -3710,6 +3939,24 @@ final class $$TracksTableReferences
       manager.$state.copyWith(prefetchedData: cache),
     );
   }
+
+  static MultiTypedResultKey<$LikedTracksTable, List<LikedTrack>>
+  _likedTracksRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.likedTracks,
+    aliasName: 'tracks__id__liked_tracks__track_id',
+  );
+
+  $$LikedTracksTableProcessedTableManager get likedTracksRefs {
+    final manager = $$LikedTracksTableTableManager(
+      $_db,
+      $_db.likedTracks,
+    ).filter((f) => f.trackId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_likedTracksRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
 }
 
 class $$TracksTableFilterComposer
@@ -3827,6 +4074,31 @@ class $$TracksTableFilterComposer
           }) => $$PlaylistEntriesTableFilterComposer(
             $db: $db,
             $table: $db.playlistEntries,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> likedTracksRefs(
+    Expression<bool> Function($$LikedTracksTableFilterComposer f) f,
+  ) {
+    final $$LikedTracksTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.likedTracks,
+      getReferencedColumn: (t) => t.trackId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$LikedTracksTableFilterComposer(
+            $db: $db,
+            $table: $db.likedTracks,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -4032,6 +4304,31 @@ class $$TracksTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> likedTracksRefs<T extends Object>(
+    Expression<T> Function($$LikedTracksTableAnnotationComposer a) f,
+  ) {
+    final $$LikedTracksTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.likedTracks,
+      getReferencedColumn: (t) => t.trackId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$LikedTracksTableAnnotationComposer(
+            $db: $db,
+            $table: $db.likedTracks,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$TracksTableTableManager
@@ -4047,7 +4344,10 @@ class $$TracksTableTableManager
           $$TracksTableUpdateCompanionBuilder,
           (Track, $$TracksTableReferences),
           Track,
-          PrefetchHooks Function({bool playlistEntriesRefs})
+          PrefetchHooks Function({
+            bool playlistEntriesRefs,
+            bool likedTracksRefs,
+          })
         > {
   $$TracksTableTableManager(_$AppDatabase db, $TracksTable table)
     : super(
@@ -4150,37 +4450,63 @@ class $$TracksTableTableManager
                     (e.readTable(table), $$TracksTableReferences(db, table, e)),
               )
               .toList(),
-          prefetchHooksCallback: ({playlistEntriesRefs = false}) {
-            return PrefetchHooks(
-              db: db,
-              explicitlyWatchedTables: [
-                if (playlistEntriesRefs) db.playlistEntries,
-              ],
-              addJoins: null,
-              getPrefetchedDataCallback: (items) async {
-                return [
-                  if (playlistEntriesRefs)
-                    await $_getPrefetchedData<
-                      Track,
-                      $TracksTable,
-                      PlaylistEntry
-                    >(
-                      currentTable: table,
-                      referencedTable: $$TracksTableReferences
-                          ._playlistEntriesRefsTable(db),
-                      managerFromTypedResult: (p0) => $$TracksTableReferences(
-                        db,
-                        table,
-                        p0,
-                      ).playlistEntriesRefs,
-                      referencedItemsForCurrentItem: (item, referencedItems) =>
-                          referencedItems.where((e) => e.trackId == item.id),
-                      typedResults: items,
-                    ),
-                ];
+          prefetchHooksCallback:
+              ({playlistEntriesRefs = false, likedTracksRefs = false}) {
+                return PrefetchHooks(
+                  db: db,
+                  explicitlyWatchedTables: [
+                    if (playlistEntriesRefs) db.playlistEntries,
+                    if (likedTracksRefs) db.likedTracks,
+                  ],
+                  addJoins: null,
+                  getPrefetchedDataCallback: (items) async {
+                    return [
+                      if (playlistEntriesRefs)
+                        await $_getPrefetchedData<
+                          Track,
+                          $TracksTable,
+                          PlaylistEntry
+                        >(
+                          currentTable: table,
+                          referencedTable: $$TracksTableReferences
+                              ._playlistEntriesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$TracksTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).playlistEntriesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.trackId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                      if (likedTracksRefs)
+                        await $_getPrefetchedData<
+                          Track,
+                          $TracksTable,
+                          LikedTrack
+                        >(
+                          currentTable: table,
+                          referencedTable: $$TracksTableReferences
+                              ._likedTracksRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$TracksTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).likedTracksRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.trackId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                    ];
+                  },
+                );
               },
-            );
-          },
         ),
       );
 }
@@ -4197,7 +4523,7 @@ typedef $$TracksTableProcessedTableManager =
       $$TracksTableUpdateCompanionBuilder,
       (Track, $$TracksTableReferences),
       Track,
-      PrefetchHooks Function({bool playlistEntriesRefs})
+      PrefetchHooks Function({bool playlistEntriesRefs, bool likedTracksRefs})
     >;
 typedef $$ScanSourcesTableCreateCompanionBuilder =
     ScanSourcesCompanion Function({
@@ -5533,6 +5859,266 @@ typedef $$PlaybackSnapshotsTableProcessedTableManager =
       PlaybackSnapshot,
       PrefetchHooks Function()
     >;
+typedef $$LikedTracksTableCreateCompanionBuilder =
+    LikedTracksCompanion Function({
+      required String trackId,
+      required DateTime addedAt,
+      Value<int> rowid,
+    });
+typedef $$LikedTracksTableUpdateCompanionBuilder =
+    LikedTracksCompanion Function({
+      Value<String> trackId,
+      Value<DateTime> addedAt,
+      Value<int> rowid,
+    });
+
+final class $$LikedTracksTableReferences
+    extends BaseReferences<_$AppDatabase, $LikedTracksTable, LikedTrack> {
+  $$LikedTracksTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $TracksTable _trackIdTable(_$AppDatabase db) =>
+      db.tracks.createAlias('liked_tracks__track_id__tracks__id');
+
+  $$TracksTableProcessedTableManager get trackId {
+    final $_column = $_itemColumn<String>('track_id')!;
+
+    final manager = $$TracksTableTableManager(
+      $_db,
+      $_db.tracks,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_trackIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$LikedTracksTableFilterComposer
+    extends Composer<_$AppDatabase, $LikedTracksTable> {
+  $$LikedTracksTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<DateTime> get addedAt => $composableBuilder(
+    column: $table.addedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$TracksTableFilterComposer get trackId {
+    final $$TracksTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.trackId,
+      referencedTable: $db.tracks,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$TracksTableFilterComposer(
+            $db: $db,
+            $table: $db.tracks,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$LikedTracksTableOrderingComposer
+    extends Composer<_$AppDatabase, $LikedTracksTable> {
+  $$LikedTracksTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<DateTime> get addedAt => $composableBuilder(
+    column: $table.addedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$TracksTableOrderingComposer get trackId {
+    final $$TracksTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.trackId,
+      referencedTable: $db.tracks,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$TracksTableOrderingComposer(
+            $db: $db,
+            $table: $db.tracks,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$LikedTracksTableAnnotationComposer
+    extends Composer<_$AppDatabase, $LikedTracksTable> {
+  $$LikedTracksTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<DateTime> get addedAt =>
+      $composableBuilder(column: $table.addedAt, builder: (column) => column);
+
+  $$TracksTableAnnotationComposer get trackId {
+    final $$TracksTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.trackId,
+      referencedTable: $db.tracks,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$TracksTableAnnotationComposer(
+            $db: $db,
+            $table: $db.tracks,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$LikedTracksTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $LikedTracksTable,
+          LikedTrack,
+          $$LikedTracksTableFilterComposer,
+          $$LikedTracksTableOrderingComposer,
+          $$LikedTracksTableAnnotationComposer,
+          $$LikedTracksTableCreateCompanionBuilder,
+          $$LikedTracksTableUpdateCompanionBuilder,
+          (LikedTrack, $$LikedTracksTableReferences),
+          LikedTrack,
+          PrefetchHooks Function({bool trackId})
+        > {
+  $$LikedTracksTableTableManager(_$AppDatabase db, $LikedTracksTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LikedTracksTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LikedTracksTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LikedTracksTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> trackId = const Value.absent(),
+                Value<DateTime> addedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LikedTracksCompanion(
+                trackId: trackId,
+                addedAt: addedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String trackId,
+                required DateTime addedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => LikedTracksCompanion.insert(
+                trackId: trackId,
+                addedAt: addedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$LikedTracksTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({trackId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (trackId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.trackId,
+                                referencedTable: $$LikedTracksTableReferences
+                                    ._trackIdTable(db),
+                                referencedColumn: $$LikedTracksTableReferences
+                                    ._trackIdTable(db)
+                                    .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$LikedTracksTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $LikedTracksTable,
+      LikedTrack,
+      $$LikedTracksTableFilterComposer,
+      $$LikedTracksTableOrderingComposer,
+      $$LikedTracksTableAnnotationComposer,
+      $$LikedTracksTableCreateCompanionBuilder,
+      $$LikedTracksTableUpdateCompanionBuilder,
+      (LikedTrack, $$LikedTracksTableReferences),
+      LikedTrack,
+      PrefetchHooks Function({bool trackId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -5551,4 +6137,6 @@ class $AppDatabaseManager {
       $$AppSettingsTableTableManager(_db, _db.appSettings);
   $$PlaybackSnapshotsTableTableManager get playbackSnapshots =>
       $$PlaybackSnapshotsTableTableManager(_db, _db.playbackSnapshots);
+  $$LikedTracksTableTableManager get likedTracks =>
+      $$LikedTracksTableTableManager(_db, _db.likedTracks);
 }

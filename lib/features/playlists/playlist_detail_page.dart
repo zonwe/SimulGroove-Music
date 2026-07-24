@@ -29,6 +29,8 @@ class PlaylistDetailPage extends ConsumerWidget {
           return const Center(child: CircularProgressIndicator());
         }
         final tracks = snapshot.data!;
+        final likedIds =
+            ref.watch(likedTrackIdsProvider).asData?.value ?? const <String>{};
         return SafeArea(
           bottom: false,
           child: LayoutBuilder(
@@ -98,9 +100,30 @@ class PlaylistDetailPage extends ConsumerWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            trailing: Text(
-                              _trackDuration(track.durationMs),
-                              style: Theme.of(context).textTheme.bodySmall,
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _trackDuration(track.durationMs),
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                                IconButton(
+                                  tooltip: likedIds.contains(track.id)
+                                      ? '取消喜欢'
+                                      : '喜欢',
+                                  icon: Icon(
+                                    likedIds.contains(track.id)
+                                        ? Icons.favorite
+                                        : Icons.favorite_border,
+                                  ),
+                                  onPressed: () => ref
+                                      .read(databaseProvider)
+                                      .setTrackLiked(
+                                        track.id,
+                                        !likedIds.contains(track.id),
+                                      ),
+                                ),
+                              ],
                             ),
                             onTap: () => ref
                                 .read(audioHandlerProvider)

@@ -32,6 +32,12 @@ final playlistsProvider = StreamProvider<List<Playlist>>(
 final scanSourcesProvider = StreamProvider<List<ScanSource>>(
   (ref) => ref.watch(databaseProvider).watchScanSources(),
 );
+final likedTracksProvider = StreamProvider<List<Track>>(
+  (ref) => ref.watch(databaseProvider).watchLikedTracks(),
+);
+final likedTrackIdsProvider = StreamProvider<Set<String>>(
+  (ref) => ref.watch(databaseProvider).watchLikedTrackIds(),
+);
 final appearanceProvider = StreamProvider<AppAppearance>(
   (ref) => ref
       .watch(databaseProvider)

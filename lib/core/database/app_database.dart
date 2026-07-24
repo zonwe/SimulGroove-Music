@@ -98,6 +98,15 @@ class PlaybackSnapshots extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+class LikedTracks extends Table {
+  TextColumn get trackId =>
+      text().references(Tracks, #id, onDelete: KeyAction.cascade)();
+  DateTimeColumn get addedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {trackId};
+}
+
 @DriftDatabase(
   tables: [
     Accounts,
@@ -107,6 +116,7 @@ class PlaybackSnapshots extends Table {
     PlaylistEntries,
     AppSettings,
     PlaybackSnapshots,
+    LikedTracks,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -115,7 +125,15 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (Migrator m) => m.createAll(),
+    onUpgrade: (Migrator m, int from, int to) async {
+      if (from < 2) await m.createTable(likedTracks);
+    },
+  );
 
   Stream<List<Track>> watchTracks() =>
       (select(tracks)..orderBy([(row) => OrderingTerm.asc(row.title)])).watch();
@@ -195,5 +213,30 @@ class AppDatabase extends _$AppDatabase {
         addedAt: DateTime.now(),
       ),
     );
+  }
+
+  Stream<List<Track>> watchLikedTracks() {
+    final query = select(tracks).join([
+      innerJoin(likedTracks, likedTracks.trackId.equalsExp(tracks.id)),
+    ])..orderBy([OrderingTerm.desc(likedTracks.addedAt)]);
+    return query.watch().map(
+      (rows) => rows.map((row) => row.readTable(tracks)).toList(),
+    );
+  }
+
+  Stream<Set<String>> watchLikedTrackIds() => select(
+    likedTracks,
+  ).watch().map((rows) => rows.map((row) => row.trackId).toSet());
+
+  Future<void> setTrackLiked(String trackId, bool liked) async {
+    if (liked) {
+      await into(likedTracks).insertOnConflictUpdate(
+        LikedTracksCompanion.insert(trackId: trackId, addedAt: DateTime.now()),
+      );
+    } else {
+      await (delete(
+        likedTracks,
+      )..where((row) => row.trackId.equals(trackId))).go();
+    }
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:flutter/services.dart';
@@ -108,7 +109,7 @@ class IoLibraryScanner implements LibraryScanner {
           artist: _clean(song['artist'] as String?, '未知艺术家'),
           album: _clean(song['album'] as String?, '未知专辑'),
           durationMs: song['duration'] as int?,
-          artwork: song['artwork'] as Uint8List?,
+          artwork: _compactArtwork(song['artwork'] as Uint8List?),
           lyrics:
               _cleanLyrics(song['lyrics'] as String?) ??
               (data == null ? null : await _tryReadSidecarLyrics(data)),
@@ -132,73 +133,9 @@ class IoLibraryScanner implements LibraryScanner {
     final picker = DirectoryPicker()..title = '选择音乐文件夹';
     final selected = picker.getDirectory()?.path;
     if (selected == null) return null;
-    final directory = Directory(selected);
-    if (!await directory.exists()) throw const FileSystemException('所选文件夹不存在');
-
-    final files = await directory
-        .list(recursive: true, followLinks: false)
-        .where((entry) => entry is File && _isAudioFile(entry.path))
-        .cast<File>()
-        .toList();
-    final tracks = <ScannedTrack>[];
-    for (final file in files) {
-      final stat = await file.stat();
-      AudioMetadata? metadata;
-      try {
-        metadata = readMetadata(file, getImage: true);
-      } catch (_) {
-        // A playable file may have malformed or missing tags; keep it in the library.
-      }
-      final canonicalPath = p.normalize(file.absolute.path);
-      tracks.add(
-        ScannedTrack(
-          id: _uuid.v5(Namespace.url.value, canonicalPath.toLowerCase()),
-          sourceType: 'windows_file',
-          sourceId: canonicalPath,
-          uri: Uri.file(canonicalPath).toString(),
-          filePath: canonicalPath,
-          title: _clean(
-            metadata?.title,
-            p.basenameWithoutExtension(canonicalPath),
-          ),
-          artist: _clean(metadata?.artist, '未知艺术家'),
-          album: _clean(metadata?.album, '未知专辑'),
-          durationMs: metadata?.duration?.inMilliseconds,
-          artwork: _compactArtwork(
-            metadata?.pictures.isEmpty ?? true
-                ? null
-                : metadata!.pictures.first.bytes,
-          ),
-          lyrics:
-              _cleanLyrics(metadata?.lyrics) ??
-              await _tryReadSidecarLyrics(canonicalPath),
-          fileSize: stat.size,
-          modifiedAt: stat.modified,
-        ),
-      );
-    }
-    return ScanResult(
-      tracks: tracks,
-      sourceUri: canonicalDirectory(selected),
-      sourceLabel: p.basename(selected),
-    );
-  }
-
-  String canonicalDirectory(String value) =>
-      p.normalize(Directory(value).absolute.path);
-
-  bool _isAudioFile(String path) {
-    const extensions = {
-      '.mp3',
-      '.flac',
-      '.m4a',
-      '.aac',
-      '.wav',
-      '.ogg',
-      '.opus',
-      '.wma',
-    };
-    return extensions.contains(p.extension(path).toLowerCase());
+    // Directory walking and synchronous metadata parsing happen off the UI
+    // isolate. The picker itself must stay on the platform/UI isolate.
+    return Isolate.run(() => _scanWindowsDirectory(selected));
   }
 
   Future<String?> _tryReadSidecarLyrics(String audioPath) async {
@@ -244,5 +181,120 @@ class IoLibraryScanner implements LibraryScanner {
     } catch (_) {
       return bytes.length <= 512 * 1024 ? bytes : null;
     }
+  }
+}
+
+Future<ScanResult> _scanWindowsDirectory(String selected) async {
+  final uuid = const Uuid();
+  final directory = Directory(selected);
+  if (!await directory.exists()) throw const FileSystemException('所选文件夹不存在');
+
+  final files = await directory
+      .list(recursive: true, followLinks: false)
+      .where((entry) => entry is File && _isWindowsAudioFile(entry.path))
+      .cast<File>()
+      .toList();
+  final tracks = <ScannedTrack>[];
+  for (final file in files) {
+    final stat = await file.stat();
+    AudioMetadata? metadata;
+    try {
+      metadata = readMetadata(file, getImage: true);
+    } catch (_) {
+      // A playable file may have malformed or missing tags; keep it in the library.
+    }
+    final canonicalPath = p.normalize(file.absolute.path);
+    tracks.add(
+      ScannedTrack(
+        id: uuid.v5(Namespace.url.value, canonicalPath.toLowerCase()),
+        sourceType: 'windows_file',
+        sourceId: canonicalPath,
+        uri: Uri.file(canonicalPath).toString(),
+        filePath: canonicalPath,
+        title: _cleanWindowsValue(
+          metadata?.title,
+          p.basenameWithoutExtension(canonicalPath),
+        ),
+        artist: _cleanWindowsValue(metadata?.artist, '未知艺术家'),
+        album: _cleanWindowsValue(metadata?.album, '未知专辑'),
+        durationMs: metadata?.duration?.inMilliseconds,
+        artwork: _compactWindowsArtwork(
+          metadata?.pictures.isEmpty ?? true
+              ? null
+              : metadata!.pictures.first.bytes,
+        ),
+        lyrics:
+            _cleanWindowsLyrics(metadata?.lyrics) ??
+            await _readWindowsSidecarLyrics(canonicalPath),
+        fileSize: stat.size,
+        modifiedAt: stat.modified,
+      ),
+    );
+  }
+  return ScanResult(
+    tracks: tracks,
+    sourceUri: p.normalize(directory.absolute.path),
+    sourceLabel: p.basename(selected),
+  );
+}
+
+bool _isWindowsAudioFile(String path) {
+  const extensions = {
+    '.mp3',
+    '.flac',
+    '.m4a',
+    '.aac',
+    '.wav',
+    '.ogg',
+    '.opus',
+    '.wma',
+  };
+  return extensions.contains(p.extension(path).toLowerCase());
+}
+
+Future<String?> _readWindowsSidecarLyrics(String audioPath) async {
+  try {
+    final lrc = File(p.setExtension(audioPath, '.lrc'));
+    if (await lrc.exists()) {
+      return _cleanWindowsLyrics(await lrc.readAsString());
+    }
+  } catch (_) {
+    // A sidecar file may be inaccessible even when the audio file is readable.
+  }
+  return null;
+}
+
+String _cleanWindowsValue(String? value, String fallback) {
+  final trimmed = value?.trim();
+  if (trimmed == null || trimmed.isEmpty || trimmed == '<unknown>') {
+    return fallback;
+  }
+  return trimmed;
+}
+
+String? _cleanWindowsLyrics(String? value) {
+  final trimmed = value?.trim();
+  return trimmed == null || trimmed.isEmpty ? null : trimmed;
+}
+
+Uint8List? _compactWindowsArtwork(Uint8List? bytes) {
+  if (bytes == null || bytes.isEmpty) return null;
+  try {
+    final decoded = image.decodeImage(bytes);
+    if (decoded == null) return bytes.length <= 512 * 1024 ? bytes : null;
+    final longestSide = decoded.width > decoded.height
+        ? decoded.width
+        : decoded.height;
+    final thumbnail = longestSide > 320
+        ? image.copyResize(
+            decoded,
+            width: decoded.width >= decoded.height ? 320 : null,
+            height: decoded.height > decoded.width ? 320 : null,
+            interpolation: image.Interpolation.average,
+          )
+        : decoded;
+    return Uint8List.fromList(image.encodeJpg(thumbnail, quality: 70));
+  } catch (_) {
+    return bytes.length <= 512 * 1024 ? bytes : null;
   }
 }

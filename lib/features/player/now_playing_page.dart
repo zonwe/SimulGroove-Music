@@ -32,6 +32,27 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
               _showLyrics ? Icons.album_outlined : Icons.lyrics_outlined,
             ),
           ),
+          StreamBuilder<MediaItem?>(
+            stream: handler.mediaItem,
+            builder: (context, itemSnapshot) => StreamBuilder<Set<String>>(
+              stream: ref.read(databaseProvider).watchLikedTrackIds(),
+              builder: (context, likedSnapshot) {
+                final item = itemSnapshot.data;
+                final liked =
+                    item != null &&
+                    (likedSnapshot.data?.contains(item.id) ?? false);
+                return IconButton(
+                  tooltip: liked ? '取消喜欢' : '喜欢',
+                  icon: Icon(liked ? Icons.favorite : Icons.favorite_border),
+                  onPressed: item == null
+                      ? null
+                      : () => ref
+                            .read(databaseProvider)
+                            .setTrackLiked(item.id, !liked),
+                );
+              },
+            ),
+          ),
         ],
       ),
       body: StreamBuilder<MediaItem?>(

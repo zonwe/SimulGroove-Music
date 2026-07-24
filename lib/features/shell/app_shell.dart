@@ -1,10 +1,10 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/database/app_database.dart';
 import '../../core/window/desktop_window_controller.dart';
 import '../account/account_page.dart';
 import '../library/library_page.dart';
+import '../library/favorites_page.dart';
 import '../placeholders/online_search_page.dart';
 import '../placeholders/recognition_page.dart';
 import '../placeholders/settings_page.dart';
@@ -129,6 +129,7 @@ class _AppShellState extends State<AppShell> {
 
   Widget _pageFor(AppDestination destination) => switch (destination) {
     AppDestination.library => const LibraryPage(),
+    AppDestination.favorites => const FavoritesPage(),
     AppDestination.playlists =>
       _selectedPlaylist == null
           ? PlaylistsPage(onOpenPlaylist: _openPlaylist)
@@ -198,19 +199,19 @@ class _DesktopNavigation extends StatelessWidget {
                 ),
               ),
             const Spacer(),
-            if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Builder(
-                  builder: (context) => Text(
-                    'Windows 本地模式',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ),
+            // if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+            //   Padding(
+            //     padding: const EdgeInsets.all(16),
+            //     child: Builder(
+            //       builder: (context) => Text(
+            //         'Windows 本地模式',
+            //         style: TextStyle(
+            //           color: Theme.of(context).colorScheme.onSurfaceVariant,
+            //           fontSize: 12,
+            //         ),
+            //       ),
+            //     ),
+            //   ),
           ],
         ),
       ),

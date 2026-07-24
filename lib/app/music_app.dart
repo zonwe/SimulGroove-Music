@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -31,11 +32,16 @@ ThemeData _theme(Brightness brightness, Color seedColor) {
   const controlShape = RoundedRectangleBorder(
     borderRadius: BorderRadius.all(Radius.circular(8)),
   );
+  final windows = !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
   return ThemeData(
     useMaterial3: true,
     brightness: brightness,
     colorScheme: scheme,
     scaffoldBackgroundColor: scheme.surface,
+    fontFamily: windows ? 'Microsoft YaHei UI' : null,
+    fontFamilyFallback: windows
+        ? const ['Microsoft YaHei', 'Segoe UI', 'Arial']
+        : null,
     cardTheme: CardThemeData(
       color: scheme.surfaceContainerLow,
       elevation: 0,
