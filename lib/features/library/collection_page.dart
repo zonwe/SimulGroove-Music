@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
 import 'artwork_view.dart';
+import '../player/playback_navigation.dart';
 
 enum CollectionKind { artist, album }
 
@@ -44,9 +44,8 @@ class CollectionPage extends ConsumerWidget {
               overflow: TextOverflow.ellipsis,
             ),
             trailing: Text(_formatDuration(track.durationMs)),
-            onTap: () => ref
-                .read(audioHandlerProvider)
-                .playTracks(tracks, initialIndex: index),
+            onTap: () =>
+                playOrOpenNowPlaying(context, ref, tracks, initialIndex: index),
           );
         },
       ),

@@ -7,6 +7,7 @@ import '../core/library/library_scanner.dart';
 import '../core/library/scanner_factory.dart';
 import '../core/player/music_audio_handler.dart';
 import '../core/theme/app_appearance.dart';
+import '../core/window/window_settings.dart';
 
 final databaseProvider = Provider<AppDatabase>(
   (ref) => throw UnimplementedError(),
@@ -50,4 +51,10 @@ final appearanceProvider = StreamProvider<AppAppearance>(
       .watch(databaseProvider)
       .watchSettings()
       .map(AppAppearance.fromSettings),
+);
+final trayMinimizeOnCloseProvider = StreamProvider<bool>(
+  (ref) => ref
+      .watch(databaseProvider)
+      .watchSettings()
+      .map((settings) => settings[trayMinimizeOnCloseSettingKey] != 'false'),
 );

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
 import 'artwork_view.dart';
+import '../player/playback_navigation.dart';
 
 class FavoritesPage extends ConsumerWidget {
   const FavoritesPage({super.key});
@@ -75,6 +76,6 @@ class _FavoriteTile extends ConsumerWidget {
           ref.read(databaseProvider).setTrackLiked(track.id, false),
     ),
     onTap: () =>
-        ref.read(audioHandlerProvider).playTracks(tracks, initialIndex: index),
+        playOrOpenNowPlaying(context, ref, tracks, initialIndex: index),
   );
 }

@@ -10,6 +10,7 @@ import '../../core/database/app_database.dart';
 import '../../core/library/scanned_track.dart';
 import 'artwork_view.dart';
 import 'collection_page.dart';
+import '../player/playback_navigation.dart';
 
 enum _LibraryView { songs, albums, artists }
 
@@ -499,9 +500,12 @@ class _SongList extends ConsumerWidget {
         ),
         onTap: selectionMode
             ? () => onToggleSelected(track)
-            : () => ref
-                  .read(audioHandlerProvider)
-                  .playTracks(tracks, initialIndex: index),
+            : () => playOrOpenNowPlaying(
+                context,
+                ref,
+                tracks,
+                initialIndex: index,
+              ),
         onLongPress: () => onLongPress(track),
       );
     },

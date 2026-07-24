@@ -13,13 +13,16 @@ import 'core/player/audio_backend.dart';
 import 'core/player/music_audio_handler.dart';
 import 'core/startup/debug_artifact_cleanup.dart';
 import 'core/window/desktop_window_controller.dart';
+import 'core/window/window_settings.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await configureAudioBackend();
-  await DesktopWindowController.initialize();
-
   final database = AppDatabase();
+  final traySetting = await database.readSetting(trayMinimizeOnCloseSettingKey);
+  await DesktopWindowController.initialize(
+    minimizeToTray: traySetting != 'false',
+  );
   final MusicAudioHandler audioHandler;
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
     audioHandler = MusicAudioHandler();

@@ -7,6 +7,7 @@ import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
 import '../library/artwork_view.dart';
 import '../library/collection_page.dart';
+import '../player/playback_navigation.dart';
 
 class PlaylistDetailPage extends ConsumerWidget {
   const PlaylistDetailPage({
@@ -158,9 +159,12 @@ class PlaylistDetailPage extends ConsumerWidget {
                                 ),
                               ],
                             ),
-                            onTap: () => ref
-                                .read(audioHandlerProvider)
-                                .playTracks(tracks, initialIndex: index),
+                            onTap: () => playOrOpenNowPlaying(
+                              context,
+                              ref,
+                              tracks,
+                              initialIndex: index,
+                            ),
                           );
                         },
                       ),

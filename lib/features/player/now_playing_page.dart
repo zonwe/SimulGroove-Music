@@ -22,39 +22,7 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
   Widget build(BuildContext context) {
     final handler = ref.watch(audioHandlerProvider);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('正在播放'),
-        actions: [
-          IconButton(
-            tooltip: _showLyrics ? '显示封面' : '显示歌词',
-            onPressed: () => setState(() => _showLyrics = !_showLyrics),
-            icon: Icon(
-              _showLyrics ? Icons.album_outlined : Icons.lyrics_outlined,
-            ),
-          ),
-          StreamBuilder<MediaItem?>(
-            stream: handler.mediaItem,
-            builder: (context, itemSnapshot) => StreamBuilder<Set<String>>(
-              stream: ref.read(databaseProvider).watchLikedTrackIds(),
-              builder: (context, likedSnapshot) {
-                final item = itemSnapshot.data;
-                final liked =
-                    item != null &&
-                    (likedSnapshot.data?.contains(item.id) ?? false);
-                return IconButton(
-                  tooltip: liked ? '取消喜欢' : '喜欢',
-                  icon: Icon(liked ? Icons.favorite : Icons.favorite_border),
-                  onPressed: item == null
-                      ? null
-                      : () => ref
-                            .read(databaseProvider)
-                            .setTrackLiked(item.id, !liked),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('正在播放')),
       body: StreamBuilder<MediaItem?>(
         stream: handler.mediaItem,
         builder: (context, itemSnapshot) {
@@ -66,39 +34,66 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
               child: Column(
                 children: [
                   Expanded(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 220),
-                      child: _showLyrics
-                          ? _LyricsPanel(
-                              lyrics: item.extras?['lyrics'] as String?,
-                              positionStream: handler.positionStream,
-                            )
-                          : LayoutBuilder(
-                              builder: (context, constraints) {
-                                final size = constraints.biggest.shortestSide
-                                    .clamp(180.0, 320.0);
-                                return Center(
-                                  child: ArtworkView(
-                                    key: const ValueKey('cover'),
-                                    bytes:
-                                        item.extras?['artwork'] as Uint8List?,
-                                    size: size,
-                                    borderRadius: 12,
-                                  ),
-                                );
-                              },
-                            ),
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => setState(() => _showLyrics = !_showLyrics),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        child: _showLyrics
+                            ? _LyricsPanel(
+                                lyrics: item.extras?['lyrics'] as String?,
+                                positionStream: handler.positionStream,
+                              )
+                            : LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final size = constraints.biggest.shortestSide
+                                      .clamp(180.0, 320.0);
+                                  return Center(
+                                    child: ArtworkView(
+                                      key: const ValueKey('cover'),
+                                      bytes:
+                                          item.extras?['artwork'] as Uint8List?,
+                                      size: size,
+                                      borderRadius: 12,
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Text(
-                    item.title,
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          item.title,
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      StreamBuilder<Set<String>>(
+                        stream: ref.read(databaseProvider).watchLikedTrackIds(),
+                        builder: (context, likedSnapshot) {
+                          final liked =
+                              likedSnapshot.data?.contains(item.id) ?? false;
+                          return IconButton(
+                            tooltip: liked ? '取消喜欢' : '喜欢',
+                            icon: Icon(
+                              liked ? Icons.favorite : Icons.favorite_border,
+                            ),
+                            onPressed: () => ref
+                                .read(databaseProvider)
+                                .setTrackLiked(item.id, !liked),
+                          );
+                        },
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(

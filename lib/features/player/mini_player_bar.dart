@@ -44,17 +44,26 @@ class MiniPlayerBar extends ConsumerWidget {
                       children: [
                         StreamBuilder<Duration>(
                           stream: handler.positionStream,
-                          builder: (context, position) =>
-                              LinearProgressIndicator(
-                                minHeight: 2,
-                                value: playerProgress(
-                                  position.data ?? Duration.zero,
-                                  item.duration,
-                                ),
-                                backgroundColor: Theme.of(
-                                  context,
-                                ).colorScheme.surfaceContainerHighest,
+                          builder: (context, position) {
+                            final current = position.data ?? Duration.zero;
+                            final max = item.duration?.inMilliseconds ?? 0;
+                            return SizedBox(
+                              height: 18,
+                              child: Slider(
+                                value: max <= 0
+                                    ? 0
+                                    : current.inMilliseconds
+                                          .clamp(0, max)
+                                          .toDouble(),
+                                max: max <= 0 ? 1 : max.toDouble(),
+                                onChanged: max <= 0
+                                    ? null
+                                    : (value) => handler.seek(
+                                        Duration(milliseconds: value.round()),
+                                      ),
                               ),
+                            );
+                          },
                         ),
                         Expanded(
                           child: Padding(
@@ -71,6 +80,11 @@ class MiniPlayerBar extends ConsumerWidget {
                                     item: item,
                                     positionStream: handler.positionStream,
                                   ),
+                                ),
+                                IconButton(
+                                  tooltip: '上一首',
+                                  onPressed: handler.skipToPrevious,
+                                  icon: const Icon(Icons.skip_previous_rounded),
                                 ),
                                 IconButton(
                                   tooltip: state.playing ? '暂停' : '播放',
