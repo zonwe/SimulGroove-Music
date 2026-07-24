@@ -12,6 +12,12 @@ class DesktopWindowController {
     minimizeToTrayOnClose = value;
   }
 
+  static void configureTrayActions({
+    Future<void> Function()? onTogglePlay,
+    Future<void> Function()? onPrevious,
+    Future<void> Function()? onNext,
+  }) {}
+
   static Future<void> toggleCompact() async {}
   static Future<void> minimize() async {}
   static Future<void> close() async {}

@@ -13,6 +13,10 @@ class DesktopWindowController {
   static bool _isWindows = false;
   static bool _minimizeToTray = true;
   static bool _allowQuit = false;
+  static Future<void> Function()? _onTogglePlay;
+  static Future<void> Function()? _onPrevious;
+  static Future<void> Function()? _onNext;
+  static bool _trayReady = false;
 
   static bool get minimizeToTrayOnClose => _minimizeToTray;
 
@@ -42,6 +46,17 @@ class DesktopWindowController {
   static Future<void> setMinimizeToTray(bool value) async {
     _minimizeToTray = value;
     if (_isWindows) await windowManager.setPreventClose(value);
+  }
+
+  static void configureTrayActions({
+    Future<void> Function()? onTogglePlay,
+    Future<void> Function()? onPrevious,
+    Future<void> Function()? onNext,
+  }) {
+    _onTogglePlay = onTogglePlay;
+    _onPrevious = onPrevious;
+    _onNext = onNext;
+    if (_trayReady) _updateTrayMenu();
   }
 
   static Future<void> toggleCompact() async {
@@ -94,6 +109,7 @@ class DesktopWindowController {
       trayManager.addListener(_trayListener);
       await trayManager.setIcon(iconPath);
       await trayManager.setToolTip('Flutter Music');
+      _trayReady = true;
       await trayManager.setContextMenu(
         Menu(
           items: [
@@ -103,10 +119,25 @@ class DesktopWindowController {
           ],
         ),
       );
+      await _updateTrayMenu();
     } catch (_) {
       // The app remains usable if a packaged build has no tray asset.
     }
   }
+
+  static Future<void> _updateTrayMenu() => trayManager.setContextMenu(
+    Menu(
+      items: [
+        MenuItem(key: 'show_window', label: '显示主窗口'),
+        MenuItem.separator(),
+        MenuItem(key: 'toggle_play', label: '播放 / 暂停'),
+        MenuItem(key: 'previous', label: '上一首'),
+        MenuItem(key: 'next', label: '下一首'),
+        MenuItem.separator(),
+        MenuItem(key: 'exit_app', label: '退出应用'),
+      ],
+    ),
+  );
 }
 
 class _WindowListener extends WindowListener {
@@ -124,9 +155,20 @@ class _TrayListener with TrayListener {
   }
 
   @override
+  void onTrayIconRightMouseDown() {
+    trayManager.popUpContextMenu();
+  }
+
+  @override
   void onTrayMenuItemClick(MenuItem menuItem) {
     if (menuItem.key == 'show_window') {
       DesktopWindowController.show();
+    } else if (menuItem.key == 'toggle_play') {
+      DesktopWindowController._onTogglePlay?.call();
+    } else if (menuItem.key == 'previous') {
+      DesktopWindowController._onPrevious?.call();
+    } else if (menuItem.key == 'next') {
+      DesktopWindowController._onNext?.call();
     } else if (menuItem.key == 'exit_app') {
       DesktopWindowController.quit();
     }

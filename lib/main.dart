@@ -36,6 +36,17 @@ Future<void> main() async {
       ),
     );
   }
+  DesktopWindowController.configureTrayActions(
+    onTogglePlay: () async {
+      if (audioHandler.playbackState.value.playing) {
+        await audioHandler.pause();
+      } else {
+        await audioHandler.play();
+      }
+    },
+    onPrevious: audioHandler.skipToPrevious,
+    onNext: audioHandler.skipToNext,
+  );
 
   runApp(
     ProviderScope(
