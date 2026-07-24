@@ -9,6 +9,7 @@ import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
 import '../../core/library/scanned_track.dart';
 import 'artwork_view.dart';
+import 'collection_page.dart';
 
 enum _LibraryView { songs, albums, artists }
 
@@ -450,13 +451,47 @@ class _SongList extends ConsumerWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
             PopupMenuButton<String>(
+              position: PopupMenuPosition.under,
+              offset: const Offset(-160, 4),
               tooltip: '更多操作',
               onSelected: (value) {
                 if (value == 'playlist') {
                   _showPlaylistPicker(context, ref, track);
                 }
+                if (value == 'artist') {
+                  openCollectionPage(
+                    context,
+                    tracks,
+                    CollectionKind.artist,
+                    track.artist,
+                  );
+                }
+                if (value == 'album') {
+                  openCollectionPage(
+                    context,
+                    tracks,
+                    CollectionKind.album,
+                    track.album,
+                  );
+                }
               },
-              itemBuilder: (_) => const [
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'artist',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.person_outline),
+                    title: Text('查看歌手：${track.artist}'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'album',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.album_outlined),
+                    title: Text('查看专辑：${track.album}'),
+                  ),
+                ),
                 PopupMenuItem(value: 'playlist', child: Text('添加到歌单')),
               ],
             ),

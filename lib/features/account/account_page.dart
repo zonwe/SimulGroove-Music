@@ -14,7 +14,9 @@ class _AccountPageState extends ConsumerState<AccountPage> {
   final _username = TextEditingController();
   final _password = TextEditingController();
   bool _busy = false;
+  bool _syncing = false;
   String? _error;
+  String? _syncMessage;
 
   @override
   void dispose() {
@@ -59,7 +61,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
         style: Theme.of(context).textTheme.headlineSmall,
       ),
       const SizedBox(height: 6),
-      const Text('当前使用本地模拟账号，不会发送网络请求。', textAlign: TextAlign.center),
+      const Text('当前使用本地 Mock 后端，不会发出真实网络请求。', textAlign: TextAlign.center),
       const SizedBox(height: 22),
       TextField(
         controller: _username,
@@ -98,14 +100,42 @@ class _AccountPageState extends ConsumerState<AccountPage> {
           Text(username),
           const SizedBox(height: 12),
           const Chip(
-            avatar: Icon(Icons.science_outlined, size: 18),
-            label: Text('本地模拟账号'),
+            avatar: Icon(Icons.cloud_done_outlined, size: 18),
+            label: Text('本地 Mock 后端账号'),
           ),
-          const SizedBox(height: 10),
-          const Text(
-            '后续接入后台时将替换 AuthRepository，密码不会保存在本地数据库。',
-            textAlign: TextAlign.center,
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _syncing ? null : _sync,
+            icon: _syncing
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.sync),
+            label: Text(_syncing ? '同步中…' : '立即同步歌单'),
           ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy || _syncing ? null : _signOut,
+            icon: const Icon(Icons.logout),
+            label: const Text('退出登录'),
+          ),
+          if (_syncMessage != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _syncMessage!,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Theme.of(context).colorScheme.primary),
+            ),
+          ],
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
         ],
       );
 
@@ -113,16 +143,47 @@ class _AccountPageState extends ConsumerState<AccountPage> {
     setState(() {
       _busy = true;
       _error = null;
+      _syncMessage = null;
     });
     try {
       await ref
           .read(authRepositoryProvider)
           .signIn(username: _username.text, password: _password.text);
+      final result = await ref.read(authRepositoryProvider).syncNow();
+      if (mounted) {
+        setState(() => _syncMessage = '已登录并同步 ${result.uploaded} 个歌单');
+      }
       _password.clear();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _sync() async {
+    setState(() {
+      _syncing = true;
+      _syncMessage = null;
+      _error = null;
+    });
+    try {
+      final result = await ref.read(authRepositoryProvider).syncNow();
+      if (mounted) {
+        setState(
+          () => _syncMessage =
+              '同步完成：上传 ${result.uploaded} 个歌单，下载 ${result.downloaded} 个歌单',
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  Future<void> _signOut() async {
+    await ref.read(authRepositoryProvider).signOut();
+    if (mounted) setState(() => _syncMessage = null);
   }
 }

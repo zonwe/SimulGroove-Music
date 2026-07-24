@@ -141,6 +141,9 @@ class AppDatabase extends _$AppDatabase {
   Future<List<Track>> allTracks() =>
       (select(tracks)..orderBy([(row) => OrderingTerm.asc(row.title)])).get();
 
+  Future<Track?> findTrackByUri(String uri) =>
+      (select(tracks)..where((row) => row.uri.equals(uri))).getSingleOrNull();
+
   Future<void> upsertTracks(Iterable<TracksCompanion> values) async {
     await batch((batch) {
       batch.insertAllOnConflictUpdate(tracks, values.toList());
@@ -170,12 +173,34 @@ class AppDatabase extends _$AppDatabase {
   Future<void> saveAccount(AccountsCompanion value) =>
       into(accounts).insertOnConflictUpdate(value);
 
+  Future<void> clearAccounts() => delete(accounts).go();
+
+  Future<String?> readSetting(String key) async {
+    final row = await (select(
+      appSettings,
+    )..where((item) => item.key.equals(key))).getSingleOrNull();
+    return row?.value;
+  }
+
   Stream<List<Playlist>> watchPlaylists() => (select(
     playlists,
   )..orderBy([(row) => OrderingTerm.asc(row.name)])).watch();
 
   Future<void> createPlaylist(PlaylistsCompanion value) =>
       into(playlists).insert(value);
+
+  Future<void> updatePlaylistSync({
+    required String id,
+    required String remoteId,
+    required String accountId,
+  }) => (update(playlists)..where((row) => row.id.equals(id))).write(
+    PlaylistsCompanion(
+      remoteId: Value(remoteId),
+      accountId: Value(accountId),
+      syncState: const Value('synced'),
+      updatedAt: Value(DateTime.now()),
+    ),
+  );
 
   Future<void> deletePlaylist(String id) =>
       (delete(playlists)..where((row) => row.id.equals(id))).go();
@@ -211,6 +236,12 @@ class AppDatabase extends _$AppDatabase {
         trackId: trackId,
         position: nextPosition,
         addedAt: DateTime.now(),
+      ),
+    );
+    await (update(playlists)..where((row) => row.id.equals(playlistId))).write(
+      PlaylistsCompanion(
+        syncState: const Value('local'),
+        updatedAt: Value(DateTime.now()),
       ),
     );
   }

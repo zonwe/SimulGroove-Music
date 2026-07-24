@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/auth/auth_repository.dart';
+import '../core/auth/backend_gateway.dart';
 import '../core/database/app_database.dart';
 import '../core/library/library_scanner.dart';
 import '../core/library/scanner_factory.dart';
@@ -16,8 +17,14 @@ final audioHandlerProvider = Provider<MusicAudioHandler>(
 final scannerProvider = Provider<LibraryScanner>(
   (ref) => createLibraryScanner(),
 );
+final backendGatewayProvider = Provider<BackendGateway>(
+  (ref) => MockBackendGateway(),
+);
 final authRepositoryProvider = Provider<AuthRepository>(
-  (ref) => MockAuthRepository(ref.watch(databaseProvider)),
+  (ref) => MockAuthRepository(
+    ref.watch(databaseProvider),
+    ref.watch(backendGatewayProvider),
+  ),
 );
 
 final tracksProvider = StreamProvider<List<Track>>(

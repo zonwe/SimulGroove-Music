@@ -128,21 +128,31 @@ class _PlaylistCard extends ConsumerWidget {
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
             subtitle: Text(tracks.isEmpty ? '暂无歌曲' : '${tracks.length} 首歌曲'),
-            trailing: PopupMenuButton<String>(
-              tooltip: '歌单操作',
-              onSelected: (value) {
-                if (value == 'delete') {
-                  _deletePlaylist(context, ref, playlist);
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: 'delete',
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.delete_outline),
-                    title: Text('删除歌单'),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (playlist.syncState == 'synced')
+                  const Tooltip(
+                    message: '已同步到后台',
+                    child: Icon(Icons.cloud_done_outlined, size: 20),
                   ),
+                PopupMenuButton<String>(
+                  tooltip: '歌单操作',
+                  onSelected: (value) {
+                    if (value == 'delete') {
+                      _deletePlaylist(context, ref, playlist);
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.delete_outline),
+                        title: Text('删除歌单'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

@@ -1,0 +1,89 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../app/providers.dart';
+import '../../core/database/app_database.dart';
+import 'artwork_view.dart';
+
+enum CollectionKind { artist, album }
+
+class CollectionPage extends ConsumerWidget {
+  const CollectionPage({
+    super.key,
+    required this.kind,
+    required this.value,
+    required this.tracks,
+  });
+
+  final CollectionKind kind;
+  final String value;
+  final List<Track> tracks;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final label = kind == CollectionKind.artist ? '歌手' : '专辑';
+    return Scaffold(
+      appBar: AppBar(title: Text(value)),
+      body: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        itemCount: tracks.length,
+        separatorBuilder: (_, _) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final track = tracks[index];
+          return ListTile(
+            minTileHeight: 64,
+            leading: ArtworkView(bytes: track.artwork),
+            title: Text(
+              track.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              kind == CollectionKind.artist ? track.album : track.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: Text(_formatDuration(track.durationMs)),
+            onTap: () => ref
+                .read(audioHandlerProvider)
+                .playTracks(tracks, initialIndex: index),
+          );
+        },
+      ),
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+        child: Text(
+          '$label · ${tracks.length} 首歌曲',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ),
+    );
+  }
+}
+
+void openCollectionPage(
+  BuildContext context,
+  List<Track> allTracks,
+  CollectionKind kind,
+  String value,
+) {
+  final tracks = allTracks
+      .where(
+        (track) =>
+            (kind == CollectionKind.artist ? track.artist : track.album) ==
+            value,
+      )
+      .toList(growable: false);
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => CollectionPage(kind: kind, value: value, tracks: tracks),
+    ),
+  );
+}
+
+String _formatDuration(int? milliseconds) {
+  if (milliseconds == null) return '--:--';
+  final duration = Duration(milliseconds: milliseconds);
+  return '${duration.inMinutes}:${duration.inSeconds.remainder(60).toString().padLeft(2, '0')}';
+}

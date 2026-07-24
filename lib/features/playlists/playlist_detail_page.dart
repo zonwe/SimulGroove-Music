@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
 import '../library/artwork_view.dart';
+import '../library/collection_page.dart';
 
 class PlaylistDetailPage extends ConsumerWidget {
   const PlaylistDetailPage({
@@ -122,6 +123,38 @@ class PlaylistDetailPage extends ConsumerWidget {
                                         track.id,
                                         !likedIds.contains(track.id),
                                       ),
+                                ),
+                                PopupMenuButton<String>(
+                                  position: PopupMenuPosition.under,
+                                  offset: const Offset(-160, 4),
+                                  tooltip: '更多操作',
+                                  onSelected: (value) {
+                                    if (value == 'artist') {
+                                      openCollectionPage(
+                                        context,
+                                        tracks,
+                                        CollectionKind.artist,
+                                        track.artist,
+                                      );
+                                    } else if (value == 'album') {
+                                      openCollectionPage(
+                                        context,
+                                        tracks,
+                                        CollectionKind.album,
+                                        track.album,
+                                      );
+                                    }
+                                  },
+                                  itemBuilder: (_) => [
+                                    PopupMenuItem(
+                                      value: 'artist',
+                                      child: Text('查看歌手：${track.artist}'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'album',
+                                      child: Text('查看专辑：${track.album}'),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
