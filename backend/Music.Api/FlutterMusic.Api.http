@@ -1,0 +1,138 @@
+@baseUrl = http://localhost:5080
+@username = rider-test@example.com
+@password = secret-123456
+# 这里填写后端进程能够访问的绝对路径，而不是手机上的路径。
+@scanPath = F:\\Music
+
+### Health check
+GET {{baseUrl}}/health
+Accept: application/json
+
+### Login
+# Run this first. The response handler stores both tokens globally.
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "{{username}}",
+  "password": "{{password}}"
+}
+
+> {%
+client.global.set("access_token", response.body.token);
+client.global.set("refresh_token", response.body.refreshToken);
+client.global.set("account_username", response.body.account.username);
+%}
+
+### Current account
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{access_token}}
+Accept: application/json
+
+### Refresh token
+POST {{baseUrl}}/api/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refresh_token}}"
+}
+
+> {%
+client.global.set("access_token", response.body.token);
+client.global.set("refresh_token", response.body.refreshToken);
+%}
+
+### Sync playlists
+POST {{baseUrl}}/api/playlists/sync
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "playlists": [
+    {
+      "remoteId": "rider-favorites",
+      "name": "Rider Favorites",
+      "updatedAt": "2026-07-24T08:00:00Z",
+      "tracks": [
+        {
+          "uri": "file:///music/demo.mp3",
+          "title": "Demo Song",
+          "artist": "Demo Artist",
+          "album": "Demo Album",
+          "durationMs": 180000
+        }
+      ]
+    }
+  ]
+}
+
+### List scan sources
+GET {{baseUrl}}/api/scan-sources/
+Authorization: Bearer {{access_token}}
+Accept: application/json
+
+### Create scan source
+# intervalMinutes 支持 1-10080；响应处理器会保存 scan_source_id。
+POST {{baseUrl}}/api/scan-sources/
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "path": "{{scanPath}}",
+  "intervalMinutes": 60,
+  "enabled": true
+}
+
+> {%
+client.global.set("scan_source_id", response.body.id);
+%}
+
+### Scan now
+POST {{baseUrl}}/api/scan-sources/{{scan_source_id}}/scan
+Authorization: Bearer {{access_token}}
+Accept: application/json
+
+### List scanned tracks
+GET {{baseUrl}}/api/scan-sources/{{scan_source_id}}/tracks?limit=200
+Authorization: Bearer {{access_token}}
+Accept: application/json
+
+### Update scan source
+PUT {{baseUrl}}/api/scan-sources/{{scan_source_id}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "path": "{{scanPath}}",
+  "intervalMinutes": 120,
+  "enabled": true
+}
+
+### Delete scan source
+DELETE {{baseUrl}}/api/scan-sources/{{scan_source_id}}
+Authorization: Bearer {{access_token}}
+
+### Query audit logs
+GET {{baseUrl}}/api/audit-logs?page=1&pageSize=50&level=warning
+Authorization: Bearer {{access_token}}
+Accept: application/json
+
+### Search audit logs
+GET {{baseUrl}}/api/audit-logs?search=scan&eventType=scan.manual&page=1&pageSize=50
+Authorization: Bearer {{access_token}}
+Accept: application/json
+
+### Logout
+POST {{baseUrl}}/api/auth/logout
+Authorization: Bearer {{access_token}}
+
+> {%
+client.global.clear("access_token");
+client.global.clear("refresh_token");
+client.global.clear("account_username");
+client.global.clear("scan_source_id");
+%}
+
+### OpenAPI
+GET {{baseUrl}}/openapi.json
+Accept: application/json

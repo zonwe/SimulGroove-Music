@@ -1,5 +1,10 @@
 import '../database/app_database.dart';
 
+const defaultBackendBaseUrl = String.fromEnvironment(
+  'MUSIC_API_URL',
+  defaultValue: 'http://localhost:5080',
+);
+
 class BackendAccount {
   const BackendAccount({
     required this.remoteId,
@@ -12,13 +17,40 @@ class BackendAccount {
   final String username;
   final String displayName;
   final String? avatarUri;
+
+  factory BackendAccount.fromJson(Map<String, dynamic> json) => BackendAccount(
+    remoteId: json['remoteId'] as String,
+    username: json['username'] as String,
+    displayName: json['displayName'] as String,
+    avatarUri: json['avatarUri'] as String?,
+  );
 }
 
 class BackendSession {
-  const BackendSession({required this.token, required this.account});
+  const BackendSession({
+    required this.token,
+    required this.refreshToken,
+    required this.expiresAt,
+    required this.account,
+  });
 
   final String token;
+  final String refreshToken;
+  final DateTime expiresAt;
   final BackendAccount account;
+
+  bool get shouldRefresh => expiresAt.isBefore(
+    DateTime.now().toUtc().add(const Duration(seconds: 30)),
+  );
+
+  factory BackendSession.fromJson(Map<String, dynamic> json) => BackendSession(
+    token: json['token'] as String,
+    refreshToken: json['refreshToken'] as String,
+    expiresAt: DateTime.parse(json['expiresAt'] as String).toUtc(),
+    account: BackendAccount.fromJson(
+      (json['account'] as Map).cast<String, dynamic>(),
+    ),
+  );
 }
 
 class BackendPlaylist {
@@ -33,6 +65,26 @@ class BackendPlaylist {
   final String name;
   final DateTime updatedAt;
   final List<BackendTrack> tracks;
+
+  factory BackendPlaylist.fromJson(Map<String, dynamic> json) =>
+      BackendPlaylist(
+        remoteId: json['remoteId'] as String,
+        name: json['name'] as String,
+        updatedAt: DateTime.parse(json['updatedAt'] as String).toLocal(),
+        tracks: (json['tracks'] as List<dynamic>)
+            .map(
+              (value) =>
+                  BackendTrack.fromJson((value as Map).cast<String, dynamic>()),
+            )
+            .toList(growable: false),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'remoteId': remoteId,
+    'name': name,
+    'updatedAt': updatedAt.toUtc().toIso8601String(),
+    'tracks': tracks.map((track) => track.toJson()).toList(growable: false),
+  };
 }
 
 class BackendTrack {
@@ -57,6 +109,42 @@ class BackendTrack {
     album: track.album,
     durationMs: track.durationMs,
   );
+
+  factory BackendTrack.fromJson(Map<String, dynamic> json) => BackendTrack(
+    uri: json['uri'] as String,
+    title: json['title'] as String,
+    artist: json['artist'] as String,
+    album: json['album'] as String,
+    durationMs: json['durationMs'] as int?,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'uri': uri,
+    'title': title,
+    'artist': artist,
+    'album': album,
+    'durationMs': durationMs,
+  };
+}
+
+class BackendLibrary {
+  const BackendLibrary({required this.playlists, required this.likedTracks});
+
+  final List<BackendPlaylist> playlists;
+  final List<BackendTrack> likedTracks;
+}
+
+class BackendException implements Exception {
+  const BackendException(this.message, {this.statusCode, this.code});
+
+  final String message;
+  final int? statusCode;
+  final String? code;
+
+  bool get isUnauthorized => statusCode == 401;
+
+  @override
+  String toString() => message;
 }
 
 abstract interface class BackendGateway {
@@ -65,74 +153,13 @@ abstract interface class BackendGateway {
     required String password,
   });
 
-  Future<BackendSession?> restoreSession(String token);
+  Future<BackendSession> refreshSession(String refreshToken);
 
-  Future<List<BackendPlaylist>> syncPlaylists(
+  Future<void> signOut(String token);
+
+  Future<BackendLibrary> syncLibrary(
     BackendSession session,
     List<BackendPlaylist> playlists,
+    List<BackendTrack> likedTracks,
   );
-}
-
-/// A local stand-in for the future HTTP backend. It keeps the same boundaries
-/// as a real service so the UI and database do not need to change later.
-class MockBackendGateway implements BackendGateway {
-  static final Map<String, List<BackendPlaylist>> _playlistsByUser = {};
-  static final Map<String, BackendSession> _sessions = {};
-
-  @override
-  Future<BackendSession> signIn({
-    required String username,
-    required String password,
-  }) async {
-    final normalized = username.trim().toLowerCase();
-    final account = BackendAccount(
-      remoteId: 'account-$normalized',
-      username: normalized,
-      displayName: normalized.split('@').first,
-    );
-    final session = BackendSession(
-      token: 'mock-session-$normalized',
-      account: account,
-    );
-    _sessions[session.token] = session;
-    _playlistsByUser.putIfAbsent(normalized, () => <BackendPlaylist>[]);
-    return session;
-  }
-
-  @override
-  Future<BackendSession?> restoreSession(String token) async {
-    final existing = _sessions[token];
-    if (existing != null) return existing;
-    const prefix = 'mock-session-';
-    if (!token.startsWith(prefix)) return null;
-    final username = token.substring(prefix.length);
-    if (username.isEmpty) return null;
-    final session = BackendSession(
-      token: token,
-      account: BackendAccount(
-        remoteId: 'account-$username',
-        username: username,
-        displayName: username.split('@').first,
-      ),
-    );
-    _sessions[token] = session;
-    _playlistsByUser.putIfAbsent(username, () => <BackendPlaylist>[]);
-    return session;
-  }
-
-  @override
-  Future<List<BackendPlaylist>> syncPlaylists(
-    BackendSession session,
-    List<BackendPlaylist> playlists,
-  ) async {
-    final username = session.account.username;
-    final existing = _playlistsByUser[username] ?? <BackendPlaylist>[];
-    final byId = {for (final item in existing) item.remoteId: item};
-    for (final playlist in playlists) {
-      byId[playlist.remoteId] = playlist;
-    }
-    final result = byId.values.toList(growable: false);
-    _playlistsByUser[username] = result;
-    return result;
-  }
 }

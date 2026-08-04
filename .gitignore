@@ -33,6 +33,27 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Workspace-local SDK and package caches
+/.dart-appdata/
+/.dart-localappdata/
+/.nuget/
+
+# Local environment and secret overrides
+.env
+.env.*
+!.env.example
+
+# .NET backend build and test artifacts
+backend/**/bin/
+backend/**/obj/
+backend/**/TestResults/
+backend/**/*.user
+backend/**/*.suo
+backend/**/*.trx
+
+# Music.Api runtime SQLite database and sidecar files
+backend/Music.Api/storage/music.db*
+
 # Symbolication related
 app.*.symbols
 

@@ -2,13 +2,21 @@ import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import '../database/app_database.dart';
+import 'auth_token_store.dart';
 import 'backend_gateway.dart';
 
 class SyncResult {
-  const SyncResult({required this.uploaded, required this.downloaded});
+  const SyncResult({
+    required this.uploaded,
+    required this.downloaded,
+    required this.uploadedLikes,
+    required this.downloadedLikes,
+  });
 
   final int uploaded;
   final int downloaded;
+  final int uploadedLikes;
+  final int downloadedLikes;
 }
 
 abstract interface class AuthRepository {
@@ -16,18 +24,24 @@ abstract interface class AuthRepository {
 
   Future<void> signOut();
 
+  Future<BackendSession?> currentSession({bool forceRefresh = false});
+
   Future<SyncResult> syncNow();
 }
 
-class MockAuthRepository implements AuthRepository {
-  MockAuthRepository(this._database, this._gateway);
+class BackendAuthRepository implements AuthRepository {
+  BackendAuthRepository(this._database, this._gateway, this._tokenStore);
 
-  static const _sessionKey = 'auth.session.token';
+  // This was used by the former Mock implementation. Clear it after a real
+  // login/logout so an old plaintext token is never considered active.
+  static const _legacySessionKey = 'auth.session.token';
 
   final AppDatabase _database;
   final BackendGateway _gateway;
+  final AuthTokenStore _tokenStore;
   final Uuid _uuid = const Uuid();
   BackendSession? _session;
+  Future<BackendSession?>? _refreshing;
 
   @override
   Future<void> signIn({
@@ -36,41 +50,61 @@ class MockAuthRepository implements AuthRepository {
   }) async {
     final normalized = username.trim();
     if (normalized.isEmpty || password.isEmpty) {
-      throw const FormatException('请输入账号和密码');
+      throw const FormatException('请输入账号和密码。');
     }
-    _session = await _gateway.signIn(username: normalized, password: password);
-    final now = DateTime.now();
-    final account = _session!.account;
-    await _database.saveAccount(
-      AccountsCompanion.insert(
-        id: _uuid.v5(Namespace.url.value, 'account:${account.remoteId}'),
-        remoteId: Value(account.remoteId),
-        username: account.username,
-        displayName: account.displayName,
-        avatarUri: Value(account.avatarUri),
-        createdAt: now,
-        updatedAt: now,
-        isMock: const Value(true),
-      ),
+    final session = await _gateway.signIn(
+      username: normalized,
+      password: password,
     );
-    await _database.setSetting(_sessionKey, _session!.token);
+    await _saveSession(session);
+    await _database.setSetting(_legacySessionKey, '');
   }
 
   @override
   Future<void> signOut() async {
-    _session = null;
-    await _database.setSetting(_sessionKey, '');
-    await _database.clearAccounts();
+    try {
+      final session = await currentSession();
+      if (session != null) await _gateway.signOut(session.token);
+    } on BackendException {
+      // Local sign-out must still succeed when the backend is unavailable.
+    } finally {
+      await _clearSession();
+    }
+  }
+
+  @override
+  Future<BackendSession?> currentSession({bool forceRefresh = false}) async {
+    final cached = _session;
+    if (!forceRefresh && cached != null && !cached.shouldRefresh) return cached;
+
+    if (!forceRefresh && cached == null) {
+      final tokens = await _tokenStore.read();
+      final account = await _database.watchCurrentAccount().first;
+      if (tokens == null || account == null) {
+        if (tokens != null || account != null) await _clearSession();
+        return null;
+      }
+      _session = BackendSession(
+        token: tokens.token,
+        refreshToken: tokens.refreshToken,
+        expiresAt: tokens.expiresAt,
+        account: BackendAccount(
+          remoteId: account.remoteId ?? account.id,
+          username: account.username,
+          displayName: account.displayName,
+          avatarUri: account.avatarUri,
+        ),
+      );
+      if (!_session!.shouldRefresh) return _session;
+    }
+
+    return _refreshSession();
   }
 
   @override
   Future<SyncResult> syncNow() async {
-    final session = await _loadSession();
-    if (session == null) {
-      throw StateError('请先登录账号');
-    }
     final account = await _database.watchCurrentAccount().first;
-    if (account == null) throw StateError('账号信息不存在，请重新登录');
+    if (account == null) throw StateError('请先登录账号。');
 
     final localPlaylists = await _database.watchPlaylists().first;
     final payload = <BackendPlaylist>[];
@@ -85,34 +119,37 @@ class MockAuthRepository implements AuthRepository {
         ),
       );
     }
+    final likedTracks = (await _database.watchLikedTracks().first)
+        .map(BackendTrack.fromLocal)
+        .toList(growable: false);
 
-    final remotePlaylists = await _gateway.syncPlaylists(session, payload);
+    final remote = await _syncWithRefresh(payload, likedTracks);
     final localByRemoteId = {
       for (final playlist in localPlaylists)
-        if (playlist.remoteId != null) playlist.remoteId!: playlist,
+        (playlist.remoteId ?? 'playlist-${playlist.id}'): playlist,
     };
     var downloaded = 0;
-    for (final remote in remotePlaylists) {
-      var local = localByRemoteId[remote.remoteId];
+    for (final remotePlaylist in remote.playlists) {
+      var local = localByRemoteId[remotePlaylist.remoteId];
       if (local == null) {
         final now = DateTime.now();
         final localId = _uuid.v4();
         await _database.createPlaylist(
           PlaylistsCompanion.insert(
             id: localId,
-            remoteId: Value(remote.remoteId),
+            remoteId: Value(remotePlaylist.remoteId),
             accountId: Value(account.id),
-            name: remote.name,
+            name: remotePlaylist.name,
             syncState: const Value('synced'),
             createdAt: now,
-            updatedAt: remote.updatedAt,
+            updatedAt: remotePlaylist.updatedAt,
           ),
         );
         local = (await _database.watchPlaylists().first).firstWhere(
           (item) => item.id == localId,
         );
         downloaded++;
-        for (final track in remote.tracks) {
+        for (final track in remotePlaylist.tracks) {
           final localTrack = await _database.findTrackByUri(track.uri);
           if (localTrack != null) {
             await _database.addTrackToPlaylist(local.id, localTrack.id);
@@ -121,18 +158,94 @@ class MockAuthRepository implements AuthRepository {
       }
       await _database.updatePlaylistSync(
         id: local.id,
-        remoteId: remote.remoteId,
+        remoteId: remotePlaylist.remoteId,
         accountId: account.id,
       );
     }
-    return SyncResult(uploaded: payload.length, downloaded: downloaded);
+
+    var downloadedLikes = 0;
+    for (final track in remote.likedTracks) {
+      final localTrack = await _database.findTrackByUri(track.uri);
+      if (localTrack == null) continue;
+      await _database.setTrackLiked(localTrack.id, true);
+      downloadedLikes++;
+    }
+    return SyncResult(
+      uploaded: payload.length,
+      downloaded: downloaded,
+      uploadedLikes: likedTracks.length,
+      downloadedLikes: downloadedLikes,
+    );
   }
 
-  Future<BackendSession?> _loadSession() async {
-    if (_session != null) return _session;
-    final token = await _database.readSetting(_sessionKey);
-    if (token == null || token.isEmpty) return null;
-    _session = await _gateway.restoreSession(token);
-    return _session;
+  Future<BackendLibrary> _syncWithRefresh(
+    List<BackendPlaylist> playlists,
+    List<BackendTrack> likedTracks,
+  ) async {
+    var session = await currentSession();
+    if (session == null) throw StateError('请先登录账号。');
+    try {
+      return await _gateway.syncLibrary(session, playlists, likedTracks);
+    } on BackendException catch (error) {
+      if (!error.isUnauthorized) rethrow;
+      session = await currentSession(forceRefresh: true);
+      if (session == null) throw StateError('登录已过期，请重新登录。');
+      return _gateway.syncLibrary(session, playlists, likedTracks);
+    }
+  }
+
+  Future<BackendSession?> _refreshSession() {
+    final active = _refreshing;
+    if (active != null) return active;
+    final future = _performRefresh();
+    _refreshing = future;
+    return future.whenComplete(() => _refreshing = null);
+  }
+
+  Future<BackendSession?> _performRefresh() async {
+    final stored = await _tokenStore.read();
+    final refreshToken = _session?.refreshToken ?? stored?.refreshToken;
+    if (refreshToken == null || refreshToken.isEmpty) return null;
+    try {
+      final refreshed = await _gateway.refreshSession(refreshToken);
+      await _saveSession(refreshed);
+      return refreshed;
+    } on BackendException catch (error) {
+      if (!error.isUnauthorized) rethrow;
+      await _clearSession();
+      return null;
+    }
+  }
+
+  Future<void> _saveSession(BackendSession session) async {
+    _session = session;
+    final now = DateTime.now();
+    final account = session.account;
+    await _database.saveAccount(
+      AccountsCompanion.insert(
+        id: _uuid.v5(Namespace.url.value, 'account:${account.remoteId}'),
+        remoteId: Value(account.remoteId),
+        username: account.username,
+        displayName: account.displayName,
+        avatarUri: Value(account.avatarUri),
+        createdAt: now,
+        updatedAt: now,
+        isMock: const Value(false),
+      ),
+    );
+    await _tokenStore.write(
+      StoredAuthTokens(
+        token: session.token,
+        refreshToken: session.refreshToken,
+        expiresAt: session.expiresAt,
+      ),
+    );
+  }
+
+  Future<void> _clearSession() async {
+    _session = null;
+    await _tokenStore.clear();
+    await _database.setSetting(_legacySessionKey, '');
+    await _database.clearAccounts();
   }
 }

@@ -1,11 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/auth/auth_repository.dart';
+import '../core/auth/auth_token_store.dart';
 import '../core/auth/backend_gateway.dart';
+import '../core/auth/http_backend_gateway.dart';
 import '../core/database/app_database.dart';
 import '../core/library/library_scanner.dart';
 import '../core/library/scanner_factory.dart';
 import '../core/player/music_audio_handler.dart';
+import '../core/scanning/remote_scan_repository.dart';
 import '../core/theme/app_appearance.dart';
 import '../core/window/window_settings.dart';
 
@@ -19,13 +22,23 @@ final scannerProvider = Provider<LibraryScanner>(
   (ref) => createLibraryScanner(),
 );
 final backendGatewayProvider = Provider<BackendGateway>(
-  (ref) => MockBackendGateway(),
+  (ref) => HttpBackendGateway(),
+);
+final authTokenStoreProvider = Provider<AuthTokenStore>(
+  (ref) => SecureAuthTokenStore(),
 );
 final authRepositoryProvider = Provider<AuthRepository>(
-  (ref) => MockAuthRepository(
+  (ref) => BackendAuthRepository(
     ref.watch(databaseProvider),
     ref.watch(backendGatewayProvider),
+    ref.watch(authTokenStoreProvider),
   ),
+);
+final remoteScanRepositoryProvider = Provider<RemoteScanRepository>(
+  (ref) => RemoteScanRepository(ref.watch(authRepositoryProvider)),
+);
+final remoteScanSourcesProvider = FutureProvider.autoDispose(
+  (ref) => ref.watch(remoteScanRepositoryProvider).listSources(),
 );
 
 final tracksProvider = StreamProvider<List<Track>>(

@@ -61,7 +61,10 @@ class _AccountPageState extends ConsumerState<AccountPage> {
         style: Theme.of(context).textTheme.headlineSmall,
       ),
       const SizedBox(height: 6),
-      const Text('当前使用本地 Mock 后端，不会发出真实网络请求。', textAlign: TextAlign.center),
+      const Text(
+        '连接 Flutter Music API。首次使用的账号会由开发后端自动创建。',
+        textAlign: TextAlign.center,
+      ),
       const SizedBox(height: 22),
       TextField(
         controller: _username,
@@ -101,7 +104,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
           const SizedBox(height: 12),
           const Chip(
             avatar: Icon(Icons.cloud_done_outlined, size: 18),
-            label: Text('本地 Mock 后端账号'),
+            label: Text('已连接真实后端'),
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
@@ -151,7 +154,10 @@ class _AccountPageState extends ConsumerState<AccountPage> {
           .signIn(username: _username.text, password: _password.text);
       final result = await ref.read(authRepositoryProvider).syncNow();
       if (mounted) {
-        setState(() => _syncMessage = '已登录并同步 ${result.uploaded} 个歌单');
+        setState(
+          () => _syncMessage =
+              '已登录并同步 ${result.uploaded} 个歌单、${result.uploadedLikes} 首喜欢歌曲',
+        );
       }
       _password.clear();
     } catch (error) {
@@ -172,7 +178,8 @@ class _AccountPageState extends ConsumerState<AccountPage> {
       if (mounted) {
         setState(
           () => _syncMessage =
-              '同步完成：上传 ${result.uploaded} 个歌单，下载 ${result.downloaded} 个歌单',
+              '同步完成：上传 ${result.uploaded} 个歌单和 ${result.uploadedLikes} 首喜欢歌曲；'
+              '新增 ${result.downloaded} 个歌单，匹配 ${result.downloadedLikes} 首喜欢歌曲',
         );
       }
     } catch (error) {
