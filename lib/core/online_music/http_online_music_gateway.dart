@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -74,23 +75,76 @@ class HttpOnlineMusicGateway implements OnlineMusicGateway {
     );
   }
 
+  @override
+  Future<String?> fetchLyrics(BackendSession session, OnlineTrack track) async {
+    if (!track.capabilities.contains('lyrics')) return null;
+    final response = await _send(
+      _assetPath(track, 'lyrics'),
+      token: session.token,
+      method: 'GET',
+    );
+    if (response.statusCode == 404) return null;
+    _ensureSuccess(response);
+    final lyrics = _jsonObject(response)['lyrics'] as String?;
+    if (lyrics == null || lyrics.trim().isEmpty) return null;
+    return lyrics;
+  }
+
+  @override
+  Future<Uint8List?> fetchArtwork(
+    BackendSession session,
+    OnlineTrack track,
+  ) async {
+    if (!track.capabilities.contains('artwork') || track.artworkUrl == null) {
+      return null;
+    }
+    final expectedPath = _assetPath(track, 'cover');
+    if (track.artworkUrl != expectedPath) {
+      throw const OnlineMusicException(
+        '服务端返回了无效的封面地址。',
+        code: 'online_music_invalid_response',
+      );
+    }
+    final response = await _send(
+      expectedPath,
+      token: session.token,
+      method: 'GET',
+    );
+    if (response.statusCode == 404) return null;
+    _ensureSuccess(response);
+    final contentType = response.headers['content-type'] ?? '';
+    if (!contentType.toLowerCase().startsWith('image/') ||
+        response.bodyBytes.isEmpty ||
+        response.bodyBytes.length > 2 * 1024 * 1024) {
+      throw const OnlineMusicException(
+        '服务端返回了无效的封面。',
+        code: 'online_music_invalid_response',
+      );
+    }
+    return response.bodyBytes;
+  }
+
   Future<http.Response> _send(
     String path, {
     required String token,
     Map<String, dynamic>? body,
+    String method = 'POST',
   }) async {
     try {
-      return await _client
-          .post(
-            Uri.parse('$_baseUrl$path'),
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: body == null ? null : jsonEncode(body),
-          )
-          .timeout(_timeout);
+      final uri = Uri.parse('$_baseUrl$path');
+      final headers = {
+        'Accept': method == 'GET' ? '*/*' : 'application/json',
+        'Authorization': 'Bearer $token',
+        if (method != 'GET') 'Content-Type': 'application/json',
+      };
+      final request = method == 'GET'
+          ? _client.get(uri, headers: headers)
+          : _client.post(
+              uri,
+              headers: headers,
+              body: body == null ? null : jsonEncode(body),
+            );
+      return await request.timeout(_timeout);
     } on TimeoutException {
       throw const OnlineMusicException(
         '在线音乐服务响应超时，请稍后重试。',
@@ -119,6 +173,7 @@ class HttpOnlineMusicGateway implements OnlineMusicGateway {
       'online_music_upstream_timeout' => '在线音乐来源响应超时，请稍后重试。',
       'online_music_playback_expired' => '播放票据已过期，请重新播放。',
       'online_music_playback_not_found' => '播放票据不存在，请重新播放。',
+      'online_music_asset_too_large' => '在线音乐资源超过大小限制。',
       _ => message,
     };
     throw OnlineMusicException(
@@ -131,4 +186,10 @@ class HttpOnlineMusicGateway implements OnlineMusicGateway {
   static Map<String, dynamic> _jsonObject(http.Response response) =>
       (jsonDecode(utf8.decode(response.bodyBytes)) as Map)
           .cast<String, dynamic>();
+
+  static String _assetPath(OnlineTrack track, String asset) {
+    final provider = Uri.encodeComponent(track.provider);
+    final trackId = Uri.encodeComponent(track.trackId);
+    return '/api/online-music/tracks/$provider/$trackId/$asset';
+  }
 }

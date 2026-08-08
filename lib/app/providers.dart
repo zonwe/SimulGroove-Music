@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/auth/auth_repository.dart';
@@ -10,6 +12,7 @@ import '../core/library/scanner_factory.dart';
 import '../core/online_music/http_online_music_gateway.dart';
 import '../core/online_music/online_music_gateway.dart';
 import '../core/online_music/online_music_repository.dart';
+import '../core/online_music/online_track.dart';
 import '../core/online_music/online_track_playback.dart';
 import '../core/player/music_audio_handler.dart';
 import '../core/theme/app_appearance.dart';
@@ -60,6 +63,11 @@ final onlineTrackPlaybackProvider = Provider<OnlineTrackPlayback>(
     ref.watch(audioHandlerProvider),
   ),
 );
+final onlineTrackArtworkProvider = FutureProvider.autoDispose
+    .family<Uint8List?, OnlineTrack>((ref, track) {
+      if (!track.capabilities.contains('artwork')) return null;
+      return ref.watch(onlineMusicRepositoryProvider).loadArtwork(track);
+    });
 final tracksProvider = StreamProvider<List<Track>>(
   (ref) => ref.watch(databaseProvider).watchTracks(),
 );

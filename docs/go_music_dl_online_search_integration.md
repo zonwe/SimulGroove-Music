@@ -1,6 +1,6 @@
 # go-music-dl 在线搜索接入方案
 
-> 状态：阶段 1 搜索与阶段 2 在线播放已实现；Windows/Android 使用全局播放器，Web 受认证请求头能力限制暂不开放播放
+> 状态：阶段 1 搜索、阶段 2 在线播放与阶段 3 歌词/封面缓存已实现；Windows/Android 使用全局播放器，Web 受认证请求头能力限制暂不开放播放
 > 最后更新：2026-08-08  
 > 适用范围：Flutter 客户端、`backend/Music.Api`、独立运行的 `go-music-dl` sidecar
 
@@ -32,7 +32,7 @@ go-music-dl sidecar（音乐源适配、解析、代理流）
 
 Flutter Music 的在线搜索页已通过 `OnlineMusicGateway`/`AuthRepository` 接入 `Music.Api`，真实账号与后端请求继续沿用既有认证边界。页面不自行管理另一个服务的 URL、Cookie 或 HTTP 客户端。
 
-仓库内的 `go-music-dl` clone 固定于上游提交 `c5a30343f12fafbad83245eee2119768a77be575`，提供 Web、TUI 和桌面模式，并包含跨音乐源搜索、播放、歌词、封面和下载相关能力。它当前的 Web 实现有以下可复用点和限制：
+仓库内的 `go-music-dl` clone 以集成提交 `11bfd8b` 固定本地改动，该提交基于上游 `c5a30343f12fafbad83245eee2119768a77be575`，并包含跨音乐源搜索、播放、歌词、封面和下载相关能力。它当前的 Web 实现有以下可复用点和限制：
 
 - Web 服务默认路由前缀是 `/music`，并提供健康检查。
 - `/music/download?stream=1` 已包含流式代理及 HTTP Range 处理，可作为播放代理实现的参考或底层能力。
@@ -495,6 +495,8 @@ lib/features/online_search/
 交付物：Windows、Android、Web 至少完成与产品边界一致的播放验证。
 
 ### 阶段 3：歌词、封面和缓存
+
+当前状态：sidecar 仅根据短期私有曲目注册表读取歌词和封面，公开 DTO 不包含上游 URL；Music.Api 为两个端点统一执行 Bearer 认证、来源白名单校验、单资源大小限制和独立的 32 MiB 内存缓存。歌词默认缓存 15 分钟，封面默认缓存 6 小时；空资源返回稳定 404，超限或损坏资源不会进入缓存。Flutter 搜索结果按需加载封面，Windows/Android 播放前并行获取歌词与封面并写入同一个 `MusicAudioHandler` 的 `MediaItem`，资源失败时仍允许音频降级播放。
 
 - 接入歌词和封面代理。
 - 增加受控缓存、大小限制和失效策略。

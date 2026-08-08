@@ -10,6 +10,8 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
     private const long MaxResponseBytes = 2 * 1024 * 1024;
 
     private readonly HttpClient _client;
+    private readonly int _maxLyricsBytes;
+    private readonly int _maxArtworkBytes;
 
     public GoMusicDlGateway(HttpClient client, IOptions<OnlineMusicOptions> options)
     {
@@ -23,6 +25,8 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         _client = client;
         _client.BaseAddress = new Uri($"{baseAddress.ToString().TrimEnd('/')}/");
         _client.Timeout = TimeSpan.FromSeconds(Math.Clamp(settings.RequestTimeoutSeconds, 1, 60));
+        _maxLyricsBytes = Math.Clamp(settings.MaxLyricsBytes, 4 * 1024, 2 * 1024 * 1024);
+        _maxArtworkBytes = Math.Clamp(settings.MaxArtworkBytes, 16 * 1024, 8 * 1024 * 1024);
     }
 
     public async Task<OnlineMusicSearchResponse> SearchAsync(
@@ -84,7 +88,9 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
                     (item.Artists ?? []).Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToArray(),
                     item.Album?.Trim() ?? string.Empty,
                     item.DurationMs is >= 0 ? item.DurationMs : null,
-                    null,
+                    string.IsNullOrWhiteSpace(item.ArtworkRef)
+                        ? null
+                        : $"/api/online-music/tracks/{Uri.EscapeDataString(item.Source!.Trim())}/{Uri.EscapeDataString(item.TrackId!.Trim())}/cover",
                     item.Playable,
                     BuildCapabilities(item)))
                 .ToArray();
@@ -235,12 +241,157 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         }
     }
 
+    public async Task<OnlineMusicLyricsAsset> GetLyricsAsync(
+        string source,
+        string trackId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var path = AssetPath(source, trackId, "lyrics");
+            using var response = await _client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            EnsureAssetStatus(response, "lyrics");
+            var bytes = await ReadLimitedBytesAsync(response.Content, _maxLyricsBytes, cancellationToken);
+            var payload = JsonSerializer.Deserialize<SidecarLyricsResponse>(
+                bytes,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (payload is null || string.IsNullOrWhiteSpace(payload.Lyrics))
+            {
+                throw new OnlineMusicGatewayException(
+                    OnlineMusicGatewayFailure.InvalidResponse,
+                    "go-music-dl sidecar returned invalid lyrics.");
+            }
+            return new OnlineMusicLyricsAsset(
+                payload.Lyrics,
+                string.IsNullOrWhiteSpace(payload.Format) ? "text" : payload.Format.Trim());
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.Timeout,
+                "go-music-dl sidecar lyrics request timed out.",
+                exception);
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.Unavailable,
+                "go-music-dl sidecar is unavailable.",
+                exception);
+        }
+        catch (JsonException exception)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.InvalidResponse,
+                "go-music-dl sidecar returned invalid lyrics JSON.",
+                exception);
+        }
+    }
+
+    public async Task<OnlineMusicArtworkAsset> GetArtworkAsync(
+        string source,
+        string trackId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var path = AssetPath(source, trackId, "cover");
+            using var response = await _client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            EnsureAssetStatus(response, "cover");
+            var contentType = response.Content.Headers.ContentType?.MediaType?.Trim();
+            if (string.IsNullOrWhiteSpace(contentType) ||
+                !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new OnlineMusicGatewayException(
+                    OnlineMusicGatewayFailure.InvalidResponse,
+                    "go-music-dl sidecar returned an invalid artwork content type.");
+            }
+            var bytes = await ReadLimitedBytesAsync(response.Content, _maxArtworkBytes, cancellationToken);
+            if (bytes.Length == 0)
+            {
+                throw new OnlineMusicGatewayException(
+                    OnlineMusicGatewayFailure.InvalidResponse,
+                    "go-music-dl sidecar returned empty artwork.");
+            }
+            return new OnlineMusicArtworkAsset(bytes, contentType);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.Timeout,
+                "go-music-dl sidecar artwork request timed out.",
+                exception);
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.Unavailable,
+                "go-music-dl sidecar is unavailable.",
+                exception);
+        }
+    }
+
     private static IReadOnlyList<string> BuildCapabilities(SidecarTrack item)
     {
         var capabilities = new List<string>();
         if (item.Playable) capabilities.Add("playback");
         if (!string.IsNullOrWhiteSpace(item.ArtworkRef)) capabilities.Add("artwork");
+        if (item.LyricsAvailable) capabilities.Add("lyrics");
         return capabilities;
+    }
+
+    private static string AssetPath(string source, string trackId, string asset) =>
+        $"integration/v1/tracks/{Uri.EscapeDataString(source)}/{Uri.EscapeDataString(trackId)}/{asset}";
+
+    private static void EnsureAssetStatus(HttpResponseMessage response, string asset)
+    {
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.NotFound,
+                $"go-music-dl sidecar {asset} was not found.");
+        }
+        if (response.StatusCode == System.Net.HttpStatusCode.RequestEntityTooLarge)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.TooLarge,
+                $"go-music-dl sidecar {asset} exceeded the size limit.");
+        }
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.Unavailable,
+                $"go-music-dl sidecar {asset} returned HTTP {(int)response.StatusCode}.");
+        }
+    }
+
+    private static async Task<byte[]> ReadLimitedBytesAsync(
+        HttpContent content,
+        int maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        if (content.Headers.ContentLength is > 0 && content.Headers.ContentLength > maximumBytes)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.TooLarge,
+                "go-music-dl sidecar asset exceeded the configured size limit.");
+        }
+        await using var input = await content.ReadAsStreamAsync(cancellationToken);
+        using var output = new MemoryStream();
+        var buffer = new byte[16 * 1024];
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+            if (read == 0) break;
+            if (output.Length + read > maximumBytes)
+            {
+                throw new OnlineMusicGatewayException(
+                    OnlineMusicGatewayFailure.TooLarge,
+                    "go-music-dl sidecar asset exceeded the configured size limit.");
+            }
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+        return output.ToArray();
     }
 
     private sealed record SidecarSearchRequest(
@@ -262,6 +413,7 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         string? Album,
         int? DurationMs,
         string? ArtworkRef,
+        bool LyricsAvailable,
         bool Playable);
 
     private sealed record SidecarWarning(string? Source, string? Code);
@@ -270,4 +422,8 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         string? StreamRef,
         DateTimeOffset ExpiresAt,
         string? MimeType);
+
+    private sealed record SidecarLyricsResponse(
+        string? Lyrics,
+        string? Format);
 }

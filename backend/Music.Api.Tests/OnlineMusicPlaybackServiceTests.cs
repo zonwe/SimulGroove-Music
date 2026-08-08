@@ -105,5 +105,15 @@ public sealed class OnlineMusicPlaybackServiceTests
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
         }
+
+        public Task<OnlineMusicLyricsAsset> GetLyricsAsync(
+            string source,
+            string trackId,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<OnlineMusicArtworkAsset> GetArtworkAsync(
+            string source,
+            string trackId,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }

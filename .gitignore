@@ -54,6 +54,9 @@ backend/**/*.trx
 # Music.Api runtime SQLite database and sidecar files
 backend/Music.Api/storage/music.db*
 
+# The go-music-dl integration is maintained as a separate pinned clone.
+/go-music-dl/
+
 # Symbolication related
 app.*.symbols
 

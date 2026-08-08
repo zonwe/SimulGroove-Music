@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../auth/auth_repository.dart';
 import '../auth/backend_gateway.dart';
 import 'online_music_error.dart';
@@ -7,6 +9,8 @@ import 'online_track.dart';
 abstract interface class OnlineMusicSearchRepository {
   Future<OnlineMusicSearchResult> search(String query);
   Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track);
+  Future<String?> loadLyrics(OnlineTrack track);
+  Future<Uint8List?> loadArtwork(OnlineTrack track);
 }
 
 class AuthenticatedOnlineMusicRepository
@@ -44,6 +48,32 @@ class AuthenticatedOnlineMusicRepository
       if (!error.isUnauthorized) rethrow;
       session = await _requireSession(forceRefresh: true);
       return _gateway.requestPlayback(session, track);
+    }
+  }
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async {
+    if (!track.capabilities.contains('lyrics')) return null;
+    var session = await _requireSession();
+    try {
+      return await _gateway.fetchLyrics(session, track);
+    } on OnlineMusicException catch (error) {
+      if (!error.isUnauthorized) rethrow;
+      session = await _requireSession(forceRefresh: true);
+      return _gateway.fetchLyrics(session, track);
+    }
+  }
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async {
+    if (!track.capabilities.contains('artwork')) return null;
+    var session = await _requireSession();
+    try {
+      return await _gateway.fetchArtwork(session, track);
+    } on OnlineMusicException catch (error) {
+      if (!error.isUnauthorized) rethrow;
+      session = await _requireSession(forceRefresh: true);
+      return _gateway.fetchArtwork(session, track);
     }
   }
 

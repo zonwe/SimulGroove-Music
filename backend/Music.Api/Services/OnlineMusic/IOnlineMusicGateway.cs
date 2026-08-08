@@ -13,6 +13,14 @@ public sealed record OnlineMusicResolvedStream(
     DateTimeOffset ExpiresAt,
     string? MimeType);
 
+public sealed record OnlineMusicLyricsAsset(
+    string Lyrics,
+    string Format);
+
+public sealed record OnlineMusicArtworkAsset(
+    byte[] Bytes,
+    string ContentType);
+
 public sealed class OnlineMusicStreamResponse(
     HttpResponseMessage response,
     Stream content) : IAsyncDisposable
@@ -34,10 +42,12 @@ public sealed class OnlineMusicStreamResponse(
 
 public enum OnlineMusicGatewayFailure
 {
+    NotFound,
     Unavailable,
     Timeout,
     InvalidResponse,
-    InvalidRange
+    InvalidRange,
+    TooLarge
 }
 
 public sealed class OnlineMusicGatewayException(
@@ -62,5 +72,15 @@ public interface IOnlineMusicGateway
     Task<OnlineMusicStreamResponse> OpenStreamAsync(
         string streamRef,
         string? range,
+        CancellationToken cancellationToken);
+
+    Task<OnlineMusicLyricsAsset> GetLyricsAsync(
+        string source,
+        string trackId,
+        CancellationToken cancellationToken);
+
+    Task<OnlineMusicArtworkAsset> GetArtworkAsync(
+        string source,
+        string trackId,
         CancellationToken cancellationToken);
 }

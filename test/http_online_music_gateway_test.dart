@@ -133,4 +133,45 @@ void main() {
     expect(source.headers['Authorization'], 'Bearer access-token');
     expect(source.mimeType, 'audio/mpeg');
   });
+
+  test('歌词和封面只通过受控 Bearer 路径读取', () async {
+    final requests = <String>[];
+    final gateway = HttpOnlineMusicGateway(
+      baseUrl: 'http://music-api.test:5080',
+      client: MockClient((request) async {
+        requests.add(request.url.path);
+        expect(request.method, 'GET');
+        expect(request.headers['authorization'], 'Bearer access-token');
+        if (request.url.path.endsWith('/lyrics')) {
+          return http.Response(
+            jsonEncode({'lyrics': '[00:01.00]Line', 'format': 'lrc'}),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response.bytes(
+          [1, 2, 3],
+          200,
+          headers: {'content-type': 'image/jpeg'},
+        );
+      }),
+    );
+    const track = OnlineTrack(
+      provider: 'source-a',
+      trackId: 'track-1',
+      title: 'Song',
+      artists: ['Artist'],
+      album: 'Album',
+      artworkUrl: '/api/online-music/tracks/source-a/track-1/cover',
+      playable: true,
+      capabilities: {'playback', 'lyrics', 'artwork'},
+    );
+
+    expect(await gateway.fetchLyrics(session, track), '[00:01.00]Line');
+    expect(await gateway.fetchArtwork(session, track), [1, 2, 3]);
+    expect(requests, [
+      '/api/online-music/tracks/source-a/track-1/lyrics',
+      '/api/online-music/tracks/source-a/track-1/cover',
+    ]);
+  });
 }

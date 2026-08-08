@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_music/app/providers.dart';
 import 'package:flutter_music/core/online_music/online_music_repository.dart';
@@ -171,6 +173,12 @@ class _ResultRepository implements OnlineMusicSearchRepository {
   @override
   Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
       throw UnimplementedError();
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async => null;
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
 }
 
 class _ErrorRepository implements OnlineMusicSearchRepository {
@@ -183,6 +191,12 @@ class _ErrorRepository implements OnlineMusicSearchRepository {
   @override
   Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
       throw UnimplementedError();
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async => null;
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
 }
 
 class _FakePlayback implements OnlineTrackPlayback {

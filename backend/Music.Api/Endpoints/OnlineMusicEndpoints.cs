@@ -139,6 +139,49 @@ public static class OnlineMusicEndpoints
             }
         });
 
+        endpoints.MapGet("/api/online-music/tracks/{source}/{trackId}/lyrics", async (
+            string source,
+            string trackId,
+            HttpContext httpContext,
+            IAuthService auth,
+            IOnlineMusicAssetService assets,
+            CancellationToken cancellationToken) =>
+        {
+            if (auth.Authenticate(httpContext.Request.ReadBearerToken()) is null) return Results.Unauthorized();
+
+            try
+            {
+                return Results.Ok(await assets.GetLyricsAsync(source, trackId, cancellationToken));
+            }
+            catch (OnlineMusicAssetException exception)
+            {
+                return AssetProblem(exception);
+            }
+        });
+
+        endpoints.MapGet("/api/online-music/tracks/{source}/{trackId}/cover", async (
+            string source,
+            string trackId,
+            HttpContext httpContext,
+            IAuthService auth,
+            IOnlineMusicAssetService assets,
+            CancellationToken cancellationToken) =>
+        {
+            if (auth.Authenticate(httpContext.Request.ReadBearerToken()) is null) return Results.Unauthorized();
+
+            try
+            {
+                return new OnlineMusicArtworkResult(await assets.GetArtworkAsync(
+                    source,
+                    trackId,
+                    cancellationToken));
+            }
+            catch (OnlineMusicAssetException exception)
+            {
+                return AssetProblem(exception);
+            }
+        });
+
         return endpoints;
     }
 
@@ -177,6 +220,53 @@ public static class OnlineMusicEndpoints
                 new ProblemResponse("online_music_source_unavailable", "在线音乐服务暂时不可用。"),
                 statusCode: StatusCodes.Status502BadGateway)
         };
+
+    private static IResult AssetProblem(OnlineMusicAssetException exception) =>
+        exception.Failure switch
+        {
+            OnlineMusicAssetFailure.InvalidTrack => Results.BadRequest(
+                new ProblemResponse("online_music_invalid_request", "歌曲来源或标识无效。")),
+            OnlineMusicAssetFailure.NotFound => Results.Json(
+                new ProblemResponse("online_music_asset_not_found", "该歌曲暂无可用资源。"),
+                statusCode: StatusCodes.Status404NotFound),
+            OnlineMusicAssetFailure.TooLarge => Results.Json(
+                new ProblemResponse("online_music_asset_too_large", "在线音乐资源超过大小限制。"),
+                statusCode: StatusCodes.Status502BadGateway),
+            OnlineMusicAssetFailure.Timeout => Results.Json(
+                new ProblemResponse("online_music_upstream_timeout", "在线音乐来源响应超时，请稍后重试。"),
+                statusCode: StatusCodes.Status504GatewayTimeout),
+            OnlineMusicAssetFailure.Disabled => Results.Json(
+                new ProblemResponse("online_music_source_unavailable", "在线音乐服务暂时不可用。"),
+                statusCode: StatusCodes.Status503ServiceUnavailable),
+            _ => Results.Json(
+                new ProblemResponse("online_music_source_unavailable", "在线音乐资源暂时不可用。"),
+                statusCode: StatusCodes.Status502BadGateway)
+        };
+
+    private sealed class OnlineMusicArtworkResult(OnlineMusicArtwork artwork) : IResult
+    {
+        public async Task ExecuteAsync(HttpContext httpContext)
+        {
+            httpContext.Response.Headers.CacheControl = "private, max-age=3600";
+            httpContext.Response.Headers.ETag = artwork.ETag;
+            httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            if (string.Equals(
+                httpContext.Request.Headers.IfNoneMatch.ToString(),
+                artwork.ETag,
+                StringComparison.Ordinal))
+            {
+                httpContext.Response.StatusCode = StatusCodes.Status304NotModified;
+                return;
+            }
+
+            httpContext.Response.StatusCode = StatusCodes.Status200OK;
+            httpContext.Response.ContentType = artwork.ContentType;
+            httpContext.Response.ContentLength = artwork.Bytes.Length;
+            await httpContext.Response.Body.WriteAsync(
+                artwork.Bytes,
+                httpContext.RequestAborted);
+        }
+    }
 
     private sealed class OnlineMusicStreamResult(OnlineMusicStreamResponse stream) : IResult
     {

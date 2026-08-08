@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_music/core/online_music/online_music_repository.dart';
 import 'package:flutter_music/core/online_music/online_track.dart';
@@ -104,6 +105,12 @@ class _QueuedRepository implements OnlineMusicSearchRepository {
   @override
   Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
       throw UnimplementedError();
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async => null;
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
 }
 
 class _DeferredRepository implements OnlineMusicSearchRepository {
@@ -122,6 +129,12 @@ class _DeferredRepository implements OnlineMusicSearchRepository {
   @override
   Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
       throw UnimplementedError();
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async => null;
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
 }
 
 class _FailingRepository implements OnlineMusicSearchRepository {
@@ -132,4 +145,10 @@ class _FailingRepository implements OnlineMusicSearchRepository {
   @override
   Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
       throw UnimplementedError();
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async => null;
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
 }

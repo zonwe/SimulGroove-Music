@@ -1,8 +1,12 @@
-import 'package:flutter/material.dart';
+import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../app/providers.dart';
 import '../../core/online_music/online_track.dart';
 
-class OnlineTrackTile extends StatelessWidget {
+class OnlineTrackTile extends ConsumerWidget {
   const OnlineTrackTile({
     required this.track,
     required this.playbackSupported,
@@ -17,7 +21,7 @@ class OnlineTrackTile extends StatelessWidget {
   final VoidCallback onPlay;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
     final artists = track.artists.isEmpty ? '未知艺术家' : track.artists.join('、');
     final details = [
@@ -34,16 +38,12 @@ class OnlineTrackTile extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  Icons.music_note_rounded,
-                  color: colorScheme.onSecondaryContainer,
+              ExcludeSemantics(
+                child: _TrackArtwork(
+                  artwork: track.capabilities.contains('artwork')
+                      ? ref.watch(onlineTrackArtworkProvider(track))
+                      : null,
+                  title: track.title,
                 ),
               ),
               const SizedBox(width: 14),
@@ -134,5 +134,57 @@ class OnlineTrackTile extends StatelessWidget {
     final minutes = duration.inMinutes;
     final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
+  }
+}
+
+class _TrackArtwork extends StatelessWidget {
+  const _TrackArtwork({required this.artwork, required this.title});
+
+  final AsyncValue<Uint8List?>? artwork;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final fallback = ColoredBox(
+      color: colorScheme.secondaryContainer,
+      child: Icon(
+        artwork?.hasError == true
+            ? Icons.broken_image_outlined
+            : Icons.music_note_rounded,
+        color: colorScheme.onSecondaryContainer,
+      ),
+    );
+    final child = artwork?.when(
+      data: (bytes) => bytes == null
+          ? fallback
+          : Image.memory(
+              bytes,
+              fit: BoxFit.cover,
+              cacheWidth: 96,
+              cacheHeight: 96,
+              gaplessPlayback: true,
+              semanticLabel: '$title 封面',
+              errorBuilder: (_, _, _) => fallback,
+            ),
+      loading: () => ColoredBox(
+        color: colorScheme.secondaryContainer,
+        child: Center(
+          child: SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: colorScheme.onSecondaryContainer,
+            ),
+          ),
+        ),
+      ),
+      error: (_, _) => fallback,
+    );
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox.square(dimension: 48, child: child ?? fallback),
+    );
   }
 }

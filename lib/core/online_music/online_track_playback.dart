@@ -24,6 +24,10 @@ class DefaultOnlineTrackPlayback implements OnlineTrackPlayback {
       throw UnsupportedError('Web 暂不支持需要认证请求头的在线播放。');
     }
     final source = await _repository.preparePlayback(track);
+    final (lyrics, artwork) = await (
+      _optionalLyrics(track),
+      _optionalArtwork(track),
+    ).wait;
     await _audioHandler.playOnlineTrack(
       id: track.id,
       title: track.title,
@@ -34,6 +38,24 @@ class DefaultOnlineTrackPlayback implements OnlineTrackPlayback {
       trackId: track.trackId,
       uri: source.url,
       headers: source.headers,
+      lyrics: lyrics,
+      artwork: artwork,
     );
+  }
+
+  Future<String?> _optionalLyrics(OnlineTrack track) async {
+    try {
+      return await _repository.loadLyrics(track);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Uint8List?> _optionalArtwork(OnlineTrack track) async {
+    try {
+      return await _repository.loadArtwork(track);
+    } catch (_) {
+      return null;
+    }
   }
 }

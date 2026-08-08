@@ -40,6 +40,11 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `OnlineMusic:RequestsPerMinute` | `30` | 每账号和每 IP 的每分钟搜索上限 |
 | `OnlineMusic:MaxResults` | `50` | 单次搜索允许的最大结果数，服务端上限 100 |
 | `OnlineMusic:PlaybackTicketSeconds` | `300` | 账号绑定播放票据有效秒数，运行时限制为 60–300 |
+| `OnlineMusic:LyricsCacheSeconds` | `900` | 歌词缓存秒数，运行时限制为 30–86400 |
+| `OnlineMusic:ArtworkCacheSeconds` | `21600` | 封面缓存秒数，运行时限制为 60–86400 |
+| `OnlineMusic:AssetCacheSizeBytes` | `33554432` | 歌词与封面的独立内存缓存总容量 |
+| `OnlineMusic:MaxLyricsBytes` | `524288` | 单份歌词最大字节数，运行时限制为 4 KiB–2 MiB |
+| `OnlineMusic:MaxArtworkBytes` | `2097152` | 单张封面最大字节数，运行时限制为 16 KiB–8 MiB |
 
 OpenAPI：`GET /openapi.json`。健康检查：`GET /health`。
 
@@ -309,7 +314,7 @@ JWT 签名错误、受众不匹配或已过期时返回 `401`。
 
 在线搜索采用 `Flutter -> Music.Api -> go-music-dl sidecar` 的 BFF 边界。除健康检查外，公开接口需要 Bearer Access Token。Flutter 不接触 sidecar 地址、第三方 Cookie、签名参数或原始播放 URL。
 
-部署环境必须显式审核 `OnlineMusic:Enabled`、私有 sidecar 地址和来源白名单。仓库内 `go-music-dl` clone 基于上游提交 `c5a30343f12fafbad83245eee2119768a77be575` 实现了 JSON 集成契约；本地启动命令：
+部署环境必须显式审核 `OnlineMusic:Enabled`、私有 sidecar 地址和来源白名单。仓库内 `go-music-dl` clone 的集成提交 `c3474b2` 基于上游提交 `c5a30343f12fafbad83245eee2119768a77be575` 实现了 JSON 集成契约；本地启动命令：
 
 ```powershell
 go -C go-music-dl run ./cmd/music-dl integration --host 127.0.0.1 --port 8080
@@ -370,7 +375,21 @@ Development 配置默认启用 `netease`、`kugou`、`kuwo`。生产部署需要
 
 请求必须继续携带签发账号的 Bearer Token，可携带 `Range: bytes=...`。服务端返回 `200` 或 `206`，只转发 `Content-Type`、`Content-Length`、`Accept-Ranges`、`Content-Range`、`ETag`。票据过期返回 `410 online_music_playback_expired`，不存在或属于其他账号统一返回 `404 online_music_playback_not_found`，无效或越界 Range 返回 `416 online_music_invalid_range`。
 
-票据允许在有效期内发起多个 Range 请求；已经建立的流不会因票据随后到期而被主动截断。过期后的新请求必须重新获取票据。Flutter 的 Windows/Android 播放使用同一个 `MusicAudioHandler`；Web 音频元素无法可靠附加 Bearer 请求头，因此当前不显示可用播放操作。歌词和封面代理留待阶段 3。
+票据允许在有效期内发起多个 Range 请求；已经建立的流不会因票据随后到期而被主动截断。过期后的新请求必须重新获取票据。Flutter 的 Windows/Android 播放使用同一个 `MusicAudioHandler`；Web 音频元素无法可靠附加 Bearer 请求头，因此当前不显示可用播放操作。
+
+### 8.5 获取歌词
+
+`GET /api/online-music/tracks/{source}/{trackId}/lyrics`
+
+请求必须携带 Bearer Token。成功返回 `{ "lyrics": "...", "format": "lrc" }`，Flutter 在播放前获取并交给现有 LRC 解析与同步歌词界面。曲目未注册、来源没有歌词或歌词为空时返回 `404 online_music_asset_not_found`；超时返回 `504`。单份歌词默认最多 512 KiB。
+
+### 8.6 获取封面
+
+`GET /api/online-music/tracks/{source}/{trackId}/cover`
+
+请求必须携带 Bearer Token。成功返回经过 MIME 校验的图片字节，并附带私有缓存策略、`ETag` 和 `X-Content-Type-Options: nosniff`；客户端可用 `If-None-Match` 获取 `304`。无封面返回 `404 online_music_asset_not_found`，损坏、超限或上游失败返回稳定的 `502`。单张封面默认最多 2 MiB。
+
+歌词与封面共享一个独立、按字节计量的内存缓存，总容量默认 32 MiB；歌词默认缓存 15 分钟，封面默认缓存 6 小时。缓存不保存第三方 Cookie、原始封面 URL 或 sidecar 私有字段。
 
 ## Flutter 客户端接入状态
 

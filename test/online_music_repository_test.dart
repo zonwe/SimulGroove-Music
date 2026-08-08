@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_music/core/auth/auth_repository.dart';
 import 'package:flutter_music/core/auth/backend_gateway.dart';
 import 'package:flutter_music/core/online_music/online_music_error.dart';
@@ -118,4 +120,16 @@ class _RetryGateway implements OnlineMusicGateway {
       headers: {'Authorization': 'Bearer ${session.token}'},
     );
   }
+
+  @override
+  Future<String?> fetchLyrics(
+    BackendSession session,
+    OnlineTrack track,
+  ) async => null;
+
+  @override
+  Future<Uint8List?> fetchArtwork(
+    BackendSession session,
+    OnlineTrack track,
+  ) async => null;
 }

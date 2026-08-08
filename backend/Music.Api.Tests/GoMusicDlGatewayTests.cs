@@ -29,6 +29,7 @@ public sealed class GoMusicDlGatewayTests
                     "album": "Album",
                     "durationMs": 123000,
                     "artworkRef": "private-cover-reference",
+                    "lyricsAvailable": true,
                     "playable": true
                   }],
                   "warnings": [{"source":"source-b","code":"upstream_timeout"}],
@@ -51,8 +52,12 @@ public sealed class GoMusicDlGatewayTests
         Assert.AreEqual("Song", body.RootElement.GetProperty("query").GetString());
         Assert.AreEqual(2, body.RootElement.GetProperty("sources").GetArrayLength());
         Assert.AreEqual("source-a", result.Items.Single().Provider);
-        Assert.IsNull(result.Items.Single().ArtworkUrl);
+        Assert.AreEqual(
+            "/api/online-music/tracks/source-a/track-1/cover",
+            result.Items.Single().ArtworkUrl);
         CollectionAssert.Contains(result.Items.Single().Capabilities.ToArray(), "playback");
+        CollectionAssert.Contains(result.Items.Single().Capabilities.ToArray(), "artwork");
+        CollectionAssert.Contains(result.Items.Single().Capabilities.ToArray(), "lyrics");
         Assert.IsTrue(result.Partial);
         Assert.AreEqual("online_music_source_unavailable", result.Warnings.Single().Code);
     }
@@ -150,6 +155,54 @@ public sealed class GoMusicDlGatewayTests
             gateway.OpenStreamAsync("private-token", "bytes=999-1000", CancellationToken.None));
 
         Assert.AreEqual(OnlineMusicGatewayFailure.InvalidRange, exception.Failure);
+    }
+
+    [TestMethod]
+    public async Task AssetsUseTrackIdentityAndEnforceContentContract()
+    {
+        var paths = new List<string>();
+        var gateway = CreateGateway(new StubHttpMessageHandler(request =>
+        {
+            paths.Add(request.RequestUri!.AbsolutePath);
+            if (request.RequestUri.AbsolutePath.EndsWith("/lyrics", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """{"lyrics":"[00:01.00]Line","format":"lrc"}""",
+                        Encoding.UTF8,
+                        "application/json")
+                });
+            }
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent("image"u8.ToArray())
+            };
+            response.Content.Headers.ContentType = new("image/jpeg");
+            return Task.FromResult(response);
+        }));
+
+        var lyrics = await gateway.GetLyricsAsync("source-a", "track 1", CancellationToken.None);
+        var artwork = await gateway.GetArtworkAsync("source-a", "track 1", CancellationToken.None);
+
+        Assert.AreEqual("[00:01.00]Line", lyrics.Lyrics);
+        Assert.AreEqual("lrc", lyrics.Format);
+        Assert.AreEqual("image/jpeg", artwork.ContentType);
+        Assert.AreEqual("image", Encoding.UTF8.GetString(artwork.Bytes));
+        CollectionAssert.Contains(paths, "/integration/v1/tracks/source-a/track%201/lyrics");
+        CollectionAssert.Contains(paths, "/integration/v1/tracks/source-a/track%201/cover");
+    }
+
+    [TestMethod]
+    public async Task MissingAssetMapsToStableNotFoundFailure()
+    {
+        var gateway = CreateGateway(new StubHttpMessageHandler(_ => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.NotFound))));
+
+        var exception = await Assert.ThrowsAsync<OnlineMusicGatewayException>(() =>
+            gateway.GetArtworkAsync("source-a", "missing", CancellationToken.None));
+
+        Assert.AreEqual(OnlineMusicGatewayFailure.NotFound, exception.Failure);
     }
 
     private static GoMusicDlGateway CreateGateway(HttpMessageHandler handler) => new(

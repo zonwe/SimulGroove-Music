@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../auth/backend_gateway.dart';
 import 'online_track.dart';
 
@@ -14,4 +16,8 @@ abstract interface class OnlineMusicGateway {
     BackendSession session,
     OnlineTrack track,
   );
+
+  Future<String?> fetchLyrics(BackendSession session, OnlineTrack track);
+
+  Future<Uint8List?> fetchArtwork(BackendSession session, OnlineTrack track);
 }

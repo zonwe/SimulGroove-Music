@@ -67,6 +67,11 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `OnlineMusic:AllowedSources` | `[]` | sidecar 规范来源 ID 白名单 |
 | `OnlineMusic:RequestsPerMinute` | `30` | 每账号和每 IP 的搜索限额 |
 | `OnlineMusic:PlaybackTicketSeconds` | `300` | 账号绑定播放票据的有效秒数，限制为 60–300 |
+| `OnlineMusic:LyricsCacheSeconds` | `900` | 歌词缓存秒数，运行时限制为 30–86400 |
+| `OnlineMusic:ArtworkCacheSeconds` | `21600` | 封面缓存秒数，运行时限制为 60–86400 |
+| `OnlineMusic:AssetCacheSizeBytes` | `33554432` | 歌词与封面的独立内存缓存总容量 |
+| `OnlineMusic:MaxLyricsBytes` | `524288` | 单份歌词最大字节数 |
+| `OnlineMusic:MaxArtworkBytes` | `2097152` | 单张封面最大字节数 |
 
 ## API 概览
 
@@ -81,6 +86,7 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 - `GET /api/audit-logs`：分页查询当前账号的审计日志。
 - `GET /api/online-music/sources`、`POST /api/online-music/search`：查询允许来源和执行跨来源搜索。
 - `POST /api/online-music/tracks/{source}/{trackId}/playback`、`GET /api/online-music/playback/{ticket}`：签发账号绑定短期票据并转发支持 Range 的在线音频流。
+- `GET /api/online-music/tracks/{source}/{trackId}/lyrics`、`GET /api/online-music/tracks/{source}/{trackId}/cover`：读取受控歌词与封面代理；空资源返回稳定 404。
 
 服务器扫描管理页位于 `/admin/scanning`，登录页位于 `/admin/login`。Flutter 客户端不包含服务器扫描管理入口。
 
@@ -95,7 +101,7 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `Music.Api/Services/Auth/` | PBKDF2 密码哈希、JWT 和 Refresh Token 轮换 |
 | `Music.Api/Services/Scanning/` | 目录扫描和定时后台任务 |
 | `Music.Api/Services/Administration/` | 管理员配置凭据校验与授权常量 |
-| `Music.Api/Services/OnlineMusic/` | sidecar JSON 网关、搜索缓存、限流、播放票据和稳定错误映射 |
+| `Music.Api/Services/OnlineMusic/` | sidecar JSON 网关、搜索/资源缓存、限流、播放票据和稳定错误映射 |
 | `Music.Api/Pages/Admin/` | 管理员登录与服务器扫描 Razor Pages |
 | `Music.Api/Data/` | SQLite 建表、歌单、扫描源和审计日志存取 |
 | `Music.Api/Models/` | API 请求/响应 DTO |

@@ -18,7 +18,7 @@ Flutter Music 是一个面向 Android、Windows 和 Web 的私人本地音乐播
 
 - Flutter 账号页通过 `HttpBackendGateway` 连接真实后端，令牌由安全存储保存；修改认证时必须继续保持刷新轮换和 401 单次重试。
 - 服务器扫描管理位于 `backend/Music.Api/Pages/Admin/` Razor Pages，不放入 Flutter 客户端；扫描的是后端机器目录，结果目前只供查看，尚不能直接播放。
-- 在线搜索与 Windows/Android 在线播放已通过 `Music.Api` 接入受控 sidecar 契约；播放使用账号绑定短期票据与 Range 代理，Web 因认证请求头限制暂不开放在线播放；听歌识曲仍是占位页。
+- 在线搜索、歌词/封面与 Windows/Android 在线播放已通过 `Music.Api` 接入受控 sidecar 契约；播放使用账号绑定短期票据与 Range 代理，Web 因认证请求头限制暂不开放在线播放；听歌识曲仍是占位页。
 - Web 本地文件扫描和播放未实现。
 - `ios/`、`macos/`、`linux/` 保留 Flutter 平台脚手架，但不是 README 声明的主要交付目标。涉及这些平台时必须单独验证，不能根据 Android/Windows 的结果推断可用。
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart' as ja;
@@ -76,19 +77,25 @@ class MusicAudioHandler extends BaseAudioHandler
     required String trackId,
     required Uri uri,
     required Map<String, String> headers,
+    String? lyrics,
+    Uint8List? artwork,
     int? durationMs,
   }) async {
+    final artUri = await cacheArtwork(id, artwork);
     final item = MediaItem(
       id: 'online:$id',
       title: title,
       artist: artist.isEmpty ? '未知艺术家' : artist,
       album: album,
       duration: durationMs == null ? null : Duration(milliseconds: durationMs),
+      artUri: artUri,
       extras: {
         'uri': uri.toString(),
         'sourceType': 'online',
         'provider': provider,
         'trackId': trackId,
+        'lyrics': lyrics,
+        'artwork': artwork,
       },
     );
     final source = ja.AudioSource.uri(uri, headers: headers, tag: item);

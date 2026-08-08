@@ -21,6 +21,7 @@ public sealed class OnlineMusicEndpointsTests
         services.AddSingleton<IOnlineMusicSearchService>(_ => null!);
         services.AddSingleton<IOnlineMusicRequestLimiter>(_ => null!);
         services.AddSingleton<IOnlineMusicPlaybackService>(_ => null!);
+        services.AddSingleton<IOnlineMusicAssetService>(_ => null!);
         var endpoints = new TestEndpointRouteBuilder(services.BuildServiceProvider());
 
         endpoints.MapOnlineMusicEndpoints();
@@ -36,6 +37,14 @@ public sealed class OnlineMusicEndpointsTests
         Assert.IsTrue(HasRoute(
             routes,
             "/api/online-music/playback/{ticket}",
+            HttpMethods.Get));
+        Assert.IsTrue(HasRoute(
+            routes,
+            "/api/online-music/tracks/{source}/{trackId}/lyrics",
+            HttpMethods.Get));
+        Assert.IsTrue(HasRoute(
+            routes,
+            "/api/online-music/tracks/{source}/{trackId}/cover",
             HttpMethods.Get));
     }
 

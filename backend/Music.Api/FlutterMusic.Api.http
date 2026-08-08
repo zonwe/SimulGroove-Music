@@ -153,6 +153,16 @@ GET {{baseUrl}}{{online_playback_url}}
 Authorization: Bearer {{access_token}}
 Range: bytes=0-1048575
 
+### Get online lyrics
+GET {{baseUrl}}/api/online-music/tracks/netease/496869422/lyrics
+Authorization: Bearer {{access_token}}
+Accept: application/json
+
+### Get online artwork
+GET {{baseUrl}}/api/online-music/tracks/netease/496869422/cover
+Authorization: Bearer {{access_token}}
+Accept: image/*
+
 ### Logout
 POST {{baseUrl}}/api/auth/logout
 Authorization: Bearer {{access_token}}

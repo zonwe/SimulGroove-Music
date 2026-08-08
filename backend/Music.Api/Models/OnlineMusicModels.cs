@@ -36,3 +36,7 @@ public sealed record OnlineMusicPlaybackResponse(
     string PlaybackUrl,
     DateTimeOffset ExpiresAt,
     string? MimeType);
+
+public sealed record OnlineMusicLyricsResponse(
+    string Lyrics,
+    string Format);

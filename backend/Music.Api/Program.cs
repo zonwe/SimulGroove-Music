@@ -32,6 +32,7 @@ builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IOnlineMusicRequestLimiter, OnlineMusicRequestLimiter>();
 builder.Services.AddSingleton<IOnlineMusicSearchService, OnlineMusicSearchService>();
 builder.Services.AddSingleton<IOnlineMusicPlaybackService, OnlineMusicPlaybackService>();
+builder.Services.AddSingleton<IOnlineMusicAssetService, OnlineMusicAssetService>();
 builder.Services.AddHttpClient<IOnlineMusicGateway, GoMusicDlGateway>();
 builder.Services.AddHostedService<ScheduledMusicScanWorker>();
 builder.Services
@@ -72,6 +73,7 @@ _ = app.Services.GetRequiredService<IScanSourceStore>();
 _ = app.Services.GetRequiredService<IAuditLogStore>();
 _ = app.Services.GetRequiredService<IOnlineMusicSearchService>();
 _ = app.Services.GetRequiredService<IOnlineMusicPlaybackService>();
+_ = app.Services.GetRequiredService<IOnlineMusicAssetService>();
 app.UseCors();
 app.UseStaticFiles();
 app.Use(async (context, next) =>

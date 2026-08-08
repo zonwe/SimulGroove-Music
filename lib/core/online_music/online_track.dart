@@ -38,6 +38,16 @@ class OnlineTrack {
         .whereType<String>()
         .toSet(),
   );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OnlineTrack &&
+          provider == other.provider &&
+          trackId == other.trackId;
+
+  @override
+  int get hashCode => Object.hash(provider, trackId);
 }
 
 class OnlineMusicWarning {

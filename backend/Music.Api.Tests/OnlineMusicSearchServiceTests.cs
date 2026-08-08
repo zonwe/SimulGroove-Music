@@ -80,5 +80,15 @@ public sealed class OnlineMusicSearchServiceTests
             string streamRef,
             string? range,
             CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<OnlineMusicLyricsAsset> GetLyricsAsync(
+            string source,
+            string trackId,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<OnlineMusicArtworkAsset> GetArtworkAsync(
+            string source,
+            string trackId,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }
