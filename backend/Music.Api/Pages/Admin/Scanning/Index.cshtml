@@ -1,0 +1,203 @@
+@page "/admin/scanning"
+@model Music.Api.Pages.Admin.Scanning.IndexModel
+@{
+    ViewData["Title"] = "服务器本地扫描";
+    var totalTracks = Model.Sources.Sum(source => source.TrackCount);
+    var enabledSources = Model.Sources.Count(source => source.Enabled);
+    var failedSources = Model.Sources.Count(source => source.Status == "failed");
+}
+
+<section class="console" aria-labelledby="console-title">
+    <div class="hero-row">
+        <div>
+            <span class="eyebrow">LIBRARY OPERATIONS</span>
+            <h1 id="console-title">服务器音乐目录</h1>
+            <p>管理后端机器可访问的绝对路径。扫描只建立索引，不会把音频复制到数据库。</p>
+        </div>
+        <a class="button button-secondary" asp-page="/Admin/Scanning/Index">刷新状态</a>
+    </div>
+
+    <div class="notice" role="note">
+        <strong>路径属于后端服务器</strong>
+        <span>例如 Music.Api 运行在 Linux 服务器上时应填写 <code>/srv/music</code>，而不是浏览器电脑上的 <code>D:\Music</code>。</span>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div class="flash flash-success" role="status">@Model.SuccessMessage</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="flash flash-error" role="alert">@Model.ErrorMessage</div>
+    }
+
+    <section class="metrics" aria-label="扫描概览">
+        <article class="metric-card"><span>扫描路径</span><strong>@Model.Sources.Count</strong></article>
+        <article class="metric-card"><span>已索引曲目</span><strong>@totalTracks</strong></article>
+        <article class="metric-card"><span>运行中的计划</span><strong>@enabledSources</strong></article>
+        <article class="metric-card metric-card-alert"><span>需要处理</span><strong>@failedSources</strong></article>
+    </section>
+
+    <div class="workspace-grid">
+        <section class="panel create-panel" aria-labelledby="create-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">NEW SOURCE</span>
+                    <h2 id="create-title">添加扫描路径</h2>
+                </div>
+            </div>
+            <form method="post" asp-page-handler="Create">
+                <div asp-validation-summary="ModelOnly" class="validation-summary" role="alert"></div>
+                <div class="field">
+                    <label asp-for="NewSource.Path"></label>
+                    <input asp-for="NewSource.Path" placeholder="F:\Music 或 /srv/music" aria-describedby="path-help" />
+                    <small id="path-help">路径必须存在，并位于后端配置的 Scanning:AllowedRoots 范围内。</small>
+                    <span asp-validation-for="NewSource.Path" class="validation-message"></span>
+                </div>
+                <div class="field">
+                    <label asp-for="NewSource.IntervalMinutes"></label>
+                    <select asp-for="NewSource.IntervalMinutes">
+                        @foreach (var interval in Music.Api.Pages.Admin.Scanning.IndexModel.Intervals)
+                        {
+                            <option value="@interval">@Music.Api.Pages.Admin.Scanning.IndexModel.IntervalLabel(interval)</option>
+                        }
+                    </select>
+                    <span asp-validation-for="NewSource.IntervalMinutes" class="validation-message"></span>
+                </div>
+                <label class="check-row" asp-for="NewSource.Enabled">
+                    <input asp-for="NewSource.Enabled" />
+                    <span>
+                        <strong>启用定时扫描</strong>
+                        <small>添加后仍会立即执行一次首次扫描。</small>
+                    </span>
+                </label>
+                <button class="button button-primary button-wide" type="submit">添加并开始扫描</button>
+            </form>
+        </section>
+
+        <section class="sources-section" aria-labelledby="sources-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">CONFIGURED SOURCES</span>
+                    <h2 id="sources-title">已配置路径</h2>
+                </div>
+            </div>
+
+            @if (Model.Sources.Count == 0)
+            {
+                <div class="empty-state">
+                    <strong>还没有扫描路径</strong>
+                    <span>从左侧添加后端机器上的音乐目录。</span>
+                </div>
+            }
+            else
+            {
+                <div class="source-list">
+                    @foreach (var source in Model.Sources)
+                    {
+                        <article class="source-card">
+                            <div class="source-top">
+                                <h3 class="source-path" title="@source.Path">@source.Path</h3>
+                                <span class="badge @Music.Api.Pages.Admin.Scanning.IndexModel.StatusClass(source.Status)">
+                                    @Music.Api.Pages.Admin.Scanning.IndexModel.StatusLabel(source.Status)
+                                </span>
+                            </div>
+                            <div class="source-meta">
+                                <span>@source.TrackCount 首曲目</span>
+                                <span>@(source.Enabled ? Music.Api.Pages.Admin.Scanning.IndexModel.IntervalLabel(source.IntervalMinutes) : "定时扫描已停用")</span>
+                                <span>上次：@Music.Api.Pages.Admin.Scanning.IndexModel.DateLabel(source.LastScanAt)</span>
+                                <span>下次：@(source.Enabled ? Music.Api.Pages.Admin.Scanning.IndexModel.DateLabel(source.NextScanAt) : "—")</span>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(source.LastError))
+                            {
+                                <p class="source-error">@source.LastError</p>
+                            }
+                            <div class="source-actions">
+                                <form method="post" asp-page-handler="Scan">
+                                    <input type="hidden" name="sourceId" value="@source.Id" />
+                                    <button class="button button-primary button-small" type="submit" disabled="@(source.Status == "scanning")">立即扫描</button>
+                                </form>
+                                <a class="button button-secondary button-small" asp-page="/Admin/Scanning/Index" asp-route-tracksFor="@source.Id">查看曲目</a>
+                                <form method="post" asp-page-handler="Toggle">
+                                    <input type="hidden" name="sourceId" value="@source.Id" />
+                                    <input type="hidden" name="enabled" value="@(!source.Enabled)" />
+                                    <button class="button button-quiet button-small" type="submit">@(source.Enabled ? "暂停计划" : "启用计划")</button>
+                                </form>
+                            </div>
+
+                            <details class="details-panel">
+                                <summary>编辑路径和周期</summary>
+                                <form method="post" asp-page-handler="Update" class="details-form">
+                                    <input type="hidden" name="sourceId" value="@source.Id" />
+                                    <div class="field">
+                                        <label for="path-@source.Id">服务器绝对路径</label>
+                                        <input id="path-@source.Id" name="path" value="@source.Path" required />
+                                    </div>
+                                    <div class="field">
+                                        <label for="interval-@source.Id">自动扫描周期</label>
+                                        <select id="interval-@source.Id" name="intervalMinutes">
+                                            @foreach (var interval in Music.Api.Pages.Admin.Scanning.IndexModel.Intervals)
+                                            {
+                                                if (source.IntervalMinutes == interval)
+                                                {
+                                                    <option value="@interval" selected>@Music.Api.Pages.Admin.Scanning.IndexModel.IntervalLabel(interval)</option>
+                                                }
+                                                else
+                                                {
+                                                    <option value="@interval">@Music.Api.Pages.Admin.Scanning.IndexModel.IntervalLabel(interval)</option>
+                                                }
+                                            }
+                                        </select>
+                                    </div>
+                                    <button class="button button-secondary" type="submit">保存修改</button>
+                                </form>
+                            </details>
+
+                            <details class="details-panel details-danger">
+                                <summary>删除扫描路径</summary>
+                                <p>将删除该路径及其 @source.TrackCount 条服务器索引，音频文件本身不会被删除。</p>
+                                <form method="post" asp-page-handler="Delete">
+                                    <input type="hidden" name="sourceId" value="@source.Id" />
+                                    <button class="button button-danger" type="submit">确认删除路径和索引</button>
+                                </form>
+                            </details>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+    </div>
+
+    @if (Model.SelectedSource is not null)
+    {
+        <section class="panel tracks-panel" aria-labelledby="tracks-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">INDEXED TRACKS</span>
+                    <h2 id="tracks-title">@Model.SelectedSource.TrackCount 首索引曲目</h2>
+                </div>
+                <a class="button button-quiet" asp-page="/Admin/Scanning/Index">关闭</a>
+            </div>
+            @if (Model.SelectedTracks.Count == 0)
+            {
+                <div class="empty-state"><strong>还没有索引曲目</strong><span>请先执行一次扫描。</span></div>
+            }
+            else
+            {
+                <div class="track-list">
+                    @foreach (var track in Model.SelectedTracks)
+                    {
+                        <div class="track-row">
+                            <div class="track-main">
+                                <strong>@track.Title</strong>
+                                <span>@track.Artist · @track.Album</span>
+                                <span title="@track.FilePath">@track.FilePath</span>
+                            </div>
+                            <span class="track-format">@track.Extension.ToUpperInvariant()</span>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+    }
+</section>

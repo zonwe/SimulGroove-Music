@@ -33,14 +33,23 @@ ThemeData _theme(Brightness brightness, Color seedColor) {
     borderRadius: BorderRadius.all(Radius.circular(8)),
   );
   final windows = !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+  final android = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   return ThemeData(
     useMaterial3: true,
+    splashFactory: NoSplash.splashFactory,
+    highlightColor: scheme.primary.withValues(alpha: 0.12),
+    hoverColor: scheme.primary.withValues(alpha: 0.08),
+    focusColor: scheme.primary.withValues(alpha: 0.12),
     brightness: brightness,
     colorScheme: scheme,
     scaffoldBackgroundColor: scheme.surface,
-    fontFamily: windows ? 'Microsoft YaHei UI' : null,
+    // Keep Latin glyphs native to each platform and use a CJK family only as
+    // fallback. Making YaHei the Windows primary also changes all Latin text.
+    fontFamily: windows ? 'Segoe UI' : (android ? 'Roboto' : null),
     fontFamilyFallback: windows
-        ? const ['Microsoft YaHei', 'Segoe UI', 'Arial']
+        ? const ['Microsoft YaHei', 'Microsoft YaHei UI', 'Arial']
+        : android
+        ? const ['Noto Sans CJK SC', 'Noto Sans SC', 'sans-serif']
         : null,
     cardTheme: CardThemeData(
       color: scheme.surfaceContainerLow,

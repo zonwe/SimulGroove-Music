@@ -1,11 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:hotkey_manager/hotkey_manager.dart';
 
 import '../../app/providers.dart';
 import '../../core/theme/app_appearance.dart';
+import '../../core/shortcuts/desktop_shortcut_service.dart';
 import '../../core/window/desktop_window_controller.dart';
 import '../../core/window/window_settings.dart';
+import 'desktop_shortcut_settings_section.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -129,6 +132,8 @@ class SettingsPage extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 16),
+        const _EqualizerSection(),
+        const SizedBox(height: 16),
         const _SettingsSection(
           title: '音乐与同步',
           children: [
@@ -149,8 +154,178 @@ class SettingsPage extends ConsumerWidget {
         if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) ...[
           const SizedBox(height: 16),
           const _TraySettingsSection(),
+          const SizedBox(height: 16),
+          const DesktopShortcutSettingsSection(),
         ],
       ],
+    );
+  }
+}
+
+// ignore: unused_element, kept as a compatibility reference for older builds.
+class _ShortcutSettingsSection extends ConsumerWidget {
+  const _ShortcutSettingsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final service = DesktopShortcutService.instance;
+    return ValueListenableBuilder<HotKeyScope>(
+      valueListenable: service.scope,
+      builder: (context, currentScope, _) => _SettingsSection(
+        title: 'Windows 快捷键',
+        children: [
+          ListTile(
+            leading: const Icon(Icons.keyboard_alt_outlined),
+            title: const Text('快捷键作用域'),
+            subtitle: const Text('全局模式在其他应用前台时也响应；应用内模式只在本应用窗口激活时响应'),
+            trailing: DropdownButton<HotKeyScope>(
+              value: currentScope,
+              items: const [
+                DropdownMenuItem(value: HotKeyScope.system, child: Text('全局')),
+                DropdownMenuItem(value: HotKeyScope.inapp, child: Text('应用内')),
+              ],
+              onChanged: (value) {
+                if (value != null) service.setScope(value);
+              },
+            ),
+          ),
+          const Divider(height: 1),
+          for (final action in DesktopShortcutAction.values)
+            _ShortcutRow(action: action, service: service),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
+            child: Text('默认不分配快捷键；录制后才会启用对应操作。'),
+          ),
+          ValueListenableBuilder<String?>(
+            valueListenable: service.lastError,
+            builder: (context, error, _) {
+              if (error == null || error.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                child: Text(
+                  error,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              );
+            },
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
+            child: Text(
+              '注册失败通常表示该组合已被其他应用或系统占用；重新录制后会立即检测。退出快捷键会直接退出应用，不受托盘最小化设置影响。',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ShortcutRow extends StatelessWidget {
+  const _ShortcutRow({required this.action, required this.service});
+
+  final DesktopShortcutAction action;
+  final DesktopShortcutService service;
+
+  @override
+  Widget build(BuildContext context) {
+    final hotKey = service.hotKeyFor(action);
+    return ListTile(
+      leading: Icon(_shortcutIcon(action)),
+      title: Text(action.label),
+      trailing: SizedBox(
+        width: 180,
+        child: HotKeyRecorder(
+          initalHotKey: hotKey,
+          onHotKeyRecorded: (recorded) async {
+            await service.update(action, recorded);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+IconData _shortcutIcon(DesktopShortcutAction action) => switch (action) {
+  DesktopShortcutAction.togglePlay => Icons.play_arrow,
+  DesktopShortcutAction.previous => Icons.skip_previous,
+  DesktopShortcutAction.next => Icons.skip_next,
+  DesktopShortcutAction.showWindow => Icons.open_in_new,
+  DesktopShortcutAction.toggleWindow => Icons.picture_in_picture_alt_outlined,
+  DesktopShortcutAction.quit => Icons.exit_to_app,
+};
+
+class _EqualizerSection extends ConsumerWidget {
+  const _EqualizerSection();
+
+  static const _presets = <String, String>{
+    'flat': '均衡',
+    'bass': '低音增强',
+    'vocal': '人声',
+    'classical': '古典',
+  };
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return StreamBuilder<Map<String, String>>(
+      stream: ref.watch(databaseProvider).watchSettings(),
+      builder: (context, snapshot) {
+        final settings = snapshot.data ?? const <String, String>{};
+        final windows =
+            !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+        final selected =
+            _presets.containsKey(settings['audio.equalizer.preset'])
+            ? settings['audio.equalizer.preset']!
+            : 'flat';
+        return _SettingsSection(
+          title: '播放音效',
+          children: [
+            ListTile(
+              leading: const Icon(Icons.equalizer_outlined),
+              title: const Text('均衡器'),
+              subtitle: Text(
+                windows
+                    ? 'Windows media_kit 音频后端当前不提供 DSP 均衡器'
+                    : '选择当前播放使用的音效预设',
+              ),
+              trailing: SizedBox(
+                width: 150,
+                child: DropdownButtonFormField<String>(
+                  initialValue: selected,
+                  items: [
+                    for (final entry in _presets.entries)
+                      DropdownMenuItem(
+                        value: entry.key,
+                        child: Text(entry.value),
+                      ),
+                  ],
+                  onChanged: windows
+                      ? null
+                      : (value) async {
+                          if (value == null) return;
+                          await ref
+                              .read(databaseProvider)
+                              .setSetting('audio.equalizer.preset', value);
+                          await ref
+                              .read(audioHandlerProvider)
+                              .setEqualizerPreset(value);
+                        },
+                ),
+              ),
+            ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
+              child: Text(
+                windows
+                    ? '当前 Windows 后端不支持真正的频段 DSP；预设不会改变音色。'
+                    : '当前后端使用预设增益；后续可接入平台音频 DSP。',
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

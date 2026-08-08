@@ -11,6 +11,7 @@ import 'app/providers.dart';
 import 'core/database/app_database.dart';
 import 'core/player/audio_backend.dart';
 import 'core/player/music_audio_handler.dart';
+import 'core/shortcuts/desktop_shortcut_service.dart';
 import 'core/startup/debug_artifact_cleanup.dart';
 import 'core/window/desktop_window_controller.dart';
 import 'core/window/window_settings.dart';
@@ -46,6 +47,10 @@ Future<void> main() async {
     },
     onPrevious: audioHandler.skipToPrevious,
     onNext: audioHandler.skipToNext,
+  );
+  await DesktopShortcutService.instance.initialize(
+    database: database,
+    handler: audioHandler,
   );
 
   runApp(

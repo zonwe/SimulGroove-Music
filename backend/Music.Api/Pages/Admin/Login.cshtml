@@ -1,0 +1,55 @@
+@page "/admin/login"
+@model Music.Api.Pages.Admin.LoginModel
+@{
+    ViewData["Title"] = "管理员登录";
+}
+
+<section class="login-shell" aria-labelledby="login-title">
+    <div class="login-copy">
+        <span class="eyebrow">SERVER ADMINISTRATION</span>
+        <h1 id="login-title">在服务器上管理音乐目录</h1>
+        <p>扫描发生在运行 Music.Api 的机器上。管理员页面不会读取或上传当前浏览器所在设备的音乐。</p>
+        <ul class="feature-list">
+            <li>使用独立管理员 Cookie 会话</li>
+            <li>管理定时计划与手动扫描</li>
+            <li>检查服务器已发现的曲目</li>
+        </ul>
+    </div>
+
+    <form method="post" class="panel login-panel">
+        <input asp-for="ReturnUrl" type="hidden" />
+        <div class="panel-heading">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span>登录 Music.Api 管理后台</span>
+        </div>
+
+        @if (!Model.IsConfigured)
+        {
+            <div class="form-error" role="alert">
+                管理员账号尚未配置。请设置 <code>Administration__Username</code> 和
+                <code>Administration__Password</code> 后重启服务。
+            </div>
+        }
+
+        <div asp-validation-summary="ModelOnly" class="validation-summary" role="alert"></div>
+        <div class="field">
+            <label asp-for="Username"></label>
+            <input asp-for="Username" autocomplete="username" autofocus />
+            <span asp-validation-for="Username" class="validation-message"></span>
+        </div>
+        <div class="field">
+            <label asp-for="Password"></label>
+            <input asp-for="Password" autocomplete="current-password" />
+            <span asp-validation-for="Password" class="validation-message"></span>
+        </div>
+        @if (Model.IsConfigured)
+        {
+            <button class="button button-primary button-wide" type="submit">登录管理后台</button>
+        }
+        else
+        {
+            <button class="button button-primary button-wide" type="button" disabled>登录管理后台</button>
+        }
+        <p class="security-note">会话保存在 HttpOnly Cookie 中；生产环境必须通过 HTTPS 访问。</p>
+    </form>
+</section>

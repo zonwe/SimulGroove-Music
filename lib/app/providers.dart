@@ -8,7 +8,6 @@ import '../core/database/app_database.dart';
 import '../core/library/library_scanner.dart';
 import '../core/library/scanner_factory.dart';
 import '../core/player/music_audio_handler.dart';
-import '../core/scanning/remote_scan_repository.dart';
 import '../core/theme/app_appearance.dart';
 import '../core/window/window_settings.dart';
 
@@ -34,13 +33,6 @@ final authRepositoryProvider = Provider<AuthRepository>(
     ref.watch(authTokenStoreProvider),
   ),
 );
-final remoteScanRepositoryProvider = Provider<RemoteScanRepository>(
-  (ref) => RemoteScanRepository(ref.watch(authRepositoryProvider)),
-);
-final remoteScanSourcesProvider = FutureProvider.autoDispose(
-  (ref) => ref.watch(remoteScanRepositoryProvider).listSources(),
-);
-
 final tracksProvider = StreamProvider<List<Track>>(
   (ref) => ref.watch(databaseProvider).watchTracks(),
 );

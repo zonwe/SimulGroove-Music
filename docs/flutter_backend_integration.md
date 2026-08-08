@@ -11,7 +11,7 @@
 - Access Token 即将过期时主动刷新；受保护请求返回 401 时只刷新并重试一次。
 - 退出登录调用 `/api/auth/logout`，即使服务不可用也会清理本地令牌和账号快照。
 - 本地歌单与喜欢歌曲通过 `/api/playlists/sync` 上传，服务端返回的新歌单和能按 URI 匹配到的喜欢歌曲会写回 Drift。
-- “服务器扫描”已加入一级导航，可创建、修改、删除扫描路径，立即扫描并查看后端索引结果。
+- Flutter 客户端不承载服务器扫描管理；该功能位于 Music.Api 的 `/admin/scanning` Razor Pages 管理后台。
 - Windows、Android、Web 共用相同 Gateway/Repository；服务地址用 `MUSIC_API_URL` 区分。
 
 尚未完成：
@@ -24,8 +24,8 @@
 ## 2. 客户端结构
 
 ```text
-AccountPage / RemoteScanPage
-              ↓ Riverpod
+AccountPage
+    ↓ Riverpod
       BackendAuthRepository
         ↙             ↘
 HttpBackendGateway   SecureAuthTokenStore
@@ -43,11 +43,10 @@ HttpBackendGateway   SecureAuthTokenStore
 | `lib/core/auth/http_backend_gateway.dart` | 登录、刷新、退出、同步的 JSON/HTTP 实现和超时/错误映射 |
 | `lib/core/auth/auth_token_store.dart` | 令牌安全存储抽象及 `flutter_secure_storage` 实现 |
 | `lib/core/auth/auth_repository.dart` | 会话恢复、刷新去重、401 单次重试、本地 Drift 同步 |
-| `lib/core/scanning/remote_scan_repository.dart` | 扫描源 API，复用认证 Repository 的会话 |
-| `lib/app/providers.dart` | 注册真实 Gateway、Token Store、认证和扫描 Provider |
+| `lib/app/providers.dart` | 注册真实 Gateway、Token Store 和认证 Provider |
 | `lib/features/account/account_page.dart` | 真实登录、退出和手动同步 UI |
-| `lib/features/scanning/remote_scan_page.dart` | 服务器扫描路径管理 UI |
-| `backend/Music.Api` | ASP.NET Core 10 + SQLite 后端 |
+| `backend/Music.Api/Pages/Admin/` | 管理员登录与服务器扫描 Razor Pages |
+| `backend/Music.Api` | ASP.NET Core 10 + SQLite 后端，并托管扫描控制台 |
 
 ## 3. 后端地址配置
 
@@ -129,7 +128,7 @@ flutter run -d <device-id> --dart-define=MUSIC_API_URL=http://<电脑局域网IP
 1. 启动后端和 Flutter。
 2. 打开“账号”，输入一个新账号和密码。开发后端会在首次登录时创建账号；后续必须使用同一密码。
 3. 登录成功后客户端自动执行一次歌单/喜欢同步。
-4. 打开“服务器扫描”，输入后端机器可访问的绝对路径。
+4. 浏览器打开 `http://localhost:5080/admin/scanning`，使用后端 `Administration` 配置的独立管理员账号登录并输入后端机器可访问的绝对路径。
 5. 后端 `Scanning:AllowedRoots` 非空时，路径必须位于允许根目录中。
 
 服务器路径不是 Flutter 客户端路径。例如 Windows 客户端连接 Linux 服务器时，应填写 `/srv/music`，不能填写客户端的 `D:\Music`。
@@ -141,7 +140,7 @@ flutter run -d <device-id> --dart-define=MUSIC_API_URL=http://<电脑局域网IP
 - 多个请求同时需要刷新时共享同一个刷新 Future，避免重复使用已经轮换的 Refresh Token。
 - 受保护请求收到 401 后只允许刷新并重试一次，避免无限循环。
 - Refresh Token 无效、过期或被撤销时清除安全存储和本地账号快照。
-- HTTP 登录/刷新超时为 15 秒；服务器扫描请求超时为 30 秒。
+- Flutter HTTP 登录/刷新超时为 15 秒。
 - 退出请求失败不会阻止本地退出，防止离线用户无法清除凭据。
 
 `flutter_secure_storage` 的平台行为由操作系统决定。不要把令牌打印到日志、错误提示或截图中，也不要复制到 Drift `AppSettings`。
@@ -164,6 +163,14 @@ flutter run -d <device-id> --dart-define=MUSIC_API_URL=http://<电脑局域网IP
 因此跨设备使用不同文件 URI 时，歌单元数据能够出现，但曲目不一定能匹配。这需要后续设计内容指纹或服务端曲目 ID 才能可靠解决。
 
 ## 8. 服务器扫描配置
+
+服务器扫描不出现在 Flutter 客户端导航中。Music.Api 启动后，通过同源页面管理：
+
+```text
+http://localhost:5080/admin/scanning
+```
+
+页面支持登录、创建/编辑/删除扫描源、启停计划、立即扫描和查看索引曲目。管理员身份由独立 HttpOnly Cookie 保存，不使用 Flutter 的 Access Token/Refresh Token。生产部署必须设置 `Administration__Username`、`Administration__Password`，使用 HTTPS，并继续限制允许扫描的根目录。
 
 建议生产/共享环境限制允许根目录：
 
@@ -188,7 +195,7 @@ flutter test
 dotnet build backend/Music.Api/Music.Api.csproj --no-restore
 ```
 
-手工联调至少覆盖：登录成功、错误密码、重启恢复、Access Token 刷新、后端离线错误、退出、歌单同步、喜欢同步、路径越界、重复路径、立即扫描和删除扫描源。
+手工联调至少要覆盖：Flutter 登录成功、错误密码、重启恢复、Access Token 刷新、后端离线错误、退出、歌单同步和喜欢同步；扫描控制台还需覆盖登录、窄屏布局、路径越界、重复路径、立即扫描、启停计划、查看曲目和删除扫描源。
 
 后端完整接口契约见 [`api.md`](api.md)。
 

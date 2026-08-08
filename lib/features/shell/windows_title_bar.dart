@@ -13,48 +13,51 @@ class WindowsTitleBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!isVisible) return const SizedBox.shrink();
-    return SizedBox(
-      height: 38,
-      child: Row(
-        children: [
-          Expanded(
-            child: DesktopDragArea(
-              child: Padding(
-                padding: const EdgeInsets.only(left: 14),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.music_note_rounded,
-                      size: 18,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Flutter Music',
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                  ],
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      child: SizedBox(
+        height: 38,
+        child: Row(
+          children: [
+            Expanded(
+              child: DesktopDragArea(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 14),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.music_note_rounded,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Flutter Music',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          _WindowButton(
-            icon: Icons.picture_in_picture_alt_outlined,
-            tooltip: '切换悬浮播放器',
-            onPressed: DesktopWindowController.toggleCompact,
-          ),
-          _WindowButton(
-            icon: Icons.remove,
-            tooltip: '最小化',
-            onPressed: DesktopWindowController.minimize,
-          ),
-          _WindowButton(
-            icon: Icons.close,
-            tooltip: '关闭',
-            isClose: true,
-            onPressed: DesktopWindowController.close,
-          ),
-        ],
+            _WindowButton(
+              icon: Icons.picture_in_picture_alt_outlined,
+              tooltip: '切换悬浮播放器',
+              onPressed: DesktopWindowController.toggleCompact,
+            ),
+            _WindowButton(
+              icon: Icons.remove,
+              tooltip: '最小化',
+              onPressed: DesktopWindowController.minimize,
+            ),
+            _WindowButton(
+              icon: Icons.close,
+              tooltip: '关闭',
+              isClose: true,
+              onPressed: DesktopWindowController.close,
+            ),
+          ],
+        ),
       ),
     );
   }

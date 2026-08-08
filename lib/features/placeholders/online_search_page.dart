@@ -29,7 +29,7 @@ class _OnlineSearchPageState extends State<OnlineSearchPage> {
           ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
-        const Text('这里将用于聚合后续接入的音乐服务 API。'),
+        // const Text('这里将用于聚合后续接入的音乐服务 API。'),
         const SizedBox(height: 20),
         TextField(
           controller: _query,

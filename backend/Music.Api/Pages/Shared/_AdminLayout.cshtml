@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>@ViewData["Title"] · Flutter Music</title>
+    <link rel="stylesheet" href="~/admin/scanning/styles.css" asp-append-version="true" />
+</head>
+<body>
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+    <header class="site-header">
+        <a class="brand" asp-page="/Admin/Scanning/Index" aria-label="Flutter Music 管理后台首页">
+            <span class="brand-mark" aria-hidden="true">FM</span>
+            <span>
+                <strong>Flutter Music</strong>
+                <small>服务器管理后台</small>
+            </span>
+        </a>
+        @if (User.Identity?.IsAuthenticated == true)
+        {
+            <div class="account-menu">
+                <span class="account-name">@User.Identity.Name</span>
+                <form method="post" asp-page="/Admin/Login" asp-page-handler="Logout">
+                    <button class="button button-quiet" type="submit">退出登录</button>
+                </form>
+            </div>
+        }
+    </header>
+    <main id="main-content">
+        @RenderBody()
+    </main>
+</body>
+</html>

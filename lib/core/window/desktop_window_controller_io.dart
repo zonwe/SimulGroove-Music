@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 
 class DesktopWindowController {
   static final ValueNotifier<bool> compactMode = ValueNotifier(false);
+  static final ValueNotifier<bool> compactPanelExpanded = ValueNotifier(false);
   static final _trayListener = _TrayListener();
   static bool _isWindows = false;
   static bool _minimizeToTray = true;
@@ -62,6 +63,7 @@ class DesktopWindowController {
   static Future<void> toggleCompact() async {
     if (!_isWindows) return;
     final next = !compactMode.value;
+    compactPanelExpanded.value = false;
     compactMode.value = next;
     await windowManager.setAlwaysOnTop(next);
     await windowManager.setSize(
@@ -69,6 +71,17 @@ class DesktopWindowController {
       animate: true,
     );
     if (!next) await windowManager.center();
+  }
+
+  static Future<void> setCompactPanelExpanded(bool expanded) async {
+    if (!_isWindows || !compactMode.value) return;
+    if (expanded) {
+      await windowManager.setSize(const Size(384, 520), animate: true);
+      compactPanelExpanded.value = true;
+    } else {
+      compactPanelExpanded.value = false;
+      await windowManager.setSize(const Size(384, 144), animate: true);
+    }
   }
 
   static Future<void> minimize() async {

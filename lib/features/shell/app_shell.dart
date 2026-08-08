@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
 import '../../core/window/desktop_window_controller.dart';
 import '../account/account_page.dart';
@@ -10,6 +12,7 @@ import '../placeholders/recognition_page.dart';
 import '../placeholders/settings_page.dart';
 import '../player/compact_player.dart';
 import '../player/mini_player_bar.dart';
+import '../player/queue_sheet.dart';
 import '../playlists/playlist_detail_page.dart';
 import '../playlists/playlists_page.dart';
 import 'app_destination.dart';
@@ -38,14 +41,7 @@ class _AppShellState extends State<AppShell> {
         valueListenable: DesktopWindowController.compactMode,
         builder: (context, compact, _) {
           if (compact) {
-            return const Scaffold(
-              body: Column(
-                children: [
-                  WindowsTitleBar(),
-                  Expanded(child: CompactPlayer()),
-                ],
-              ),
-            );
+            return const CompactPlayerWindow();
           }
           return LayoutBuilder(
             builder: (context, constraints) {
@@ -80,7 +76,26 @@ class _AppShellState extends State<AppShell> {
                               selected: _destination,
                               onSelect: _select,
                             ),
-                          Expanded(child: _pageFor(_destination)),
+                          Expanded(
+                            child: ValueListenableBuilder<bool>(
+                              valueListenable: playbackQueueDockOpen,
+                              builder: (context, queueOpen, _) {
+                                final docked = wide && queueOpen;
+                                return Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(child: _pageFor(_destination)),
+                                    if (docked)
+                                      const SizedBox(
+                                        width: 336,
+                                        child: _QueueDockPanel(),
+                                      ),
+                                  ],
+                                );
+                              },
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -156,6 +171,11 @@ class _DesktopNavigation extends StatelessWidget {
       width: 224,
       child: Material(
         color: Theme.of(context).colorScheme.surfaceContainerLow,
+        shape: Border(
+          right: BorderSide(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+        ),
         child: SafeArea(
           top: !WindowsTitleBar.isVisible,
           child: Column(
@@ -250,4 +270,25 @@ class _DrawerNavigation extends StatelessWidget {
         ),
     ],
   );
+}
+
+class _QueueDockPanel extends ConsumerWidget {
+  const _QueueDockPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        border: Border(
+          left: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+        ),
+      ),
+      child: PlaybackQueuePanel(
+        handler: ref.watch(audioHandlerProvider),
+        fillHeight: true,
+        onClose: () => playbackQueueDockOpen.value = false,
+      ),
+    );
+  }
 }

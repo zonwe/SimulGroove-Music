@@ -1,5 +1,4 @@
 using Music.Api.Data;
-using Microsoft.Data.Sqlite;
 using Music.Api.Models;
 using Music.Api.Services;
 using Music.Api.Services.Scanning;
@@ -32,7 +31,7 @@ public static class ScanSourceEndpoints
             {
                 return Results.BadRequest(new ProblemResponse("invalid_scan_source", exception.Message));
             }
-            catch (SqliteException exception) when (exception.SqliteErrorCode == 19)
+            catch (DuplicateScanSourceException)
             {
                 return Results.Conflict(new ProblemResponse("duplicate_scan_source", "This path has already been configured."));
             }
@@ -52,7 +51,7 @@ public static class ScanSourceEndpoints
             {
                 return Results.BadRequest(new ProblemResponse("invalid_scan_source", exception.Message));
             }
-            catch (SqliteException exception) when (exception.SqliteErrorCode == 19)
+            catch (DuplicateScanSourceException)
             {
                 return Results.Conflict(new ProblemResponse("duplicate_scan_source", "This path has already been configured."));
             }

@@ -60,29 +60,7 @@ class PlaylistsPage extends ConsumerWidget {
   }
 
   Future<void> _createPlaylist(BuildContext context, WidgetRef ref) async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('新建歌单'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: '歌单名称'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('创建'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
+    final name = await showCreatePlaylistDialog(context);
     if (name == null || name.isEmpty) return;
     final now = DateTime.now();
     await ref
@@ -97,6 +75,49 @@ class PlaylistsPage extends ConsumerWidget {
           ),
         );
   }
+}
+
+Future<String?> showCreatePlaylistDialog(BuildContext context) =>
+    showDialog<String>(
+      context: context,
+      builder: (_) => const _CreatePlaylistDialog(),
+    );
+
+class _CreatePlaylistDialog extends StatefulWidget {
+  const _CreatePlaylistDialog();
+
+  @override
+  State<_CreatePlaylistDialog> createState() => _CreatePlaylistDialogState();
+}
+
+class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('新建歌单'),
+    content: TextField(
+      controller: _controller,
+      autofocus: true,
+      decoration: const InputDecoration(labelText: '歌单名称'),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
+        child: const Text('创建'),
+      ),
+    ],
+  );
 }
 
 class _PlaylistCard extends ConsumerWidget {

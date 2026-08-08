@@ -20,4 +20,11 @@ class UnsupportedLibraryScanner implements LibraryScanner {
 
   @override
   Future<ScanResult?> scanFullDevice() async => null;
+
+  @override
+  Future<ScanResult?> rescanSource({
+    required String sourceUri,
+    required String platform,
+    required String sourceLabel,
+  }) async => null;
 }

@@ -155,6 +155,45 @@ class AppDatabase extends _$AppDatabase {
 
   Stream<List<ScanSource>> watchScanSources() => select(scanSources).watch();
 
+  Future<void> replaceScanSourceTracks(
+    ScanSource source,
+    Iterable<TracksCompanion> values,
+  ) async {
+    final incoming = values.toList(growable: false);
+    final incomingUris = incoming.map((value) => value.uri.value).toSet();
+    await transaction(() async {
+      final sourceTracks = source.uri == 'media-store://external'
+          ? tracks.sourceType.equals('android_media_store')
+          : tracks.sourceType.equals('windows_file') &
+                tracks.sourceId.like('${source.uri}%') |
+            tracks.sourceType.equals('android_document_tree') &
+                (tracks.sourceId.like('${source.uri}%') |
+                    tracks.uri.like('${source.uri}%'));
+      final staleTracks = incomingUris.isEmpty
+          ? sourceTracks
+          : sourceTracks & tracks.uri.isNotIn(incomingUris);
+      await (delete(tracks)..where((row) => staleTracks)).go();
+      if (incoming.isNotEmpty) {
+        await batch((batch) {
+          batch.insertAllOnConflictUpdate(tracks, incoming);
+        });
+      }
+    });
+  }
+
+  Future<void> deleteScanSource(ScanSource source) async {
+    await transaction(() async {
+      final predicate = source.uri == 'media-store://external'
+          ? tracks.sourceType.equals('android_media_store')
+          : tracks.sourceType.equals('windows_file') &
+                tracks.sourceId.like('${source.uri}%') |
+            tracks.sourceType.equals('android_document_tree') &
+                tracks.sourceId.like('${source.uri}%');
+      await (delete(tracks)..where((row) => predicate)).go();
+      await (delete(scanSources)..where((row) => row.id.equals(source.id))).go();
+    });
+  }
+
   Stream<Map<String, String>> watchSettings() => select(
     appSettings,
   ).watch().map((rows) => {for (final row in rows) row.key: row.value});
@@ -238,6 +277,21 @@ class AppDatabase extends _$AppDatabase {
         addedAt: DateTime.now(),
       ),
     );
+    await (update(playlists)..where((row) => row.id.equals(playlistId))).write(
+      PlaylistsCompanion(
+        syncState: const Value('local'),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  Future<void> removeTrackFromPlaylist(String playlistId, String trackId) async {
+    await (delete(playlistEntries)
+          ..where(
+            (row) =>
+                row.playlistId.equals(playlistId) & row.trackId.equals(trackId),
+          ))
+        .go();
     await (update(playlists)..where((row) => row.id.equals(playlistId))).write(
       PlaylistsCompanion(
         syncState: const Value('local'),

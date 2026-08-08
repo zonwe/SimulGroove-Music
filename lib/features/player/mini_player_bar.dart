@@ -1,6 +1,5 @@
-import 'dart:typed_data';
-
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,6 +7,8 @@ import '../../app/providers.dart';
 import '../../core/lyrics/lrc_parser.dart';
 import '../library/artwork_view.dart';
 import 'now_playing_page.dart';
+import 'queue_sheet.dart';
+import 'volume_control.dart';
 
 class MiniPlayerBar extends ConsumerWidget {
   const MiniPlayerBar({super.key, this.onReturn});
@@ -17,6 +18,8 @@ class MiniPlayerBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final handler = ref.watch(audioHandlerProvider);
+    final isAndroid =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
     return StreamBuilder<MediaItem?>(
       stream: handler.mediaItem,
       builder: (context, itemSnapshot) {
@@ -81,6 +84,17 @@ class MiniPlayerBar extends ConsumerWidget {
                                     positionStream: handler.positionStream,
                                   ),
                                 ),
+                                IconButton(
+                                  tooltip: '播放列表',
+                                  onPressed: () =>
+                                      showPlaybackQueue(context, handler),
+                                  icon: const Icon(Icons.queue_music_rounded),
+                                ),
+                                if (!isAndroid)
+                                  VolumeControl(
+                                    handler: handler,
+                                    showSlider: false,
+                                  ),
                                 IconButton(
                                   tooltip: '上一首',
                                   onPressed: handler.skipToPrevious,

@@ -41,6 +41,24 @@ class IoLibraryScanner implements LibraryScanner {
     return Future.value();
   }
 
+  @override
+  Future<ScanResult?> rescanSource({
+    required String sourceUri,
+    required String platform,
+    required String sourceLabel,
+  }) {
+    if (sourceUri == 'media-store://external') {
+      return _scanAndroidFullDevice();
+    }
+    if (Platform.isAndroid && sourceUri.startsWith('content://')) {
+      return _scanAndroidDirectoryUri(sourceUri, sourceLabel);
+    }
+    if (Platform.isWindows) {
+      return Isolate.run(() => _scanWindowsDirectory(sourceUri));
+    }
+    return Future.value();
+  }
+
   Future<ScanResult?> _scanAndroidDirectory() async {
     final selected = await _mediaStore.invokeMapMethod<String, Object?>(
       'pickAudioDirectory',
@@ -48,6 +66,10 @@ class IoLibraryScanner implements LibraryScanner {
     if (selected == null) return null;
     final uri = selected['uri']! as String;
     final label = selected['label'] as String? ?? '已授权音乐目录';
+    return _scanAndroidDirectoryUri(uri, label);
+  }
+
+  Future<ScanResult?> _scanAndroidDirectoryUri(String uri, String label) async {
     await Permission.notification.request();
     final rawSongs =
         await _mediaStore.invokeListMethod<Object?>('scanAudioTree', {
@@ -58,6 +80,7 @@ class IoLibraryScanner implements LibraryScanner {
       tracks: await _mapAndroidTracks(
         rawSongs,
         sourceType: 'android_document_tree',
+        sourceUri: uri,
       ),
       sourceUri: uri,
       sourceLabel: label,
@@ -89,17 +112,38 @@ class IoLibraryScanner implements LibraryScanner {
   Future<List<ScannedTrack>> _mapAndroidTracks(
     List<Object?> rawSongs, {
     required String sourceType,
+    String? sourceUri,
   }) async {
+    // MediaStore exposes a filesystem path for many device-wide scans. Parse
+    // those files off the UI isolate so embedded lyrics are preferred without
+    // making a large library scan jank the app. Document Tree providers may
+    // not expose a path; their native sidecar lookup remains the fallback.
+    final audioPaths = <String>{};
+    for (final raw in rawSongs) {
+      final path = Map<Object?, Object?>.from(raw! as Map)['path'] as String?;
+      if (path != null && path.isNotEmpty) audioPaths.add(path);
+    }
+    final audioPathList = audioPaths.toList(growable: false);
+    final embeddedLyricsByPath = audioPathList.isEmpty
+        ? const <String, String?>{}
+        : await Isolate.run(
+            () => _readEmbeddedLyricsByPath(audioPathList),
+          );
     final tracks = <ScannedTrack>[];
     for (final raw in rawSongs) {
       final song = Map<Object?, Object?>.from(raw! as Map);
       final mediaUri = song['uri']! as String;
       final data = song['path'] as String?;
+      final embeddedLyrics = data == null
+          ? null
+          : _cleanLyrics(embeddedLyricsByPath[data]);
       tracks.add(
         ScannedTrack(
           id: _uuid.v5(Namespace.url.value, mediaUri),
           sourceType: sourceType,
-          sourceId: song['id'].toString(),
+          sourceId: sourceUri == null
+              ? song['id'].toString()
+              : '$sourceUri/${song['id']}',
           uri: mediaUri,
           filePath: data,
           title: _clean(
@@ -111,6 +155,7 @@ class IoLibraryScanner implements LibraryScanner {
           durationMs: song['duration'] as int?,
           artwork: _compactArtwork(song['artwork'] as Uint8List?),
           lyrics:
+              embeddedLyrics ??
               _cleanLyrics(song['lyrics'] as String?) ??
               (data == null ? null : await _tryReadSidecarLyrics(data)),
           fileSize: song['size'] as int?,
@@ -184,6 +229,20 @@ class IoLibraryScanner implements LibraryScanner {
   }
 }
 
+Map<String, String?> _readEmbeddedLyricsByPath(List<String> paths) {
+  final lyricsByPath = <String, String?>{};
+  for (final path in paths) {
+    try {
+      final lyrics = readMetadata(File(path), getImage: false).lyrics?.trim();
+      lyricsByPath[path] = lyrics == null || lyrics.isEmpty ? null : lyrics;
+    } catch (_) {
+      // A malformed tag must not exclude an otherwise playable track.
+      lyricsByPath[path] = null;
+    }
+  }
+  return lyricsByPath;
+}
+
 Future<ScanResult> _scanWindowsDirectory(String selected) async {
   final uuid = const Uuid();
   final directory = Directory(selected);
@@ -191,7 +250,11 @@ Future<ScanResult> _scanWindowsDirectory(String selected) async {
 
   final files = await directory
       .list(recursive: true, followLinks: false)
-      .where((entry) => entry is File && _isWindowsAudioFile(entry.path))
+      .where(
+        (entry) =>
+            entry is File &&
+            _isWindowsAudioFile(entry.path),
+      )
       .cast<File>()
       .toList();
   final tracks = <ScannedTrack>[];

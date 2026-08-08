@@ -68,7 +68,10 @@ public sealed class SqliteScanSourceStore : IScanSourceStore
             var now = DateTimeOffset.UtcNow;
             var id = Guid.NewGuid().ToString("N");
             using var connection = OpenConnection();
+            using var transaction = connection.BeginTransaction();
+            EnsureAccount(connection, transaction, username);
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = "INSERT INTO scan_sources(id, username, path, interval_minutes, enabled, status, track_count, last_scan_at, next_scan_at, last_error, created_at, updated_at) VALUES ($id, $username, $path, $interval, $enabled, 'idle', 0, NULL, $nextScanAt, NULL, $now, $now)";
             command.Parameters.AddWithValue("$id", id);
             command.Parameters.AddWithValue("$username", username);
@@ -77,7 +80,16 @@ public sealed class SqliteScanSourceStore : IScanSourceStore
             command.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);
             command.Parameters.AddWithValue("$nextScanAt", Format(enabled ? now : now.AddMinutes(intervalMinutes)));
             command.Parameters.AddWithValue("$now", Format(now));
-            command.ExecuteNonQuery();
+            try
+            {
+                command.ExecuteNonQuery();
+            }
+            catch (SqliteException exception) when (IsUniqueConstraint(exception))
+            {
+                throw new DuplicateScanSourceException(path, exception);
+            }
+
+            transaction.Commit();
             return Get(username, id)!;
         }
     }
@@ -96,7 +108,15 @@ public sealed class SqliteScanSourceStore : IScanSourceStore
             command.Parameters.AddWithValue("$now", Format(DateTimeOffset.UtcNow));
             command.Parameters.AddWithValue("$username", username);
             command.Parameters.AddWithValue("$id", id);
-            if (command.ExecuteNonQuery() == 0) return null;
+            try
+            {
+                if (command.ExecuteNonQuery() == 0) return null;
+            }
+            catch (SqliteException exception) when (IsUniqueConstraint(exception))
+            {
+                throw new DuplicateScanSourceException(path, exception);
+            }
+
             return Get(username, id);
         }
     }
@@ -217,6 +237,12 @@ public sealed class SqliteScanSourceStore : IScanSourceStore
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
+            CREATE TABLE IF NOT EXISTS accounts (
+                username TEXT PRIMARY KEY,
+                remote_id TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                avatar_uri TEXT NULL
+            );
             CREATE TABLE IF NOT EXISTS scan_sources (
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL REFERENCES accounts(username) ON DELETE CASCADE,
@@ -254,6 +280,24 @@ public sealed class SqliteScanSourceStore : IScanSourceStore
             """;
         command.ExecuteNonQuery();
     }
+
+    private static void EnsureAccount(SqliteConnection connection, SqliteTransaction transaction, string username)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO accounts(username, remote_id, display_name, avatar_uri)
+            VALUES ($username, $remoteId, $displayName, NULL)
+            ON CONFLICT(username) DO NOTHING
+            """;
+        command.Parameters.AddWithValue("$username", username);
+        command.Parameters.AddWithValue("$remoteId", $"account-{username}");
+        command.Parameters.AddWithValue("$displayName", username.Split('@')[0]);
+        command.ExecuteNonQuery();
+    }
+
+    private static bool IsUniqueConstraint(SqliteException exception) =>
+        exception.SqliteExtendedErrorCode == 2067;
 
     private SqliteConnection OpenConnection()
     {

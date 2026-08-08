@@ -19,6 +19,14 @@ Invoke-RestMethod http://localhost:5080/health
 Invoke-RestMethod http://localhost:5080/openapi.json
 ```
 
+服务器扫描管理页面由 API 项目直接托管，浏览器打开：
+
+```text
+http://localhost:5080/admin/scanning
+```
+
+页面由 Razor Pages 渲染，PageModel 直接调用扫描 Service。管理员登录使用独立的 HttpOnly Cookie，不复用 Flutter 的 JWT/Refresh Token。生产环境必须使用 HTTPS。
+
 默认数据库为 `backend/Music.Api/storage/music.db`。开发时可使用 `Database:Path` 指向临时文件；不要把运行数据库、WAL/SHM 文件提交到版本库。
 
 ## 配置
@@ -27,7 +35,12 @@ Invoke-RestMethod http://localhost:5080/openapi.json
 
 ```powershell
 $env:Auth__JwtKey = "使用密码管理器生成的至少 32 字节随机密钥"
+$env:Administration__Username = "admin"
+$env:Administration__Password = "使用密码管理器生成的管理员密码"
 ```
+
+开发环境内置仅供本机联调的账号 `admin`，密码为
+`LOCAL-DEVELOPMENT-ONLY-CHANGE-BEFORE-USE`。共享开发机和任何生产部署都必须通过环境变量覆盖；生产配置未提供密码时，管理员登录会保持禁用。
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -36,6 +49,8 @@ $env:Auth__JwtKey = "使用密码管理器生成的至少 32 字节随机密钥"
 | `Auth:Audience` | `flutter-music-client` | JWT 接收方 |
 | `Auth:AccessTokenMinutes` | `15` | Access Token 有效期 |
 | `Auth:RefreshTokenDays` | `30` | Refresh Token 有效期 |
+| `Administration:Username` | `admin` | Razor Pages 管理员用户名；生产环境通过环境变量覆盖 |
+| `Administration:Password` | 空 | Razor Pages 管理员密码；不得提交真实密码 |
 | `Scanning:PollSeconds` | `30` | 后台扫描任务轮询间隔，代码会限制在 5–3600 秒 |
 | `Scanning:AllowedRoots` | `[]` | 允许用户配置的服务器目录根；生产环境应显式设置 |
 | `Audit:RetentionDays` | `90` | 审计日志保留时间，范围为 7–3650 天 |
@@ -52,6 +67,8 @@ $env:Auth__JwtKey = "使用密码管理器生成的至少 32 字节随机密钥"
 - `POST /api/scan-sources/{id}/scan`、`GET /api/scan-sources/{id}/tracks`：立即扫描和读取索引结果。
 - `GET /api/audit-logs`：分页查询当前账号的审计日志。
 
+服务器扫描管理页位于 `/admin/scanning`，登录页位于 `/admin/login`。Flutter 客户端不包含服务器扫描管理入口。
+
 完整请求/响应契约见 [`../docs/api.md`](../docs/api.md)，可执行示例见 [`Music.Api/FlutterMusic.Api.http`](Music.Api/FlutterMusic.Api.http)。扫描只读取后端机器可访问的文件，不上传或复制音频内容；索引保存于 SQLite，并按账号隔离。
 
 ## 项目结构
@@ -62,6 +79,8 @@ $env:Auth__JwtKey = "使用密码管理器生成的至少 32 字节随机密钥"
 | `Music.Api/Endpoints/` | 请求校验、认证上下文和 HTTP 响应 |
 | `Music.Api/Services/Auth/` | PBKDF2 密码哈希、JWT 和 Refresh Token 轮换 |
 | `Music.Api/Services/Scanning/` | 目录扫描和定时后台任务 |
+| `Music.Api/Services/Administration/` | 管理员配置凭据校验与授权常量 |
+| `Music.Api/Pages/Admin/` | 管理员登录与服务器扫描 Razor Pages |
 | `Music.Api/Data/` | SQLite 建表、歌单、扫描源和审计日志存取 |
 | `Music.Api/Models/` | API 请求/响应 DTO |
 | `Music.Api/Middleware/` | 已认证请求的审计日志 |

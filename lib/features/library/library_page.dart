@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:drift/drift.dart' show Value;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
@@ -8,6 +9,8 @@ import 'package:uuid/uuid.dart';
 import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
 import '../../core/library/scanned_track.dart';
+import '../../core/library/artist_names.dart';
+import '../../core/player/track_directory.dart';
 import 'artwork_view.dart';
 import 'collection_page.dart';
 import '../player/playback_navigation.dart';
@@ -25,6 +28,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
   final TextEditingController _search = TextEditingController();
   _LibraryView _view = _LibraryView.songs;
   bool _scanning = false;
+  bool _rescanAllBusy = false;
   bool _selectionMode = false;
   final Set<String> _selectedTrackIds = <String>{};
   String? _error;
@@ -91,6 +95,18 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                         icon: const Icon(Icons.phone_android_outlined),
                         label: const Text('扫描整台设备'),
                       ),
+                    OutlinedButton.icon(
+                      onPressed: _rescanAllBusy
+                          ? null
+                          : () => unawaited(_rescanAll()),
+                      icon: _rescanAllBusy
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh),
+                      label: Text(_rescanAllBusy ? '重新扫描中…' : '重新扫描'),
+                    ),
                   ],
                 ),
           if (scanner.isSupported) ...[
@@ -98,8 +114,11 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
             sources.when(
               loading: () => const LinearProgressIndicator(minHeight: 2),
               error: (error, _) => Text('搜索位置读取失败：$error'),
-              data: (values) =>
-                  _ScanSources(values: values, onAdd: () => unawaited(_scan())),
+              data: (values) => _ScanSources(
+                values: values,
+                onAdd: () => unawaited(_scan()),
+                onDelete: _deleteSource,
+              ),
             ),
           ],
           const SizedBox(height: 16),
@@ -216,6 +235,88 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     if (mounted) _clearSelection();
   }
 
+  Future<void> _rescanAll() async {
+    if (_rescanAllBusy) return;
+    final sources = await ref.read(databaseProvider).watchScanSources().first;
+    if (sources.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('还没有添加搜索位置')));
+      }
+      return;
+    }
+    setState(() {
+      _rescanAllBusy = true;
+      _error = null;
+    });
+    var imported = 0;
+    try {
+      final scanner = ref.read(scannerProvider);
+      final database = ref.read(databaseProvider);
+      for (final source in sources) {
+        final result = await scanner.rescanSource(
+          sourceUri: source.uri,
+          platform: source.platform,
+          sourceLabel: source.label,
+        );
+        if (result == null) continue;
+        imported += result.tracks.length;
+        await database.replaceScanSourceTracks(
+          source,
+          result.tracks.map(_toCompanion),
+        );
+        await database.saveScanSource(
+          ScanSourcesCompanion.insert(
+            id: source.id,
+            platform: result.tracks.firstOrNull?.sourceType ?? source.platform,
+            uri: result.sourceUri,
+            label: result.sourceLabel,
+            lastScannedAt: Value(DateTime.now()),
+          ),
+        );
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已重新扫描 ${sources.length} 个位置，更新 $imported 首歌曲'),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _rescanAllBusy = false);
+    }
+  }
+
+  Future<void> _deleteSource(ScanSource source) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除搜索位置？'),
+        content: Text('将移除“${source.label}”以及该位置导入的歌曲。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await ref.read(databaseProvider).deleteScanSource(source);
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('已删除搜索位置“${source.label}”并更新音乐库')));
+    }
+  }
+
   Future<void> _scan({bool fullDevice = false}) async {
     setState(() {
       _scanning = true;
@@ -270,10 +371,15 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
 }
 
 class _ScanSources extends StatelessWidget {
-  const _ScanSources({required this.values, required this.onAdd});
+  const _ScanSources({
+    required this.values,
+    required this.onAdd,
+    required this.onDelete,
+  });
 
   final List<ScanSource> values;
   final VoidCallback onAdd;
+  final Future<void> Function(ScanSource source) onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -351,6 +457,11 @@ class _ScanSources extends StatelessWidget {
                   leading: const Icon(Icons.folder_outlined),
                   title: Text(source.label),
                   subtitle: Text(_sourceLocation(source)),
+                  trailing: IconButton(
+                    tooltip: '删除搜索位置',
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () => onDelete(source),
+                  ),
                 ),
           ],
         ),
@@ -430,83 +541,95 @@ class _SongList extends ConsumerWidget {
     separatorBuilder: (_, _) => const Divider(height: 1),
     itemBuilder: (context, index) {
       final track = tracks[index];
-      return ListTile(
-        minTileHeight: 64,
-        leading: selectionMode
-            ? Checkbox(
-                value: selectedTrackIds.contains(track.id),
-                onChanged: (_) => onToggleSelected(track),
-              )
-            : ArtworkView(bytes: track.artwork),
-        title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          '${track.artist} · ${track.album}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+      return GestureDetector(
+        onSecondaryTapDown: (details) => _showTrackContextMenu(
+          context,
+          ref,
+          tracks,
+          track,
+          details.globalPosition,
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              _duration(track.durationMs),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            PopupMenuButton<String>(
-              position: PopupMenuPosition.under,
-              offset: const Offset(-160, 4),
-              tooltip: '更多操作',
-              onSelected: (value) {
-                if (value == 'playlist') {
-                  _showPlaylistPicker(context, ref, track);
-                }
-                if (value == 'artist') {
-                  openCollectionPage(
-                    context,
-                    tracks,
-                    CollectionKind.artist,
-                    track.artist,
-                  );
-                }
-                if (value == 'album') {
-                  openCollectionPage(
-                    context,
-                    tracks,
-                    CollectionKind.album,
-                    track.album,
-                  );
-                }
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  value: 'artist',
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.person_outline),
-                    title: Text('查看歌手：${track.artist}'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'album',
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.album_outlined),
-                    title: Text('查看专辑：${track.album}'),
-                  ),
-                ),
-                PopupMenuItem(value: 'playlist', child: Text('添加到歌单')),
-              ],
-            ),
-          ],
-        ),
-        onTap: selectionMode
-            ? () => onToggleSelected(track)
-            : () => playOrOpenNowPlaying(
-                context,
-                ref,
-                tracks,
-                initialIndex: index,
+        child: ListTile(
+          minTileHeight: 64,
+          leading: selectionMode
+              ? Checkbox(
+                  value: selectedTrackIds.contains(track.id),
+                  onChanged: (_) => onToggleSelected(track),
+                )
+              : ArtworkView(bytes: track.artwork),
+          title: Text(
+            track.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(
+            '${track.artist} · ${track.album}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _duration(track.durationMs),
+                style: Theme.of(context).textTheme.bodySmall,
               ),
-        onLongPress: () => onLongPress(track),
+              PopupMenuButton<String>(
+                position: PopupMenuPosition.under,
+                offset: const Offset(-160, 4),
+                tooltip: '更多操作',
+                onSelected: (value) async {
+                  if (value == 'playlist') {
+                    _showPlaylistPicker(context, ref, track);
+                  }
+                  if (value == 'artist') {
+                    await openArtistCollectionPage(
+                      context,
+                      tracks,
+                      track.artist,
+                    );
+                  }
+                  if (value == 'album') {
+                    openCollectionPage(
+                      context,
+                      tracks,
+                      CollectionKind.album,
+                      track.album,
+                    );
+                  }
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'artist',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.person_outline),
+                      title: Text('查看歌手：${track.artist}'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'album',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.album_outlined),
+                      title: Text('查看专辑：${track.album}'),
+                    ),
+                  ),
+                  PopupMenuItem(value: 'playlist', child: Text('添加到歌单')),
+                ],
+              ),
+            ],
+          ),
+          onTap: selectionMode
+              ? () => onToggleSelected(track)
+              : () => playOrOpenNowPlaying(
+                  context,
+                  ref,
+                  tracks,
+                  initialIndex: index,
+                ),
+          onLongPress: () => onLongPress(track),
+        ),
       );
     },
   );
@@ -522,9 +645,12 @@ class _GroupGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final groups = <String, List<Track>>{};
     for (final track in tracks) {
-      groups
-          .putIfAbsent(byAlbum ? track.album : track.artist, () => [])
-          .add(track);
+      final names = byAlbum
+          ? <String>[track.album]
+          : splitArtistNames(track.artist);
+      for (final name in names) {
+        groups.putIfAbsent(name, () => []).add(track);
+      }
     }
     return GridView.builder(
       padding: const EdgeInsets.only(bottom: 18),
@@ -541,7 +667,12 @@ class _GroupGrid extends StatelessWidget {
         return Card(
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: () {},
+            onTap: () => openCollectionPage(
+              context,
+              tracks,
+              byAlbum ? CollectionKind.album : CollectionKind.artist,
+              entry.key,
+            ),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -610,6 +741,72 @@ String _duration(int? milliseconds) {
   final minutes = duration.inMinutes;
   final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
   return '$minutes:$seconds';
+}
+
+Future<void> _showTrackContextMenu(
+  BuildContext context,
+  WidgetRef ref,
+  List<Track> tracks,
+  Track track,
+  Offset position,
+) async {
+  final value = await showMenu<String>(
+    context: context,
+    position: RelativeRect.fromLTRB(
+      position.dx,
+      position.dy,
+      position.dx,
+      position.dy,
+    ),
+    items: [
+      const PopupMenuItem(
+        value: 'playlist',
+        child: ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(Icons.playlist_add),
+          title: Text('添加到歌单'),
+        ),
+      ),
+      PopupMenuItem(
+        value: 'artist',
+        child: ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.person_outline),
+          title: Text('查看歌手：${track.artist}'),
+        ),
+      ),
+      PopupMenuItem(
+        value: 'album',
+        child: ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.album_outlined),
+          title: Text('查看专辑：${track.album}'),
+        ),
+      ),
+      if (!kIsWeb &&
+          defaultTargetPlatform == TargetPlatform.windows &&
+          track.filePath != null)
+        const PopupMenuItem(
+          value: 'directory',
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.folder_open_outlined),
+            title: Text('打开所在目录'),
+          ),
+        ),
+    ],
+  );
+  if (!context.mounted || value == null) return;
+  switch (value) {
+    case 'playlist':
+      await _showPlaylistPicker(context, ref, track);
+    case 'artist':
+      await openArtistCollectionPage(context, tracks, track.artist);
+    case 'album':
+      openCollectionPage(context, tracks, CollectionKind.album, track.album);
+    case 'directory':
+      await openTrackDirectory(track.filePath);
+  }
 }
 
 Future<void> _showPlaylistPicker(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/app_database.dart';
+import '../../core/library/artist_names.dart';
 import 'artwork_view.dart';
 import '../player/playback_navigation.dart';
 
@@ -61,6 +62,42 @@ class CollectionPage extends ConsumerWidget {
   }
 }
 
+Future<void> openArtistCollectionPage(
+  BuildContext context,
+  List<Track> allTracks,
+  String artistTag,
+) async {
+  final artists = splitArtistNames(artistTag);
+  if (artists.isEmpty) return;
+
+  if (artists.length == 1) {
+    openCollectionPage(
+      context,
+      allTracks,
+      CollectionKind.artist,
+      artists.single,
+    );
+    return;
+  }
+
+  final selectedArtist = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => SimpleDialog(
+      title: const Text('选择歌手'),
+      children: [
+        for (final artist in artists)
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(dialogContext).pop(artist),
+            child: Text(artist),
+          ),
+      ],
+    ),
+  );
+  if (!context.mounted || selectedArtist == null) return;
+
+  openCollectionPage(context, allTracks, CollectionKind.artist, selectedArtist);
+}
+
 void openCollectionPage(
   BuildContext context,
   List<Track> allTracks,
@@ -69,9 +106,9 @@ void openCollectionPage(
 ) {
   final tracks = allTracks
       .where(
-        (track) =>
-            (kind == CollectionKind.artist ? track.artist : track.album) ==
-            value,
+        (track) => kind == CollectionKind.artist
+            ? artistTagContains(track.artist, value)
+            : track.album == value,
       )
       .toList(growable: false);
   Navigator.of(context).push(

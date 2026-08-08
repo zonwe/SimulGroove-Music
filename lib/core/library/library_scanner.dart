@@ -6,4 +6,9 @@ abstract interface class LibraryScanner {
   String get actionLabel;
   Future<ScanResult?> scan();
   Future<ScanResult?> scanFullDevice();
+  Future<ScanResult?> rescanSource({
+    required String sourceUri,
+    required String platform,
+    required String sourceLabel,
+  });
 }

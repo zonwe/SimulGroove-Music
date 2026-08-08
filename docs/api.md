@@ -15,6 +15,8 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 
 ```powershell
 $env:Auth__JwtKey = "使用密码管理器生成的至少 32 字节随机密钥"
+$env:Administration__Username = "admin"
+$env:Administration__Password = "使用密码管理器生成的管理员密码"
 ```
 
 相关配置：
@@ -25,11 +27,15 @@ $env:Auth__JwtKey = "使用密码管理器生成的至少 32 字节随机密钥"
 | `Auth:Audience` | `flutter-music-client` | JWT 接收方 |
 | `Auth:AccessTokenMinutes` | `15` | Access Token 有效分钟数 |
 | `Auth:RefreshTokenDays` | `30` | Refresh Token 有效天数 |
+| `Administration:Username` | `admin` | Razor Pages 管理员用户名 |
+| `Administration:Password` | 空 | Razor Pages 管理员密码；生产环境必须通过安全配置注入 |
 | `Scanning:PollSeconds` | `30` | 后台任务检查到期扫描源的间隔秒数 |
 | `Scanning:AllowedRoots` | `[]` | 允许扫描的根目录；空数组表示后端可访问的任意目录 |
 | `Audit:RetentionDays` | `90` | 审计日志保留天数，范围 7-3650 |
 
 OpenAPI：`GET /openapi.json`。健康检查：`GET /health`。
+
+服务器扫描管理页面由 Razor Pages 提供：`GET /admin/login` 和 `GET /admin/scanning`。页面使用独立管理员 Cookie，并由 PageModel 直接调用扫描 Service；它不复用下述 Flutter JWT 接口，Flutter 客户端也不包含服务器扫描入口。
 
 ## 项目分层
 
@@ -43,6 +49,7 @@ OpenAPI：`GET /openapi.json`。健康检查：`GET /health`。
 | Data | `Data/` | SQLite 建表和歌单持久化 |
 | Models | `Models/` | API 请求/响应 DTO |
 | OpenAPI | `OpenApi/` | OpenAPI 文档生成 |
+| Admin UI | `Pages/Admin/` | 管理员 Cookie 登录和服务器扫描 Razor Pages |
 
 歌单接口依赖 `IPlaylistStore`，以后可以新增 PostgreSQL 或远程同步实现而不修改接口层；认证接口依赖 `IAuthService`，以后可以接入短信登录、第三方 OAuth 或独立认证服务。
 
