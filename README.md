@@ -15,8 +15,18 @@
 - 外观：默认跟随系统浅色/深色模式，也可手动指定，并提供 8 种可持久化主题色。
 - 账号：连接 `backend/Music.Api`，支持 JWT、Refresh Token 轮换、安全令牌存储、退出和歌单/喜欢同步。
 - 服务器扫描：由 `backend/Music.Api` 托管的 Web 控制台配置后端机器上的音乐绝对路径、定时扫描并查看索引结果；Flutter 客户端不提供该入口，也不会上传客户端音乐。
-- 占位入口：听歌识曲（已声明麦克风权限但未实现）和网络搜索（未接第三方 API）。
-- Web：提供响应式界面、真实后端登录与占位入口；按当前需求不提供本地目录扫描和本地播放。
+- 在线音乐：通过已登录的 `Music.Api` 聚合受控来源，支持去抖、部分失败、短期播放票据和 Range 在线播放；Windows/Android 复用全局播放器，Web 暂不开放需要认证请求头的播放。
+- 占位入口：听歌识曲（已声明麦克风权限但未实现）。
+- Web：提供响应式界面、真实后端登录与在线搜索；按当前需求不提供本地目录扫描和本地播放。
+
+本地在线搜索联调需先在另一个终端启动项目内的 sidecar clone：
+
+```powershell
+go -C go-music-dl run ./cmd/music-dl integration --host 127.0.0.1 --port 8080
+dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:5080
+```
+
+开发环境默认允许 `netease`、`kugou`、`kuwo`；生产配置仍默认关闭在线音乐功能。
 
 ## 技术结构
 
@@ -76,5 +86,5 @@ dart run build_runner build
 - 服务端音乐文件流式播放（当前服务器扫描只建立索引）
 - 多端歌单冲突合并和删除传播（当前同步采用客户端提交覆盖同 ID 歌单）
 - 听歌识曲实现
-- 网络搜索及各家音乐 API
+- 在线歌词与封面代理
 - Web 本地文件扫描与播放

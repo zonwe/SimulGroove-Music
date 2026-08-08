@@ -67,6 +67,51 @@ class MusicAudioHandler extends BaseAudioHandler
     await play();
   }
 
+  Future<void> playOnlineTrack({
+    required String id,
+    required String title,
+    required String artist,
+    required String album,
+    required String provider,
+    required String trackId,
+    required Uri uri,
+    required Map<String, String> headers,
+    int? durationMs,
+  }) async {
+    final item = MediaItem(
+      id: 'online:$id',
+      title: title,
+      artist: artist.isEmpty ? '未知艺术家' : artist,
+      album: album,
+      duration: durationMs == null ? null : Duration(milliseconds: durationMs),
+      extras: {
+        'uri': uri.toString(),
+        'sourceType': 'online',
+        'provider': provider,
+        'trackId': trackId,
+      },
+    );
+    final source = ja.AudioSource.uri(uri, headers: headers, tag: item);
+    _rebuildingQueue = true;
+    try {
+      await _player.setAudioSources(
+        [source],
+        initialIndex: 0,
+        initialPosition: Duration.zero,
+      );
+    } finally {
+      _rebuildingQueue = false;
+    }
+    _tracks = const [];
+    _items = [item];
+    _baseOrder = const [0];
+    _activeOrder = const [0];
+    _shuffleEnabled = false;
+    queue.add([item]);
+    _updateCurrentItem(0);
+    await play();
+  }
+
   Future<MediaItem> _toMediaItem(Track track) async {
     final artUri = await cacheArtwork(track.id, track.artwork);
     return MediaItem(

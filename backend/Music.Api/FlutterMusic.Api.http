@@ -1,4 +1,4 @@
-@baseUrl = http://localhost:5080
+@baseUrl = http://localhost:8081
 @username = rider-test@example.com
 @password = secret-123456
 # 这里填写后端进程能够访问的绝对路径，而不是手机上的路径。
@@ -121,6 +121,37 @@ Accept: application/json
 GET {{baseUrl}}/api/audit-logs?search=scan&eventType=scan.manual&page=1&pageSize=50
 Authorization: Bearer {{access_token}}
 Accept: application/json
+
+### List online music sources
+GET {{baseUrl}}/api/online-music/sources
+Authorization: Bearer {{access_token}}
+Accept: application/json
+
+### Search online music
+POST {{baseUrl}}/api/online-music/search
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "query": "夜曲",
+  "sources": [],
+  "limit": 20,
+  "cursor": null
+}
+
+### Issue online playback ticket
+POST {{baseUrl}}/api/online-music/tracks/netease/496869422/playback
+Authorization: Bearer {{access_token}}
+Accept: application/json
+
+> {%
+client.global.set("online_playback_url", response.body.playbackUrl);
+%}
+
+### Stream online music range
+GET {{baseUrl}}{{online_playback_url}}
+Authorization: Bearer {{access_token}}
+Range: bytes=0-1048575
 
 ### Logout
 POST {{baseUrl}}/api/auth/logout

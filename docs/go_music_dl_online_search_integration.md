@@ -1,6 +1,6 @@
 # go-music-dl 在线搜索接入方案
 
-> 状态：设计方案，尚未实施  
+> 状态：阶段 1 搜索与阶段 2 在线播放已实现；Windows/Android 使用全局播放器，Web 受认证请求头能力限制暂不开放播放
 > 最后更新：2026-08-08  
 > 适用范围：Flutter 客户端、`backend/Music.Api`、独立运行的 `go-music-dl` sidecar
 
@@ -30,9 +30,9 @@ go-music-dl sidecar（音乐源适配、解析、代理流）
 
 ## 2. 背景与上游现状
 
-Flutter Music 当前的在线搜索页仍是占位功能，真实账号与后端请求已经通过 `BackendGateway`/`AuthRepository` 建立边界。在线搜索应沿用这个依赖方向，而不是让页面自行管理另一个服务的 URL、Cookie 或 HTTP 客户端。
+Flutter Music 的在线搜索页已通过 `OnlineMusicGateway`/`AuthRepository` 接入 `Music.Api`，真实账号与后端请求继续沿用既有认证边界。页面不自行管理另一个服务的 URL、Cookie 或 HTTP 客户端。
 
-截至本文更新时，[go-music-dl](https://github.com/guohuiyuan/go-music-dl) 提供 Web、TUI 和桌面模式，并包含跨音乐源搜索、播放、歌词、封面和下载相关能力。它当前的 Web 实现有以下可复用点和限制：
+仓库内的 `go-music-dl` clone 固定于上游提交 `c5a30343f12fafbad83245eee2119768a77be575`，提供 Web、TUI 和桌面模式，并包含跨音乐源搜索、播放、歌词、封面和下载相关能力。它当前的 Web 实现有以下可复用点和限制：
 
 - Web 服务默认路由前缀是 `/music`，并提供健康检查。
 - `/music/download?stream=1` 已包含流式代理及 HTTP Range 处理，可作为播放代理实现的参考或底层能力。
@@ -189,13 +189,15 @@ GET  /integration/v1/streams/{streamToken}
 
 内部 DTO 也不应包含可被客户端长期复用的上游 URL。若底层解析必须产生 URL，应只留在 sidecar 内存或短期票据中。
 
-建议 fork 中新增独立目录，避免把集成逻辑散落在原有页面处理器中：
+clone 中已新增独立目录，避免把集成逻辑散落在原有页面处理器中：
 
 ```text
 internal/integrationapi/
   routes.go
   dto.go
   mapper.go
+  search.go
+  server.go
 ```
 
 ## 7. Music.Api 公开 API
@@ -354,7 +356,7 @@ UI 不直接展示 Go、Gin、第三方平台或网络库的原始异常。服�
     "SidecarBaseUrl": "http://127.0.0.1:8080",
     "RequestTimeoutSeconds": 12,
     "SearchCacheSeconds": 60,
-    "PlaybackTicketSeconds": 120,
+    "PlaybackTicketSeconds": 300,
     "AllowedSources": ["source-a", "source-b"],
     "MaxResults": 50
   }
@@ -428,7 +430,7 @@ backend/Music.Api/
   Endpoints/OnlineMusicEndpoints.cs
   Services/OnlineMusic/IOnlineMusicGateway.cs
   Services/OnlineMusic/GoMusicDlGateway.cs
-  Services/OnlineMusic/PlaybackTicketService.cs
+  Services/OnlineMusic/OnlineMusicPlaybackService.cs
 ```
 
 Endpoint 只做认证上下文、请求校验和 HTTP 映射；调用、缓存和错误转换放入 Service。公开契约落地后同步更新 [`api.md`](api.md)、OpenAPI 和 HTTP 示例。
@@ -448,7 +450,7 @@ lib/features/online_search/
   online_track_tile.dart
 ```
 
-现有 [`online_search_page.dart`](../lib/features/placeholders/online_search_page.dart) 可在功能落地时迁移出占位目录。Provider 继续集中在 `lib/app/providers.dart`，页面不直接持有 Token 或通用 HTTP 客户端。
+在线搜索页已迁移至 [`online_search_page.dart`](../lib/features/online_search/online_search_page.dart)。Provider 继续集中在 `lib/app/providers.dart`，页面不直接持有 Token 或通用 HTTP 客户端。
 
 播放器侧应扩展 `MusicAudioHandler` 可接受的队列项或增加在线音源解析边界，而不是创建第二个播放器。在线曲目引用和本地 Drift `Track` 不应在第一阶段强行合并；先用显式的可播放项模型处理两类来源。
 
@@ -470,6 +472,8 @@ lib/features/online_search/
 
 ### 阶段 1：只接搜索
 
+当前状态：sidecar `/integration/v1/health` 与 `/integration/v1/search`、Music.Api Gateway、公开搜索 Endpoint、缓存、限流、Flutter 搜索页、350 毫秒去抖、过期请求保护和部分失败状态均已落地。2026-08-08 的本地真实联调使用 `netease + kugou` 返回两个来源的统一结果，响应未包含第三方 URL、Cookie、签名参数或非空 `artworkRef`。
+
 - 在 sidecar 增加 JSON 搜索接口。
 - 在 Music.Api 增加 Gateway、公开搜索 Endpoint、超时、限流和映射。
 - 在 Flutter 实现搜索页面、去抖、过期请求保护和部分失败状态。
@@ -478,6 +482,10 @@ lib/features/online_search/
 交付物：跨来源搜索闭环，不包含在线播放。
 
 ### 阶段 2：在线播放
+
+当前状态：sidecar 私有曲目注册表与 `streamRef`、Music.Api 账号绑定播放票据、Range 转发、Flutter 票据刷新和全局 `MusicAudioHandler` 播放路径已落地。票据默认五分钟有效；已建立的响应可继续传输，过期后的新 Range 请求需要重新解析。Web 因无法可靠为音频元素附加 Bearer Token 暂不开放播放按钮。
+
+2026-08-08 的真实端到端验证使用 `netease` 搜索结果完成解析：公开票据响应未包含 sidecar `streamRef`、第三方 URL 或签名参数；`Range: bytes=0-1023` 返回 `206`、`Content-Range: bytes 0-1023/10484550`、`audio/mpeg` 和精确 1024 字节；另一个已登录账号复用同一票据返回 `404`。
 
 - 增加解析接口、播放票据和 Range 代理。
 - 将在线队列接入现有 `MusicAudioHandler`。
@@ -548,4 +556,3 @@ lib/features/online_search/
 - [go-music-dl AGPL-3.0 许可证](https://github.com/guohuiyuan/go-music-dl/blob/main/LICENSE)
 - [Flutter Music API 文档](api.md)
 - [现有音乐服务 API 评估](music_service_api_evaluation.md)
-

@@ -7,9 +7,14 @@ import '../core/auth/http_backend_gateway.dart';
 import '../core/database/app_database.dart';
 import '../core/library/library_scanner.dart';
 import '../core/library/scanner_factory.dart';
+import '../core/online_music/http_online_music_gateway.dart';
+import '../core/online_music/online_music_gateway.dart';
+import '../core/online_music/online_music_repository.dart';
+import '../core/online_music/online_track_playback.dart';
 import '../core/player/music_audio_handler.dart';
 import '../core/theme/app_appearance.dart';
 import '../core/window/window_settings.dart';
+import '../features/online_search/online_search_controller.dart';
 
 final databaseProvider = Provider<AppDatabase>(
   (ref) => throw UnimplementedError(),
@@ -31,6 +36,28 @@ final authRepositoryProvider = Provider<AuthRepository>(
     ref.watch(databaseProvider),
     ref.watch(backendGatewayProvider),
     ref.watch(authTokenStoreProvider),
+  ),
+);
+final onlineMusicGatewayProvider = Provider<OnlineMusicGateway>(
+  (ref) => HttpOnlineMusicGateway(),
+);
+final onlineMusicRepositoryProvider = Provider<OnlineMusicSearchRepository>(
+  (ref) => AuthenticatedOnlineMusicRepository(
+    ref.watch(authRepositoryProvider),
+    ref.watch(onlineMusicGatewayProvider),
+  ),
+);
+final onlineSearchControllerProvider = Provider<OnlineSearchController>((ref) {
+  final controller = OnlineSearchController(
+    ref.watch(onlineMusicRepositoryProvider),
+  );
+  ref.onDispose(controller.dispose);
+  return controller;
+});
+final onlineTrackPlaybackProvider = Provider<OnlineTrackPlayback>(
+  (ref) => DefaultOnlineTrackPlayback(
+    ref.watch(onlineMusicRepositoryProvider),
+    ref.watch(audioHandlerProvider),
   ),
 );
 final tracksProvider = StreamProvider<List<Track>>(

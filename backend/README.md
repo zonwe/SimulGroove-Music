@@ -1,6 +1,6 @@
 # Flutter Music 后端
 
-`backend/Music.Api` 是 Flutter Music 的实验性同步后端，基于 ASP.NET Core 10 Minimal API 和 SQLite。它提供账号会话、歌单/喜欢同步、服务器目录扫描和审计日志，并已通过 `HttpBackendGateway` 接入 Flutter 主界面。客户端运行配置见 [`../docs/flutter_backend_integration.md`](../docs/flutter_backend_integration.md)。
+`backend/Music.Api` 是 Flutter Music 的实验性同步后端，基于 ASP.NET Core 10 Minimal API 和 SQLite。它提供账号会话、歌单/喜欢同步、服务器目录扫描、在线音乐搜索 BFF 和审计日志，并已接入 Flutter 主界面。客户端运行配置见 [`../docs/flutter_backend_integration.md`](../docs/flutter_backend_integration.md)。
 
 ## 快速开始
 
@@ -18,6 +18,14 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 Invoke-RestMethod http://localhost:5080/health
 Invoke-RestMethod http://localhost:5080/openapi.json
 ```
+
+在线搜索联调还需要在仓库根目录的 `go-music-dl` clone 中启动仅监听本机的集成服务：
+
+```powershell
+go -C go-music-dl run ./cmd/music-dl integration --host 127.0.0.1 --port 8080
+```
+
+Development 配置默认启用 `netease`、`kugou`、`kuwo` 三个已验证来源；生产 `appsettings.json` 仍默认关闭在线音乐功能。
 
 服务器扫描管理页面由 API 项目直接托管，浏览器打开：
 
@@ -54,6 +62,11 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `Scanning:PollSeconds` | `30` | 后台扫描任务轮询间隔，代码会限制在 5–3600 秒 |
 | `Scanning:AllowedRoots` | `[]` | 允许用户配置的服务器目录根；生产环境应显式设置 |
 | `Audit:RetentionDays` | `90` | 审计日志保留时间，范围为 7–3650 天 |
+| `OnlineMusic:Enabled` | `false` | 是否启用在线音乐搜索 |
+| `OnlineMusic:SidecarBaseUrl` | `http://127.0.0.1:8080` | 私有 go-music-dl sidecar 地址 |
+| `OnlineMusic:AllowedSources` | `[]` | sidecar 规范来源 ID 白名单 |
+| `OnlineMusic:RequestsPerMinute` | `30` | 每账号和每 IP 的搜索限额 |
+| `OnlineMusic:PlaybackTicketSeconds` | `300` | 账号绑定播放票据的有效秒数，限制为 60–300 |
 
 ## API 概览
 
@@ -66,6 +79,8 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 - `GET/POST /api/scan-sources/`、`PUT/DELETE /api/scan-sources/{id}`：管理服务器扫描源。
 - `POST /api/scan-sources/{id}/scan`、`GET /api/scan-sources/{id}/tracks`：立即扫描和读取索引结果。
 - `GET /api/audit-logs`：分页查询当前账号的审计日志。
+- `GET /api/online-music/sources`、`POST /api/online-music/search`：查询允许来源和执行跨来源搜索。
+- `POST /api/online-music/tracks/{source}/{trackId}/playback`、`GET /api/online-music/playback/{ticket}`：签发账号绑定短期票据并转发支持 Range 的在线音频流。
 
 服务器扫描管理页位于 `/admin/scanning`，登录页位于 `/admin/login`。Flutter 客户端不包含服务器扫描管理入口。
 
@@ -80,6 +95,7 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `Music.Api/Services/Auth/` | PBKDF2 密码哈希、JWT 和 Refresh Token 轮换 |
 | `Music.Api/Services/Scanning/` | 目录扫描和定时后台任务 |
 | `Music.Api/Services/Administration/` | 管理员配置凭据校验与授权常量 |
+| `Music.Api/Services/OnlineMusic/` | sidecar JSON 网关、搜索缓存、限流、播放票据和稳定错误映射 |
 | `Music.Api/Pages/Admin/` | 管理员登录与服务器扫描 Razor Pages |
 | `Music.Api/Data/` | SQLite 建表、歌单、扫描源和审计日志存取 |
 | `Music.Api/Models/` | API 请求/响应 DTO |
@@ -106,5 +122,6 @@ dotnet test backend/Music.Api.Tests/Music.Api.Tests.csproj --no-restore
 - 配置 `Scanning:AllowedRoots`，避免用户把任意服务器目录加入扫描。
 - Refresh Token 只保存 SHA-256 摘要，每次刷新都会轮换；客户端应在刷新失败时清除本地会话。
 - 服务端扫描的是后端机器上的目录，不是客户端上传的音乐文件。
+- 在线音乐功能默认关闭；sidecar 只应在回环地址或私有网络监听，Flutter 不得直接访问它。
 
 后端的协作约束和验证矩阵见 [`AGENTS.md`](AGENTS.md)。

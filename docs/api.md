@@ -32,6 +32,14 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `Scanning:PollSeconds` | `30` | 后台任务检查到期扫描源的间隔秒数 |
 | `Scanning:AllowedRoots` | `[]` | 允许扫描的根目录；空数组表示后端可访问的任意目录 |
 | `Audit:RetentionDays` | `90` | 审计日志保留天数，范围 7-3650 |
+| `OnlineMusic:Enabled` | `false` | 是否启用在线音乐搜索；默认关闭 |
+| `OnlineMusic:SidecarBaseUrl` | `http://127.0.0.1:8080` | 仅供 Music.Api 访问的 go-music-dl sidecar 地址 |
+| `OnlineMusic:AllowedSources` | `[]` | 允许搜索的规范来源 ID 白名单 |
+| `OnlineMusic:RequestTimeoutSeconds` | `12` | sidecar 搜索请求超时秒数 |
+| `OnlineMusic:SearchCacheSeconds` | `60` | 相同搜索的短期缓存秒数 |
+| `OnlineMusic:RequestsPerMinute` | `30` | 每账号和每 IP 的每分钟搜索上限 |
+| `OnlineMusic:MaxResults` | `50` | 单次搜索允许的最大结果数，服务端上限 100 |
+| `OnlineMusic:PlaybackTicketSeconds` | `300` | 账号绑定播放票据有效秒数，运行时限制为 60–300 |
 
 OpenAPI：`GET /openapi.json`。健康检查：`GET /health`。
 
@@ -296,6 +304,73 @@ JWT 签名错误、受众不匹配或已过期时返回 `401`。
 ```
 
 审计内容包括登录成功/失败、令牌刷新、退出登录、扫描路径变更、手动扫描、定时扫描和已认证 API 请求。密码、JWT、Refresh Token 及请求体不会写入日志。
+
+## 8. 在线音乐搜索与播放
+
+在线搜索采用 `Flutter -> Music.Api -> go-music-dl sidecar` 的 BFF 边界。除健康检查外，公开接口需要 Bearer Access Token。Flutter 不接触 sidecar 地址、第三方 Cookie、签名参数或原始播放 URL。
+
+部署环境必须显式审核 `OnlineMusic:Enabled`、私有 sidecar 地址和来源白名单。仓库内 `go-music-dl` clone 基于上游提交 `c5a30343f12fafbad83245eee2119768a77be575` 实现了 JSON 集成契约；本地启动命令：
+
+```powershell
+go -C go-music-dl run ./cmd/music-dl integration --host 127.0.0.1 --port 8080
+```
+
+Development 配置默认启用 `netease`、`kugou`、`kuwo`。生产部署需要显式启用并设置经过验证的来源白名单：
+
+```json
+{
+  "OnlineMusic": {
+    "Enabled": true,
+    "SidecarBaseUrl": "http://127.0.0.1:8080",
+    "AllowedSources": ["实际来源 ID"]
+  }
+}
+```
+
+### 8.1 查询允许的来源
+
+`GET /api/online-music/sources`
+
+成功返回 `enabled` 和 `sources`。未认证返回 `401`。
+
+### 8.2 搜索
+
+`POST /api/online-music/search`
+
+```json
+{
+  "query": "夜曲",
+  "sources": [],
+  "limit": 20,
+  "cursor": null
+}
+```
+
+`sources` 为空时搜索全部允许来源。成功响应包含稳定身份 `provider + trackId`、展示字段、可播放状态和来源级警告。单个来源失败时返回 `200` 且 `partial: true`；全部来源不可用返回 `503`，整体超时返回 `504`，限流返回 `429`。
+
+### 8.3 获取播放票据
+
+`POST /api/online-music/tracks/{source}/{trackId}/playback`
+
+成功返回账号绑定、不可猜测的短期票据：
+
+```json
+{
+  "playbackUrl": "/api/online-music/playback/opaque-ticket",
+  "expiresAt": "2026-08-08T12:05:00Z",
+  "mimeType": "audio/mpeg"
+}
+```
+
+来源不在白名单或曲目 ID 无效返回 `400`；sidecar 不可用返回 `503`；解析超时返回 `504`。响应不包含 sidecar 私有 `streamRef` 或第三方 URL。
+
+### 8.4 播放在线音频
+
+`GET /api/online-music/playback/{ticket}`
+
+请求必须继续携带签发账号的 Bearer Token，可携带 `Range: bytes=...`。服务端返回 `200` 或 `206`，只转发 `Content-Type`、`Content-Length`、`Accept-Ranges`、`Content-Range`、`ETag`。票据过期返回 `410 online_music_playback_expired`，不存在或属于其他账号统一返回 `404 online_music_playback_not_found`，无效或越界 Range 返回 `416 online_music_invalid_range`。
+
+票据允许在有效期内发起多个 Range 请求；已经建立的流不会因票据随后到期而被主动截断。过期后的新请求必须重新获取票据。Flutter 的 Windows/Android 播放使用同一个 `MusicAudioHandler`；Web 音频元素无法可靠附加 Bearer 请求头，因此当前不显示可用播放操作。歌词和封面代理留待阶段 3。
 
 ## Flutter 客户端接入状态
 

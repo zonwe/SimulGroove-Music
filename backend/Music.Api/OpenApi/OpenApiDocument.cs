@@ -26,7 +26,11 @@ public static class OpenApiDocument
             },
             ["/api/scan-sources/{id}/scan"] = new { post = new { summary = "Run a music scan immediately", security = Security(), parameters = IdParameter(), responses = new Dictionary<string, object> { ["200"] = Response("ScanSourceResponse"), ["401"] = ErrorResponse(), ["404"] = ErrorResponse() } } },
             ["/api/scan-sources/{id}/tracks"] = new { get = new { summary = "List tracks indexed for a scan source", security = Security(), parameters = IdAndLimitParameters(), responses = new Dictionary<string, object> { ["200"] = ArrayResponse("ScannedTrackResponse"), ["401"] = ErrorResponse() } } },
-            ["/api/audit-logs"] = new { get = new { summary = "Query account-scoped audit logs", security = Security(), parameters = AuditParameters(), responses = new Dictionary<string, object> { ["200"] = Response("AuditLogPageResponse"), ["401"] = ErrorResponse() } } }
+            ["/api/audit-logs"] = new { get = new { summary = "Query account-scoped audit logs", security = Security(), parameters = AuditParameters(), responses = new Dictionary<string, object> { ["200"] = Response("AuditLogPageResponse"), ["401"] = ErrorResponse() } } },
+            ["/api/online-music/sources"] = new { get = new { summary = "List configured online music sources", security = Security(), responses = new Dictionary<string, object> { ["200"] = Response("OnlineMusicSourcesResponse"), ["401"] = ErrorResponse() } } },
+            ["/api/online-music/search"] = new { post = new { summary = "Search configured online music sources", security = Security(), requestBody = RequestBody("OnlineMusicSearchRequest"), responses = new Dictionary<string, object> { ["200"] = Response("OnlineMusicSearchResponse"), ["400"] = ErrorResponse(), ["401"] = ErrorResponse(), ["429"] = ErrorResponse(), ["503"] = ErrorResponse(), ["504"] = ErrorResponse() } } },
+            ["/api/online-music/tracks/{source}/{trackId}/playback"] = new { post = new { summary = "Issue an account-bound online playback ticket", security = Security(), parameters = OnlineTrackParameters(), responses = new Dictionary<string, object> { ["200"] = Response("OnlineMusicPlaybackResponse"), ["400"] = ErrorResponse(), ["401"] = ErrorResponse(), ["503"] = ErrorResponse(), ["504"] = ErrorResponse() } } },
+            ["/api/online-music/playback/{ticket}"] = new { get = new { summary = "Stream online audio with Range support", security = Security(), parameters = PlaybackTicketParameters(), responses = new Dictionary<string, object> { ["200"] = BinaryResponse(), ["206"] = BinaryResponse(), ["401"] = ErrorResponse(), ["404"] = ErrorResponse(), ["410"] = ErrorResponse(), ["416"] = ErrorResponse(), ["502"] = ErrorResponse(), ["504"] = ErrorResponse() } } }
         },
         ["components"] = new
         {
@@ -48,7 +52,13 @@ public static class OpenApiDocument
                 ["ScanSourceResponse"] = new { type = "object", properties = new { id = new { type = "string" }, path = new { type = "string" }, intervalMinutes = new { type = "integer" }, enabled = new { type = "boolean" }, status = new { type = "string", example = "idle" }, trackCount = new { type = "integer" }, lastScanAt = new { type = "string", format = "date-time", nullable = true }, nextScanAt = new { type = "string", format = "date-time", nullable = true }, lastError = new { type = "string", nullable = true } } },
                 ["ScannedTrackResponse"] = new { type = "object", properties = new { id = new { type = "string" }, scanSourceId = new { type = "string" }, filePath = new { type = "string" }, title = new { type = "string" }, artist = new { type = "string" }, album = new { type = "string" }, extension = new { type = "string" }, fileSize = new { type = "integer", format = "int64" }, modifiedAt = new { type = "string", format = "date-time" } } },
                 ["AuditLogPageResponse"] = new { type = "object", properties = new { items = new { type = "array", items = Ref("AuditLogResponse") }, total = new { type = "integer" }, page = new { type = "integer" }, pageSize = new { type = "integer" } } },
-                ["AuditLogResponse"] = new { type = "object", properties = new { id = new { type = "string" }, username = new { type = "string", nullable = true }, level = new { type = "string" }, eventType = new { type = "string" }, message = new { type = "string" }, createdAt = new { type = "string", format = "date-time" }, method = new { type = "string", nullable = true }, path = new { type = "string", nullable = true }, statusCode = new { type = "integer", nullable = true }, durationMs = new { type = "integer", nullable = true }, ipAddress = new { type = "string", nullable = true }, traceId = new { type = "string", nullable = true }, details = new { type = "string", nullable = true } } }
+                ["AuditLogResponse"] = new { type = "object", properties = new { id = new { type = "string" }, username = new { type = "string", nullable = true }, level = new { type = "string" }, eventType = new { type = "string" }, message = new { type = "string" }, createdAt = new { type = "string", format = "date-time" }, method = new { type = "string", nullable = true }, path = new { type = "string", nullable = true }, statusCode = new { type = "integer", nullable = true }, durationMs = new { type = "integer", nullable = true }, ipAddress = new { type = "string", nullable = true }, traceId = new { type = "string", nullable = true }, details = new { type = "string", nullable = true } } },
+                ["OnlineMusicSourcesResponse"] = new { type = "object", properties = new { enabled = new { type = "boolean" }, sources = new { type = "array", items = new { type = "string" } } } },
+                ["OnlineMusicSearchRequest"] = new { type = "object", required = new[] { "query" }, properties = new { query = new { type = "string", minLength = 1, maxLength = 100 }, sources = new { type = "array", maxItems = 8, items = new { type = "string" } }, limit = new { type = "integer", minimum = 1, maximum = 100, @default = 20 }, cursor = new { type = "string", nullable = true } } },
+                ["OnlineMusicTrackResponse"] = new { type = "object", properties = new { provider = new { type = "string" }, trackId = new { type = "string" }, title = new { type = "string" }, artists = new { type = "array", items = new { type = "string" } }, album = new { type = "string" }, durationMs = new { type = "integer", nullable = true }, artworkUrl = new { type = "string", nullable = true }, playable = new { type = "boolean" }, capabilities = new { type = "array", items = new { type = "string" } } } },
+                ["OnlineMusicWarningResponse"] = new { type = "object", properties = new { provider = new { type = "string" }, code = new { type = "string" }, message = new { type = "string" } } },
+                ["OnlineMusicSearchResponse"] = new { type = "object", properties = new { items = new { type = "array", items = Ref("OnlineMusicTrackResponse") }, partial = new { type = "boolean" }, warnings = new { type = "array", items = Ref("OnlineMusicWarningResponse") }, nextCursor = new { type = "string", nullable = true } } },
+                ["OnlineMusicPlaybackResponse"] = new { type = "object", properties = new { playbackUrl = new { type = "string" }, expiresAt = new { type = "string", format = "date-time" }, mimeType = new { type = "string", nullable = true } } }
             }
         }
     };
@@ -59,6 +69,7 @@ public static class OpenApiDocument
     private static object Response(string schema) => new { description = "Success", content = new Dictionary<string, object> { ["application/json"] = new { schema = Ref(schema) } } };
     private static object ArrayResponse(string schema) => new { description = "Success", content = new Dictionary<string, object> { ["application/json"] = new { schema = new { type = "array", items = Ref(schema) } } } };
     private static object ErrorResponse() => new { description = "Request failed" };
+    private static object BinaryResponse() => new { description = "Audio stream", content = new Dictionary<string, object> { ["application/octet-stream"] = new { schema = new { type = "string", format = "binary" } } } };
     private static object[] IdParameter() => [new { name = "id", @in = "path", required = true, schema = new { type = "string" } }];
     private static object[] IdAndLimitParameters() =>
     [
@@ -74,5 +85,15 @@ public static class OpenApiDocument
         new { name = "to", @in = "query", required = false, schema = new { type = "string", format = "date-time" } },
         new { name = "page", @in = "query", required = false, schema = new { type = "integer", minimum = 1, @default = 1 } },
         new { name = "pageSize", @in = "query", required = false, schema = new { type = "integer", minimum = 1, maximum = 100, @default = 50 } }
+    ];
+    private static object[] OnlineTrackParameters() =>
+    [
+        new { name = "source", @in = "path", required = true, schema = new { type = "string" } },
+        new { name = "trackId", @in = "path", required = true, schema = new { type = "string" } }
+    ];
+    private static object[] PlaybackTicketParameters() =>
+    [
+        new { name = "ticket", @in = "path", required = true, schema = new { type = "string" } },
+        new { name = "Range", @in = "header", required = false, schema = new { type = "string", example = "bytes=0-1048575" } }
     ];
 }

@@ -10,7 +10,7 @@ Flutter Music 是一个面向 Android、Windows 和 Web 的私人本地音乐播
 
 - Android：授权目录或扫描整台设备、读取 MediaStore/Document Tree、后台播放、媒体通知、锁屏和耳机控制。
 - Windows：递归扫描本地目录、读取音频元数据、桌面快捷键、系统托盘、自绘标题栏和紧凑悬浮播放器。
-- Web：响应式界面、Drift Web 数据库、真实后端账号和占位功能；不支持本地目录扫描与本地音乐播放。
+- Web：响应式界面、Drift Web 数据库、真实后端账号和在线搜索；不支持本地目录扫描与本地音乐播放。
 - 通用功能：歌曲/专辑/艺术家视图、搜索、封面、歌词、播放队列、歌单、喜欢、主题外观和设置持久化。
 - 实验性后端：`backend/Music.Api` 提供 ASP.NET Core + SQLite 的认证、歌单同步、服务器目录扫描和审计日志接口。
 
@@ -18,7 +18,7 @@ Flutter Music 是一个面向 Android、Windows 和 Web 的私人本地音乐播
 
 - Flutter 账号页通过 `HttpBackendGateway` 连接真实后端，令牌由安全存储保存；修改认证时必须继续保持刷新轮换和 401 单次重试。
 - 服务器扫描管理位于 `backend/Music.Api/Pages/Admin/` Razor Pages，不放入 Flutter 客户端；扫描的是后端机器目录，结果目前只供查看，尚不能直接播放。
-- 在线搜索和听歌识曲是占位页。
+- 在线搜索与 Windows/Android 在线播放已通过 `Music.Api` 接入受控 sidecar 契约；播放使用账号绑定短期票据与 Range 代理，Web 因认证请求头限制暂不开放在线播放；听歌识曲仍是占位页。
 - Web 本地文件扫描和播放未实现。
 - `ios/`、`macos/`、`linux/` 保留 Flutter 平台脚手架，但不是 README 声明的主要交付目标。涉及这些平台时必须单独验证，不能根据 Android/Windows 的结果推断可用。
 
@@ -49,11 +49,13 @@ Flutter Music 是一个面向 Android、Windows 和 Web 的私人本地音乐播
 | `lib/features/player/` | 迷你播放器、正在播放页、队列、音量和歌曲信息 | UI 状态来自 `MusicAudioHandler` 的流和值流 |
 | `lib/features/playlists/` | 歌单列表和详情 | 写操作经 `AppDatabase`，不要在页面内维护另一份事实源 |
 | `lib/features/account/` | 真实登录和歌单/喜欢同步 UI | 页面不直接持有 Token 或 HTTP 客户端 |
-| `lib/features/placeholders/` | 设置，以及在线搜索/识曲占位页 | `settings_page.dart` 已是实际设置页，目录名不代表全部都是占位功能 |
+| `lib/features/placeholders/` | 设置与听歌识曲占位页 | `settings_page.dart` 已是实际设置页，目录名不代表全部都是占位功能 |
+| `lib/features/online_search/` | 在线音乐搜索状态、页面和结果项 | 只调用 `Music.Api`；不得直连 sidecar 或保存第三方 URL/Cookie |
 | `android/` | Android 宿主、权限和 MediaStore MethodChannel | 修改 Kotlin 后至少做 Android 编译或实机验证 |
 | `windows/` | Windows Runner、CMake、图标和生成的插件注册 | 生成的 registrant 不手改；CMake 有 MSVC 兼容设置 |
 | `web/` | Web 启动页、PWA 资源、Drift worker 和 SQLite WASM | 不要遗漏 `sqlite3.wasm`、`drift_worker.js` 的部署路径 |
 | `backend/Music.Api/` | ASP.NET Core 10 Minimal API + SQLite 后端 | 与 Flutter 主工程是独立构建单元 |
+| `go-music-dl/` | 固定上游 clone 与私有 JSON sidecar | 集成模式默认仅监听 `127.0.0.1`；搜索私有字段与上游 URL 只进短期内存注册表，不得向公网或 Flutter 暴露 |
 | `backend/Music.Api/Pages/Admin/` | 后端托管的服务器扫描 Razor Pages | 使用独立管理员 Cookie；PageModel 调用扫描 Service，不复用 Flutter JWT |
 | `backend/Music.Api/wwwroot/admin/scanning/` | 管理页面样式资源 | 不应再放置独立 HTML/JavaScript 应用 |
 | `docs/api.md` | 后端配置和接口契约 | 接口行为变化时同步更新 |
