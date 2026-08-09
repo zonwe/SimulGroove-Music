@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Music.Api.Data;
 using Music.Api.Endpoints;
 using Music.Api.Middleware;
@@ -22,6 +23,9 @@ builder.Services.Configure<AdministrationOptions>(
 builder.Services.Configure<OnlineMusicOptions>(
 	builder.Configuration.GetSection(OnlineMusicOptions.SectionName));
 
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton(TimeProvider.System);
+
 builder.Services.AddSingleton<IAuthService, AuthService>();
 builder.Services.AddSingleton<IAdminCredentialService, AdminCredentialService>();
 builder.Services.AddSingleton<IPlaylistStore, SqliteStore>();
@@ -33,7 +37,22 @@ builder.Services.AddSingleton<IOnlineMusicRequestLimiter, OnlineMusicRequestLimi
 builder.Services.AddSingleton<IOnlineMusicSearchService, OnlineMusicSearchService>();
 builder.Services.AddSingleton<IOnlineMusicPlaybackService, OnlineMusicPlaybackService>();
 builder.Services.AddSingleton<IOnlineMusicAssetService, OnlineMusicAssetService>();
-builder.Services.AddHttpClient<IOnlineMusicGateway, GoMusicDlGateway>();
+builder.Services.AddSingleton<OnlineMusicCircuitBreaker>();
+builder.Services.AddTransient<CorrelationIdHandler>();
+builder.Services.AddTransient<OnlineMusicResilienceHandler>();
+builder.Services
+	.AddHttpClient<IOnlineMusicGateway, GoMusicDlGateway>()
+	.AddHttpMessageHandler<OnlineMusicResilienceHandler>()
+	.AddHttpMessageHandler<CorrelationIdHandler>();
+builder.Services
+	.AddHttpClient(OnlineMusicSidecarHealthCheck.HttpClientName, client =>
+		client.Timeout = Timeout.InfiniteTimeSpan)
+	.AddHttpMessageHandler<CorrelationIdHandler>();
+builder.Services
+	.AddHealthChecks()
+	.AddCheck<OnlineMusicSidecarHealthCheck>(
+		"online_music_sidecar",
+		tags: ["ready"]);
 builder.Services.AddHostedService<ScheduledMusicScanWorker>();
 builder.Services
 	.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -74,6 +93,7 @@ _ = app.Services.GetRequiredService<IAuditLogStore>();
 _ = app.Services.GetRequiredService<IOnlineMusicSearchService>();
 _ = app.Services.GetRequiredService<IOnlineMusicPlaybackService>();
 _ = app.Services.GetRequiredService<IOnlineMusicAssetService>();
+app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseCors();
 app.UseStaticFiles();
 app.Use(async (context, next) =>
@@ -102,6 +122,10 @@ app.MapGet("/", () => Results.Ok(new
 }));
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapHealthChecks("/health/ready", new()
+{
+	Predicate = registration => registration.Tags.Contains("ready")
+});
 app.MapGet("/openapi.json", () => Results.Json(OpenApiDocument.Create()));
 app.MapAuthEndpoints();
 app.MapPlaylistEndpoints();

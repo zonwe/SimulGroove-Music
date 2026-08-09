@@ -9,6 +9,7 @@ public static class OpenApiDocument
         ["paths"] = new Dictionary<string, object>
         {
             ["/health"] = new { get = new { summary = "Health check", responses = new Dictionary<string, object> { ["200"] = new { description = "Success" } } } },
+            ["/health/ready"] = new { get = new { summary = "Dependency readiness check", responses = new Dictionary<string, object> { ["200"] = new { description = "Ready" }, ["503"] = new { description = "A required dependency is unavailable" } } } },
             ["/api/auth/login"] = new { post = new { summary = "Login", requestBody = RequestBody("LoginRequest"), responses = new Dictionary<string, object> { ["200"] = Response("AuthTokenResponse"), ["400"] = ErrorResponse(), ["401"] = ErrorResponse() } } },
             ["/api/auth/refresh"] = new { post = new { summary = "Rotate refresh token", requestBody = RequestBody("RefreshTokenRequest"), responses = new Dictionary<string, object> { ["200"] = Response("AuthTokenResponse"), ["400"] = ErrorResponse(), ["401"] = ErrorResponse() } } },
             ["/api/auth/me"] = new { get = new { summary = "Current session", security = Security(), responses = new Dictionary<string, object> { ["200"] = Response("SessionAccountResponse"), ["401"] = ErrorResponse() } } },

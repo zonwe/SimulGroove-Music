@@ -402,6 +402,16 @@ go-music-dl-sidecar:8080
 - 两个进程分别设置资源限额、健康检查和重启策略。
 - 版本升级先通过契约测试，再更新固定 commit 或镜像 digest。
 
+仓库根目录的 `compose.online-music.yml` 已实现单机编排：API 使用非 root 用户运行并持久化 SQLite 与 Data Protection 密钥；sidecar 不发布宿主机端口，只通过 Compose 私有网络向 API 提供集成端点。部署前从 `.env.example` 创建未提交的 `.env`，替换 JWT 和管理员占位密钥，然后运行：
+
+```powershell
+docker compose --env-file .env -f compose.online-music.yml config
+docker compose --env-file .env -f compose.online-music.yml up --detach --build
+Invoke-WebRequest http://localhost:5080/health/ready
+```
+
+该编排保留 sidecar 的外网访问能力，仅阻止宿主机端口暴露。生产 HTTPS 由外部反向代理或入口控制器终止。升级前必须记录主仓库与 sidecar commit、备份 API 数据卷并通过契约测试；升级后检查 Compose 健康状态与 `/health/ready`。回滚时恢复两个已记录 commit 后重建，只有迁移不兼容时才恢复数据卷备份。
+
 ## 12. 安全与合规
 
 ### 12.1 服务安全
@@ -503,6 +513,8 @@ lib/features/online_search/
 - 完善空歌词、损坏封面、来源限流等降级状态。
 
 ### 阶段 4：加固与运维
+
+当前状态：Music.Api 已区分进程存活检查 `/health` 与依赖就绪检查 `/health/ready`；在线音乐启用时，就绪检查会以独立的 1–10 秒超时探测 sidecar。经过字符集和长度校验的 `X-Correlation-ID` 会贯穿响应、账号审计记录与 sidecar 请求，非法值由服务端替换，且不携带敏感业务数据。sidecar 业务调用已经发布低基数请求数、失败数、耗时与熔断拒绝指标，并在连续瞬时失败后打开进程内熔断；恢复窗口只允许单个探测请求，就绪检查则绕过熔断以准确发现依赖恢复。
 
 - 健康检查、指标、关联 ID、熔断和告警。
 - 容器/服务管理配置与版本升级流程。

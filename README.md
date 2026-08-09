@@ -28,6 +28,14 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 
 开发环境默认允许 `netease`、`kugou`、`kuwo`；生产配置仍默认关闭在线音乐功能。
 
+单机容器联调可从 `.env.example` 创建本地 `.env`，再运行：
+
+```powershell
+docker compose --env-file .env -f compose.online-music.yml up --detach --build
+```
+
+该编排只发布 `Music.Api` 端口，sidecar 保持在 Compose 私有网络。完整的密钥、数据卷、健康检查和升级说明见 [`backend/README.md`](backend/README.md)。
+
 ## 技术结构
 
 - Flutter + Riverpod
@@ -86,5 +94,5 @@ dart run build_runner build
 - 服务端音乐文件流式播放（当前服务器扫描只建立索引）
 - 多端歌单冲突合并和删除传播（当前同步采用客户端提交覆盖同 ID 歌单）
 - 听歌识曲实现
-- 在线音乐服务的指标、熔断与部署编排
+- 在线音乐服务的生产指标导出与告警
 - Web 本地文件扫描与播放

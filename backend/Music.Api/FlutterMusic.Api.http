@@ -8,6 +8,10 @@
 GET {{baseUrl}}/health
 Accept: application/json
 
+### Dependency readiness check
+GET {{baseUrl}}/health/ready
+Accept: text/plain
+
 ### Login
 # Run this first. The response handler stores both tokens globally.
 POST {{baseUrl}}/api/auth/login

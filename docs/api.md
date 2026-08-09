@@ -36,6 +36,9 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `OnlineMusic:SidecarBaseUrl` | `http://127.0.0.1:8080` | 仅供 Music.Api 访问的 go-music-dl sidecar 地址 |
 | `OnlineMusic:AllowedSources` | `[]` | 允许搜索的规范来源 ID 白名单 |
 | `OnlineMusic:RequestTimeoutSeconds` | `12` | sidecar 搜索请求超时秒数 |
+| `OnlineMusic:HealthCheckTimeoutSeconds` | `3` | 就绪检查访问 sidecar 的超时秒数，运行时限制为 1–10 |
+| `OnlineMusic:CircuitBreakerFailureThreshold` | `5` | 连续瞬时失败达到该次数后打开熔断，运行时限制为 2–20 |
+| `OnlineMusic:CircuitBreakerBreakSeconds` | `30` | 熔断持续秒数，运行时限制为 5–300；恢复窗口仅允许一个探测请求 |
 | `OnlineMusic:SearchCacheSeconds` | `60` | 相同搜索的短期缓存秒数 |
 | `OnlineMusic:RequestsPerMinute` | `30` | 每账号和每 IP 的每分钟搜索上限 |
 | `OnlineMusic:MaxResults` | `50` | 单次搜索允许的最大结果数，服务端上限 100 |
@@ -46,7 +49,11 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `OnlineMusic:MaxLyricsBytes` | `524288` | 单份歌词最大字节数，运行时限制为 4 KiB–2 MiB |
 | `OnlineMusic:MaxArtworkBytes` | `2097152` | 单张封面最大字节数，运行时限制为 16 KiB–8 MiB |
 
-OpenAPI：`GET /openapi.json`。健康检查：`GET /health`。
+OpenAPI：`GET /openapi.json`。存活检查：`GET /health`。就绪检查：`GET /health/ready`；在线音乐启用时该端点会探测私有 sidecar，依赖不可用时返回 `503`，功能关闭时不阻塞服务就绪。
+
+所有请求响应都会带有 `X-Correlation-ID`。客户端可传入最多 64 个字符、仅包含 ASCII 字母、数字、点、下划线和连字符的值；其他值会被替换。该 ID 同时写入账号审计记录并转发给 sidecar，便于跨进程排障，且不包含 Token、Cookie 或上游 URL。
+
+在线音乐 sidecar 调用使用 .NET `Meter` `FlutterMusic.OnlineMusic` 发布 `requests`、`failures`、`duration` 和 `circuit_rejections` 指标。完整指标名以 `flutter_music.online_music.sidecar.` 开头；标签仅包含低基数的规范操作名和失败类型，不包含搜索词、来源、曲目 ID、Token 或 URL。连续的 HTTP 408、429、5xx 或网络错误会触发进程内熔断；恢复窗口只允许一个探测请求。`/health/ready` 使用独立客户端绕过熔断，以便依赖恢复后仍能被就绪检查准确发现。
 
 服务器扫描管理页面由 Razor Pages 提供：`GET /admin/login` 和 `GET /admin/scanning`。页面使用独立管理员 Cookie，并由 PageModel 直接调用扫描 Service；它不复用下述 Flutter JWT 接口，Flutter 客户端也不包含服务器扫描入口。
 
@@ -314,7 +321,7 @@ JWT 签名错误、受众不匹配或已过期时返回 `401`。
 
 在线搜索采用 `Flutter -> Music.Api -> go-music-dl sidecar` 的 BFF 边界。除健康检查外，公开接口需要 Bearer Access Token。Flutter 不接触 sidecar 地址、第三方 Cookie、签名参数或原始播放 URL。
 
-部署环境必须显式审核 `OnlineMusic:Enabled`、私有 sidecar 地址和来源白名单。仓库内 `go-music-dl` clone 的集成提交 `c3474b2` 基于上游提交 `c5a30343f12fafbad83245eee2119768a77be575` 实现了 JSON 集成契约；本地启动命令：
+部署环境必须显式审核 `OnlineMusic:Enabled`、私有 sidecar 地址和来源白名单。仓库内 `go-music-dl` clone 的集成提交 `11bfd8b` 基于上游提交 `c5a30343f12fafbad83245eee2119768a77be575` 实现了 JSON 集成契约；本地启动命令：
 
 ```powershell
 go -C go-music-dl run ./cmd/music-dl integration --host 127.0.0.1 --port 8080

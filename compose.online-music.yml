@@ -1,0 +1,72 @@
+name: flutter-music-online
+
+services:
+  music-api:
+    build:
+      context: .
+      dockerfile: backend/Music.Api/Dockerfile
+    restart: unless-stopped
+    init: true
+    cpus: "${MUSIC_API_CPU_LIMIT:-1.0}"
+    mem_limit: "${MUSIC_API_MEMORY_LIMIT:-512m}"
+    ports:
+      - "${MUSIC_API_PORT:-5080}:8080"
+    environment:
+      Auth__JwtKey: "${MUSIC_API_JWT_KEY:?Set MUSIC_API_JWT_KEY in .env}"
+      Administration__Username: "${MUSIC_API_ADMIN_USERNAME:-admin}"
+      Administration__Password: "${MUSIC_API_ADMIN_PASSWORD:?Set MUSIC_API_ADMIN_PASSWORD in .env}"
+      OnlineMusic__Enabled: "true"
+      OnlineMusic__SidecarBaseUrl: "http://music-sidecar:8080"
+      OnlineMusic__AllowedSources__0: "${ONLINE_MUSIC_SOURCE_0:-netease}"
+      OnlineMusic__AllowedSources__1: "${ONLINE_MUSIC_SOURCE_1:-kugou}"
+      OnlineMusic__AllowedSources__2: "${ONLINE_MUSIC_SOURCE_2:-kuwo}"
+    volumes:
+      - music-api-data:/data
+      - music-api-keys:/home/music-api/.aspnet/DataProtection-Keys
+    depends_on:
+      music-sidecar:
+        condition: service_healthy
+    networks:
+      - default
+      - online-private
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  music-sidecar:
+    build:
+      context: ./go-music-dl
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    cpus: "${MUSIC_SIDECAR_CPU_LIMIT:-2.0}"
+    mem_limit: "${MUSIC_SIDECAR_MEMORY_LIMIT:-1g}"
+    command: ["./music-dl", "integration", "--host", "0.0.0.0", "--port", "8080"]
+    expose:
+      - "8080"
+    volumes:
+      - music-sidecar-data:/home/appuser/data
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8080/integration/v1/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    networks:
+      - online-private
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  default:
+    driver: bridge
+  online-private:
+    driver: bridge
+
+volumes:
+  music-api-data:
+  music-api-keys:
+  music-sidecar-data:

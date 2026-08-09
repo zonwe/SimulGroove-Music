@@ -16,6 +16,7 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 
 ```powershell
 Invoke-RestMethod http://localhost:5080/health
+Invoke-WebRequest http://localhost:5080/health/ready
 Invoke-RestMethod http://localhost:5080/openapi.json
 ```
 
@@ -36,6 +37,35 @@ http://localhost:5080/admin/scanning
 页面由 Razor Pages 渲染，PageModel 直接调用扫描 Service。管理员登录使用独立的 HttpOnly Cookie，不复用 Flutter 的 JWT/Refresh Token。生产环境必须使用 HTTPS。
 
 默认数据库为 `backend/Music.Api/storage/music.db`。开发时可使用 `Database:Path` 指向临时文件；不要把运行数据库、WAL/SHM 文件提交到版本库。
+
+## 容器部署
+
+仓库根目录的 [`compose.online-music.yml`](../compose.online-music.yml) 会构建非 root 的 `Music.Api` 镜像，并从固定在本地的 `go-music-dl` clone 构建 sidecar。只有 API 的 `5080` 端口映射到宿主机；sidecar 仅加入 Compose 私有网络，但仍可通过容器网络访问第三方音乐平台。
+
+首次启动前复制环境模板并替换全部占位密钥：
+
+```powershell
+Copy-Item .env.example .env
+# 使用密码管理器编辑 .env 中的 JWT 与管理员密钥
+docker compose --env-file .env -f compose.online-music.yml config
+docker compose --env-file .env -f compose.online-music.yml up --detach --build
+Invoke-WebRequest http://localhost:5080/health/ready
+```
+
+API 数据库、Data Protection 密钥和 sidecar 数据分别保存在命名卷中。不要提交 `.env`、数据库、Cookie 或卷导出文件。生产环境还应在 API 前配置 HTTPS 反向代理；Compose 文件不负责申请证书。
+
+升级前记录主仓库与 sidecar commit，备份 `music-api-data` 卷，并先运行 Go 契约测试与后端测试。随后重新构建并检查就绪状态：
+
+```powershell
+git rev-parse HEAD
+git -C go-music-dl rev-parse HEAD
+docker compose --env-file .env -f compose.online-music.yml build --pull
+docker compose --env-file .env -f compose.online-music.yml up --detach
+docker compose --env-file .env -f compose.online-music.yml ps
+Invoke-WebRequest http://localhost:5080/health/ready
+```
+
+若升级失败，恢复记录的两个 commit 并重新构建；只有数据库迁移不兼容时才恢复升级前的数据卷备份。不要用删除卷的方式代替回滚。
 
 ## 配置
 
@@ -64,6 +94,9 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `Audit:RetentionDays` | `90` | 审计日志保留时间，范围为 7–3650 天 |
 | `OnlineMusic:Enabled` | `false` | 是否启用在线音乐搜索 |
 | `OnlineMusic:SidecarBaseUrl` | `http://127.0.0.1:8080` | 私有 go-music-dl sidecar 地址 |
+| `OnlineMusic:HealthCheckTimeoutSeconds` | `3` | 就绪检查访问 sidecar 的超时秒数，运行时限制为 1–10 |
+| `OnlineMusic:CircuitBreakerFailureThreshold` | `5` | 连续瞬时失败达到该次数后打开熔断，运行时限制为 2–20 |
+| `OnlineMusic:CircuitBreakerBreakSeconds` | `30` | 熔断持续秒数，运行时限制为 5–300；恢复窗口仅允许一个探测请求 |
 | `OnlineMusic:AllowedSources` | `[]` | sidecar 规范来源 ID 白名单 |
 | `OnlineMusic:RequestsPerMinute` | `30` | 每账号和每 IP 的搜索限额 |
 | `OnlineMusic:PlaybackTicketSeconds` | `300` | 账号绑定播放票据的有效秒数，限制为 60–300 |
@@ -75,7 +108,16 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 
 ## API 概览
 
-除 `/`、`/health` 和 `/openapi.json` 外，业务接口需要 `Authorization: Bearer <access-token>`：
+除 `/`、`/health`、`/health/ready` 和 `/openapi.json` 外，业务接口需要 `Authorization: Bearer <access-token>`。`/health` 仅表示 API 进程存活；`/health/ready` 在在线音乐启用时探测私有 sidecar，不可用时返回 `503`：
+
+客户端可以传入最多 64 个字符的 `X-Correlation-ID`（仅允许 ASCII 字母、数字、点、下划线和连字符）。服务端会拒绝不安全的值并生成替代 ID，在响应、账号审计记录和发往 sidecar 的请求中复用该 ID。
+
+在线音乐 sidecar 调用通过 .NET `Meter` `FlutterMusic.OnlineMusic` 提供请求数、失败数、耗时和熔断拒绝数。标签只包含规范操作名与失败类型，不包含搜索词、来源、曲目 ID、Token 或 URL。生产部署可用 OpenTelemetry 或兼容的 `MeterListener` 订阅以下指标：
+
+- `flutter_music.online_music.sidecar.requests`
+- `flutter_music.online_music.sidecar.failures`
+- `flutter_music.online_music.sidecar.duration`
+- `flutter_music.online_music.sidecar.circuit_rejections`
 
 - `POST /api/auth/login`：首次使用账号时创建账号并登录。
 - `POST /api/auth/refresh`：轮换 Access Token 和 Refresh Token；客户端必须替换旧 Refresh Token。
