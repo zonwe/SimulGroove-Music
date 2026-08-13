@@ -1,5 +1,5 @@
 name: flutter_music
-description: "A private, cross-platform local music player for Android, Windows, and Web."
+description: "A private, cross-platform local music player for Android, Windows, Linux, and Web."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -43,6 +43,8 @@ dependencies:
   audio_session: ^0.2.4
   just_audio_media_kit: ^2.1.0
   media_kit_libs_windows_audio: ^1.0.9
+  media_kit_libs_linux: ^1.2.1
+  audio_service_mpris: ^0.2.1
   audio_metadata_reader: ^1.6.0
   permission_handler: ^12.0.3
   window_manager: ^0.5.2
@@ -51,7 +53,7 @@ dependencies:
   path: ^1.9.1
   rxdart: ^0.28.0
   collection: ^1.19.1
-  filepicker_windows: ^3.0.2
+  file_selector: ^1.1.0
   path_provider: ^2.1.6
   image: ^4.8.0
   flutter_secure_storage: ^10.3.1

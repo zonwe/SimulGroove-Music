@@ -5,13 +5,14 @@ import 'package:just_audio/just_audio.dart' as ja;
 
 import '../database/app_database.dart';
 
-/// Builds a native local-file source for Windows tracks.
+/// Builds a native local-file source for desktop tracks.
 ///
 /// MPV external-file probing is disabled in the vendored media_kit adapter, so
 /// the original local path can be passed through without hiding or copying it.
 Future<ja.AudioSource> createAudioSource(Track track, MediaItem item) async {
-  if (Platform.isWindows &&
-      track.sourceType == 'windows_file' &&
+  if ((Platform.isWindows || Platform.isLinux) &&
+      (track.sourceType == 'windows_file' ||
+          track.sourceType == 'linux_file') &&
       track.filePath != null) {
     return ja.AudioSource.uri(Uri.file(track.filePath!), tag: item);
   }

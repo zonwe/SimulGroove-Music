@@ -13,7 +13,7 @@ class DesktopShortcutSettingsSection extends StatelessWidget {
     return ValueListenableBuilder<int>(
       valueListenable: service.revision,
       builder: (context, _, child) => _SettingsCard(
-        title: 'Windows 快捷键',
+        title: '桌面快捷键',
         child: Column(
           children: [
             Padding(

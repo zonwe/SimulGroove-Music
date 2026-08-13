@@ -30,7 +30,7 @@ extension DesktopShortcutActionLabel on DesktopShortcutAction {
   };
 }
 
-/// Owns the app's global and in-app Windows shortcuts.
+/// Owns the app's global and in-app desktop shortcuts.
 ///
 /// Bindings are kept separately for each scope so the settings page can show
 /// and edit the two kinds of shortcuts side by side.
@@ -52,7 +52,9 @@ class DesktopShortcutService {
   MusicAudioHandler? _handler;
 
   bool get isSupported =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux);
 
   HotKey? hotKeyFor(
     DesktopShortcutAction action, [

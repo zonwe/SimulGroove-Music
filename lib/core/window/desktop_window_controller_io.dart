@@ -11,6 +11,7 @@ class DesktopWindowController {
   static final ValueNotifier<bool> compactMode = ValueNotifier(false);
   static final ValueNotifier<bool> compactPanelExpanded = ValueNotifier(false);
   static final _trayListener = _TrayListener();
+  static bool _isDesktop = false;
   static bool _isWindows = false;
   static bool _minimizeToTray = true;
   static bool _allowQuit = false;
@@ -22,26 +23,29 @@ class DesktopWindowController {
   static bool get minimizeToTrayOnClose => _minimizeToTray;
 
   static Future<void> initialize({bool minimizeToTray = true}) async {
+    _isDesktop = Platform.isWindows || Platform.isLinux;
     _isWindows = Platform.isWindows;
-    if (!_isWindows) return;
-    _minimizeToTray = minimizeToTray;
+    if (!_isDesktop) return;
+    _minimizeToTray = _isWindows && minimizeToTray;
     await windowManager.ensureInitialized();
-    windowManager.addListener(_WindowListener());
-    await windowManager.setPreventClose(_minimizeToTray);
-    const options = WindowOptions(
-      size: Size(1280, 720),
+    if (_isWindows) {
+      windowManager.addListener(_WindowListener());
+      await windowManager.setPreventClose(_minimizeToTray);
+    }
+    final options = WindowOptions(
+      size: const Size(1280, 720),
       center: true,
       backgroundColor: Colors.transparent,
-      titleBarStyle: TitleBarStyle.hidden,
-      windowButtonVisibility: false,
+      titleBarStyle: _isWindows ? TitleBarStyle.hidden : TitleBarStyle.normal,
+      windowButtonVisibility: !_isWindows,
       title: 'Flutter Music',
     );
     await windowManager.waitUntilReadyToShow(options, () async {
-      await windowManager.setResizable(false);
+      await windowManager.setResizable(!_isWindows);
       await windowManager.show();
       await windowManager.focus();
     });
-    await _initializeTray();
+    if (_isWindows) await _initializeTray();
   }
 
   static Future<void> setMinimizeToTray(bool value) async {
@@ -61,10 +65,11 @@ class DesktopWindowController {
   }
 
   static Future<void> toggleCompact() async {
-    if (!_isWindows) return;
+    if (!_isDesktop) return;
     final next = !compactMode.value;
     compactPanelExpanded.value = false;
     compactMode.value = next;
+    await windowManager.setResizable(!next && !_isWindows);
     await windowManager.setAlwaysOnTop(next);
     await windowManager.setSize(
       next ? const Size(384, 144) : const Size(1280, 720),
@@ -74,7 +79,7 @@ class DesktopWindowController {
   }
 
   static Future<void> setCompactPanelExpanded(bool expanded) async {
-    if (!_isWindows || !compactMode.value) return;
+    if (!_isDesktop || !compactMode.value) return;
     if (expanded) {
       await windowManager.setSize(const Size(384, 520), animate: true);
       compactPanelExpanded.value = true;
@@ -85,11 +90,11 @@ class DesktopWindowController {
   }
 
   static Future<void> minimize() async {
-    if (_isWindows) await windowManager.minimize();
+    if (_isDesktop) await windowManager.minimize();
   }
 
   static Future<void> close() async {
-    if (!_isWindows) return;
+    if (!_isDesktop) return;
     if (_minimizeToTray) {
       await windowManager.hide();
     } else {
@@ -98,16 +103,16 @@ class DesktopWindowController {
   }
 
   static Future<void> show() async {
-    if (!_isWindows) return;
+    if (!_isDesktop) return;
     await windowManager.show();
     await windowManager.focus();
   }
 
   static Future<void> quit() async {
-    if (!_isWindows) return;
+    if (!_isDesktop) return;
     _allowQuit = true;
-    await trayManager.destroy();
-    await windowManager.setPreventClose(false);
+    if (_trayReady) await trayManager.destroy();
+    if (_isWindows) await windowManager.setPreventClose(false);
     await windowManager.close();
   }
 

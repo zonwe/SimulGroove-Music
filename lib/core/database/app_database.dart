@@ -164,8 +164,9 @@ class AppDatabase extends _$AppDatabase {
     await transaction(() async {
       final sourceTracks = source.uri == 'media-store://external'
           ? tracks.sourceType.equals('android_media_store')
-          : tracks.sourceType.equals('windows_file') &
-                tracks.sourceId.like('${source.uri}%') |
+          : (tracks.sourceType.equals('windows_file') |
+                tracks.sourceType.equals('linux_file')) &
+              tracks.sourceId.like('${source.uri}%') |
             tracks.sourceType.equals('android_document_tree') &
                 (tracks.sourceId.like('${source.uri}%') |
                     tracks.uri.like('${source.uri}%'));
@@ -185,8 +186,9 @@ class AppDatabase extends _$AppDatabase {
     await transaction(() async {
       final predicate = source.uri == 'media-store://external'
           ? tracks.sourceType.equals('android_media_store')
-          : tracks.sourceType.equals('windows_file') &
-                tracks.sourceId.like('${source.uri}%') |
+          : (tracks.sourceType.equals('windows_file') |
+                tracks.sourceType.equals('linux_file')) &
+              tracks.sourceId.like('${source.uri}%') |
             tracks.sourceType.equals('android_document_tree') &
                 tracks.sourceId.like('${source.uri}%');
       await (delete(tracks)..where((row) => predicate)).go();

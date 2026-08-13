@@ -14,6 +14,7 @@
 - `just_audio` 与 `audio_service` 音频播放。
 - Android Kotlin 原生 MediaStore/Document Tree 桥接。
 - Windows 文件系统、窗口、托盘、快捷键和 media_kit 音频后端。
+- Linux 文件系统、原生窗口、MPRIS 媒体控制、快捷键和 media_kit 音频后端。
 - Web 的 SQLite WASM/Worker。
 - ASP.NET Core + SQLite 实验性后端。
 
@@ -27,7 +28,7 @@
 4. 追踪“扫描一首歌进入数据库”的流程。
 5. 追踪“点击歌曲开始播放”的流程。
 6. 理解歌单、喜欢和设置如何持久化。
-7. 最后学习 Android/Windows 平台代码和实验性后端。
+7. 最后学习 Android/Windows/Linux 平台代码和实验性后端。
 
 ## 2. 学完后你应该能够做到什么
 
@@ -52,7 +53,7 @@
 - Git。
 - Flutter SDK；项目 `pubspec.yaml` 要求 Dart SDK `^3.12.2`，因此 Flutter 必须携带兼容的 Dart 版本。
 - Android Studio 或 VS Code + Flutter/Dart 插件。
-- 至少一个运行目标：Chrome、Windows、Android Emulator 或 Android 真机。
+- 至少一个运行目标：Chrome、Windows、Linux、Android Emulator 或 Android 真机。
 - 如果研究后端：.NET 10 SDK。
 
 先检查环境：
@@ -73,10 +74,11 @@ git status --short
 | --- | --- | --- |
 | Web | Chrome/Edge | 最快看到 UI，但不能学习真实本地扫描和播放 |
 | Windows | Visual Studio 的 Desktop development with C++、Windows SDK | 最适合完整观察目录扫描、播放器、窗口和托盘 |
+| Linux | Flutter Linux 工具链、GTK 3 开发包、CMake/Ninja、系统 `mpv` 运行库 | 适合观察目录扫描、MPRIS、快捷键和桌面窗口 |
 | Android | Android SDK、模拟器或开启调试的真机 | 最适合学习权限、MediaStore 和后台音频 |
 | 后端 | .NET 10 SDK | 在理解 Flutter 本地主链路后再学习 |
 
-`ios/`、`macos/`、`linux/` 是 Flutter 脚手架，但不是当前主要交付目标。初学阶段不要因为看见这些目录就假设功能已经适配。
+`ios/`、`macos/` 仍只是 Flutter 脚手架，不是当前主要交付目标；Linux 已接入本地扫描和播放，但仍应在真实 Linux 桌面环境单独验证。
 
 ### 3.3 获取依赖
 
@@ -86,7 +88,9 @@ git status --short
 flutter pub get
 ```
 
-项目通过 `dependency_overrides` 使用本地 `third_party/just_audio_media_kit`，因此不要随意删除 `third_party/` 或把它替换成 pub.dev 版本。Windows 音频行为可能依赖其中的本地补丁。
+项目通过 `dependency_overrides` 使用本地 `third_party/just_audio_media_kit`，因此不要随意删除 `third_party/` 或把它替换成 pub.dev 版本。Windows/Linux 音频行为可能依赖其中的本地补丁。
+
+Linux 同样复用这个 media_kit 适配器，并通过 `audio_service_mpris` 接入桌面媒体键。Wayland/X11、桌面环境和系统 `mpv` 版本可能影响实际行为，不能用 Windows 构建结果代替 Linux 验证。
 
 ## 4. 第一次运行
 
@@ -124,7 +128,15 @@ flutter run -d windows
 
 如果 Windows 构建失败，先回到 `flutter doctor -v` 检查 Visual Studio C++ 工作负载和 Windows SDK，不要立即修改 Dart 业务代码。
 
-### 4.3 Android：体验权限与后台播放
+### 4.3 Linux：体验桌面扫描与系统媒体控制
+
+```bash
+flutter run -d linux
+```
+
+Linux 重点体验系统目录选择器、递归扫描、本地播放、MPRIS 媒体键、桌面快捷键、宽屏队列和紧凑窗口。Ubuntu/Debian 还需要安装 `libmpv-dev` 与 `mpv`；Wayland 和 X11 下的全局快捷键能力可能不同，应分别记录实际验证环境。
+
+### 4.4 Android：体验权限与后台播放
 
 ```powershell
 flutter run -d <设备 ID>

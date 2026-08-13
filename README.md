@@ -1,11 +1,12 @@
 # Flutter Music
 
-面向 Android、Windows 和 Web 的私人本地音乐播放器。当前版本实现 Groove Music 风格的本地音乐体验，并已接入仓库内的 ASP.NET Core 后端用于账号、歌单/喜欢同步和服务器目录扫描。
+面向 Android、Windows、Linux 和 Web 的私人本地音乐播放器。当前版本实现 Groove Music 风格的本地音乐体验，并已接入仓库内的 ASP.NET Core 后端用于账号、歌单/喜欢同步和服务器目录扫描。
 
 ## 当前功能
 
 - Android：通过系统目录选择器授权一个或多个音乐文件夹并递归扫描，也可选择扫描整台设备；支持后台播放、媒体通知、锁屏/耳机媒体控制与音频焦点。
 - Windows：选择一个或多个音乐目录并递归扫描，音乐库会列出当前搜索位置；使用自绘标题栏，主窗口固定为 1280×720，可切换 384×144 置顶悬浮控制窗。
+- Linux：通过系统目录选择器添加并递归扫描音乐目录，使用 media_kit 播放本地与在线音频，支持 MPRIS 系统媒体控制、桌面快捷键、宽屏播放队列和紧凑悬浮窗。
 - 常见格式：MP3、FLAC、M4A、AAC、WAV、OGG、OPUS、WMA（最终能否解码也取决于系统/平台解码器）。
 - 音乐库：歌曲、专辑、艺术家视图，本地搜索，封面及标签读取。
 - 播放：队列、上一首/下一首、进度、暂停/继续、底栏迷你播放器。
@@ -15,7 +16,7 @@
 - 外观：默认跟随系统浅色/深色模式，也可手动指定，并提供 8 种可持久化主题色。
 - 账号：连接 `backend/Music.Api`，支持 JWT、Refresh Token 轮换、安全令牌存储、退出和歌单/喜欢同步。
 - 服务器扫描：由 `backend/Music.Api` 托管的 Web 控制台配置后端机器上的音乐绝对路径、定时扫描并查看索引结果；Flutter 客户端不提供该入口，也不会上传客户端音乐。
-- 在线音乐：通过已登录的 `Music.Api` 聚合受控来源，支持去抖、部分失败、短期播放票据、Range 在线播放、封面和同步歌词；Windows/Android 复用全局播放器，Web 暂不开放需要认证请求头的播放。
+- 在线音乐：通过已登录的 `Music.Api` 聚合受控来源，支持去抖、部分失败、短期播放票据、Range 在线播放、封面和同步歌词；Windows/Linux/Android 复用全局播放器，Web 暂不开放需要认证请求头的播放。
 - 占位入口：听歌识曲（已声明麦克风权限但未实现）。
 - Web：提供响应式界面、真实后端登录与在线搜索；按当前需求不提供本地目录扫描和本地播放。
 
@@ -40,7 +41,7 @@ docker compose --env-file .env -f compose.online-music.yml up --detach --build
 
 - Flutter + Riverpod
 - Drift/SQLite（Web 使用 `sqlite3.wasm` 和 Drift worker）
-- `just_audio` + `audio_service`，Windows 使用 media_kit 音频后端
+- `just_audio` + `audio_service`，Windows/Linux 使用 media_kit 音频后端，Linux 通过 MPRIS 接入桌面媒体控制
 - Android 原生 MethodChannel 查询 MediaStore
 
 ## 开发与验证

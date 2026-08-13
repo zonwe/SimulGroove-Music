@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'dart:isolate';
+
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
-import 'package:filepicker_windows/filepicker_windows.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as image;
 import 'package:path/path.dart' as p;
@@ -20,7 +22,8 @@ class IoLibraryScanner implements LibraryScanner {
   );
 
   @override
-  bool get isSupported => Platform.isAndroid || Platform.isWindows;
+  bool get isSupported =>
+      Platform.isAndroid || Platform.isWindows || Platform.isLinux;
 
   @override
   bool get supportsFullDeviceScan => Platform.isAndroid;
@@ -31,7 +34,7 @@ class IoLibraryScanner implements LibraryScanner {
   @override
   Future<ScanResult?> scan() {
     if (Platform.isAndroid) return _scanAndroidDirectory();
-    if (Platform.isWindows) return _scanWindows();
+    if (Platform.isWindows || Platform.isLinux) return _scanDesktop();
     return Future.value();
   }
 
@@ -53,8 +56,10 @@ class IoLibraryScanner implements LibraryScanner {
     if (Platform.isAndroid && sourceUri.startsWith('content://')) {
       return _scanAndroidDirectoryUri(sourceUri, sourceLabel);
     }
-    if (Platform.isWindows) {
-      return Isolate.run(() => _scanWindowsDirectory(sourceUri));
+    if (Platform.isWindows || Platform.isLinux) {
+      return Isolate.run(
+        () => scanDesktopDirectory(sourceUri, isWindows: Platform.isWindows),
+      );
     }
     return Future.value();
   }
@@ -126,9 +131,7 @@ class IoLibraryScanner implements LibraryScanner {
     final audioPathList = audioPaths.toList(growable: false);
     final embeddedLyricsByPath = audioPathList.isEmpty
         ? const <String, String?>{}
-        : await Isolate.run(
-            () => _readEmbeddedLyricsByPath(audioPathList),
-          );
+        : await Isolate.run(() => _readEmbeddedLyricsByPath(audioPathList));
     final tracks = <ScannedTrack>[];
     for (final raw in rawSongs) {
       final song = Map<Object?, Object?>.from(raw! as Map);
@@ -174,13 +177,14 @@ class IoLibraryScanner implements LibraryScanner {
     return tracks;
   }
 
-  Future<ScanResult?> _scanWindows() async {
-    final picker = DirectoryPicker()..title = '选择音乐文件夹';
-    final selected = picker.getDirectory()?.path;
+  Future<ScanResult?> _scanDesktop() async {
+    final selected = await getDirectoryPath(confirmButtonText: '选择音乐文件夹');
     if (selected == null) return null;
     // Directory walking and synchronous metadata parsing happen off the UI
     // isolate. The picker itself must stay on the platform/UI isolate.
-    return Isolate.run(() => _scanWindowsDirectory(selected));
+    return Isolate.run(
+      () => scanDesktopDirectory(selected, isWindows: Platform.isWindows),
+    );
   }
 
   Future<String?> _tryReadSidecarLyrics(String audioPath) async {
@@ -243,18 +247,18 @@ Map<String, String?> _readEmbeddedLyricsByPath(List<String> paths) {
   return lyricsByPath;
 }
 
-Future<ScanResult> _scanWindowsDirectory(String selected) async {
+@visibleForTesting
+Future<ScanResult> scanDesktopDirectory(
+  String selected, {
+  required bool isWindows,
+}) async {
   final uuid = const Uuid();
   final directory = Directory(selected);
   if (!await directory.exists()) throw const FileSystemException('所选文件夹不存在');
 
   final files = await directory
       .list(recursive: true, followLinks: false)
-      .where(
-        (entry) =>
-            entry is File &&
-            _isWindowsAudioFile(entry.path),
-      )
+      .where((entry) => entry is File && _isDesktopAudioFile(entry.path))
       .cast<File>()
       .toList();
   final tracks = <ScannedTrack>[];
@@ -267,28 +271,30 @@ Future<ScanResult> _scanWindowsDirectory(String selected) async {
       // A playable file may have malformed or missing tags; keep it in the library.
     }
     final canonicalPath = p.normalize(file.absolute.path);
+    final stablePath = isWindows ? canonicalPath.toLowerCase() : canonicalPath;
+    final sourceType = isWindows ? 'windows_file' : 'linux_file';
     tracks.add(
       ScannedTrack(
-        id: uuid.v5(Namespace.url.value, canonicalPath.toLowerCase()),
-        sourceType: 'windows_file',
+        id: uuid.v5(Namespace.url.value, stablePath),
+        sourceType: sourceType,
         sourceId: canonicalPath,
         uri: Uri.file(canonicalPath).toString(),
         filePath: canonicalPath,
-        title: _cleanWindowsValue(
+        title: _cleanDesktopValue(
           metadata?.title,
           p.basenameWithoutExtension(canonicalPath),
         ),
-        artist: _cleanWindowsValue(metadata?.artist, '未知艺术家'),
-        album: _cleanWindowsValue(metadata?.album, '未知专辑'),
+        artist: _cleanDesktopValue(metadata?.artist, '未知艺术家'),
+        album: _cleanDesktopValue(metadata?.album, '未知专辑'),
         durationMs: metadata?.duration?.inMilliseconds,
-        artwork: _compactWindowsArtwork(
+        artwork: _compactDesktopArtwork(
           metadata?.pictures.isEmpty ?? true
               ? null
               : metadata!.pictures.first.bytes,
         ),
         lyrics:
-            _cleanWindowsLyrics(metadata?.lyrics) ??
-            await _readWindowsSidecarLyrics(canonicalPath),
+            _cleanDesktopLyrics(metadata?.lyrics) ??
+            await _readDesktopSidecarLyrics(canonicalPath),
         fileSize: stat.size,
         modifiedAt: stat.modified,
       ),
@@ -297,11 +303,13 @@ Future<ScanResult> _scanWindowsDirectory(String selected) async {
   return ScanResult(
     tracks: tracks,
     sourceUri: p.normalize(directory.absolute.path),
-    sourceLabel: p.basename(selected),
+    sourceLabel: p.basename(p.normalize(selected)).isEmpty
+        ? p.normalize(selected)
+        : p.basename(p.normalize(selected)),
   );
 }
 
-bool _isWindowsAudioFile(String path) {
+bool _isDesktopAudioFile(String path) {
   const extensions = {
     '.mp3',
     '.flac',
@@ -315,11 +323,11 @@ bool _isWindowsAudioFile(String path) {
   return extensions.contains(p.extension(path).toLowerCase());
 }
 
-Future<String?> _readWindowsSidecarLyrics(String audioPath) async {
+Future<String?> _readDesktopSidecarLyrics(String audioPath) async {
   try {
     final lrc = File(p.setExtension(audioPath, '.lrc'));
     if (await lrc.exists()) {
-      return _cleanWindowsLyrics(await lrc.readAsString());
+      return _cleanDesktopLyrics(await lrc.readAsString());
     }
   } catch (_) {
     // A sidecar file may be inaccessible even when the audio file is readable.
@@ -327,7 +335,7 @@ Future<String?> _readWindowsSidecarLyrics(String audioPath) async {
   return null;
 }
 
-String _cleanWindowsValue(String? value, String fallback) {
+String _cleanDesktopValue(String? value, String fallback) {
   final trimmed = value?.trim();
   if (trimmed == null || trimmed.isEmpty || trimmed == '<unknown>') {
     return fallback;
@@ -335,12 +343,12 @@ String _cleanWindowsValue(String? value, String fallback) {
   return trimmed;
 }
 
-String? _cleanWindowsLyrics(String? value) {
+String? _cleanDesktopLyrics(String? value) {
   final trimmed = value?.trim();
   return trimmed == null || trimmed.isEmpty ? null : trimmed;
 }
 
-Uint8List? _compactWindowsArtwork(Uint8List? bytes) {
+Uint8List? _compactDesktopArtwork(Uint8List? bytes) {
   if (bytes == null || bytes.isEmpty) return null;
   try {
     final decoded = image.decodeImage(bytes);
