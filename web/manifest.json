@@ -1,11 +1,11 @@
 {
-    "name": "Flutter Music",
-    "short_name": "Music",
+    "name": "SimulGroove Music",
+    "short_name": "SimulGroove Music",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0B0D12",
     "theme_color": "#AEB9FF",
-    "description": "Flutter Music local player.",
+    "description": "SimulGroove Music local player.",
     "prefer_related_applications": false,
     "icons": [
         {

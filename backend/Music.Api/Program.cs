@@ -114,7 +114,7 @@ app.UseMiddleware<AuditLogMiddleware>();
 
 app.MapGet("/", () => Results.Ok(new
 {
-	name = "Flutter Music API",
+	name = "SimulGroove Music API",
 	version = "1.0.0",
 	// documentation = "docs/api.md (repository)",
 	openapi = "/openapi.json",

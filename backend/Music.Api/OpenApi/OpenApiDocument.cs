@@ -5,7 +5,7 @@ public static class OpenApiDocument
     public static object Create() => new Dictionary<string, object>
     {
         ["openapi"] = "3.0.3",
-        ["info"] = new { title = "Flutter Music API", version = "1.0.0" },
+        ["info"] = new { title = "SimulGroove Music API", version = "1.0.0" },
         ["paths"] = new Dictionary<string, object>
         {
             ["/health"] = new { get = new { summary = "Health check", responses = new Dictionary<string, object> { ["200"] = new { description = "Success" } } } },

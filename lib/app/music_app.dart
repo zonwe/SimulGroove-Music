@@ -14,7 +14,7 @@ class MusicApp extends ConsumerWidget {
     final appearance = ref.watch(appearanceProvider).value;
     final seedColor = appearance?.seedColor ?? defaultThemeColor;
     return MaterialApp(
-      title: 'Flutter Music',
+      title: 'SimulGroove Music',
       debugShowCheckedModeBanner: false,
       themeMode: appearance?.themeMode ?? ThemeMode.system,
       theme: _theme(Brightness.light, seedColor),

@@ -1,7 +1,7 @@
-# 音乐服务 API 调研与 Flutter Music 接入评估
+# 音乐服务 API 调研与 SimulGroove Music 接入评估
 
 > 调研日期：2026-07-31  
-> 目标项目：Flutter Music（Android、Windows、Web）  
+> 目标项目：SimulGroove Music（Android、Windows、Web）
 > 结论基于各服务在调研日期公开的官方文档；价格、额度、开放范围和条款都可能变化，正式上线前必须重新确认。本文是工程评估，不是法律意见。
 
 ## 1. 结论先行

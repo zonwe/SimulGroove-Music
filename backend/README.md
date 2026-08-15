@@ -1,6 +1,6 @@
-# Flutter Music 后端
+# SimulGroove Music 后端
 
-`backend/Music.Api` 是 Flutter Music 的实验性同步后端，基于 ASP.NET Core 10 Minimal API 和 SQLite。它提供账号会话、歌单/喜欢同步、服务器目录扫描、在线音乐搜索 BFF 和审计日志，并已接入 Flutter 主界面。客户端运行配置见 [`../docs/flutter_backend_integration.md`](../docs/flutter_backend_integration.md)。
+`backend/Music.Api` 是 SimulGroove Music 的实验性同步后端，基于 ASP.NET Core 10 Minimal API 和 SQLite。它提供账号会话、歌单/喜欢同步、服务器目录扫描、在线音乐搜索 BFF 和审计日志，并已接入 Flutter 主界面。客户端运行配置见 [`../docs/flutter_backend_integration.md`](../docs/flutter_backend_integration.md)。
 
 ## 快速开始
 

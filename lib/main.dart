@@ -31,7 +31,7 @@ Future<void> main() async {
     audioHandler = await AudioService.init<MusicAudioHandler>(
       builder: MusicAudioHandler.new,
       config: const AudioServiceConfig(
-        androidNotificationChannelId: 'top.zonwe.music_player.playback',
+        androidNotificationChannelId: 'top.comwe.simul_groove_player.playback',
         androidNotificationChannelName: '音乐播放',
         androidStopForegroundOnPause: false,
       ),

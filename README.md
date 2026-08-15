@@ -1,4 +1,4 @@
-# Flutter Music
+# SimulGroove Music
 
 面向 Android、Windows、Linux 和 Web 的私人本地音乐播放器。当前版本实现 Groove Music 风格的本地音乐体验，并已接入仓库内的 ASP.NET Core 后端，用于账号、歌单/喜欢同步、服务器目录扫描和受控在线音乐聚合。
 

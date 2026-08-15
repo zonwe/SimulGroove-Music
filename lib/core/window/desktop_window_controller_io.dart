@@ -38,7 +38,7 @@ class DesktopWindowController {
       backgroundColor: Colors.transparent,
       titleBarStyle: _isWindows ? TitleBarStyle.hidden : TitleBarStyle.normal,
       windowButtonVisibility: !_isWindows,
-      title: 'Flutter Music',
+      title: 'SimulGroove Music',
     );
     await windowManager.waitUntilReadyToShow(options, () async {
       await windowManager.setResizable(!_isWindows);
@@ -122,11 +122,11 @@ class DesktopWindowController {
         'windows/runner/resources/app_icon.ico',
       );
       final directory = await getTemporaryDirectory();
-      final iconPath = p.join(directory.path, 'flutter_music_tray.ico');
+      final iconPath = p.join(directory.path, 'simul_groove_music_tray.ico');
       await File(iconPath).writeAsBytes(data.buffer.asUint8List());
       trayManager.addListener(_trayListener);
       await trayManager.setIcon(iconPath);
-      await trayManager.setToolTip('Flutter Music');
+      await trayManager.setToolTip('SimulGroove Music');
       _trayReady = true;
       await trayManager.setContextMenu(
         Menu(

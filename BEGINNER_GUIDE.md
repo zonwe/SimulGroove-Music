@@ -1,4 +1,4 @@
-# Flutter Music 初学者学习指南
+# SimulGroove Music 初学者学习指南
 
 这是一份从“能运行项目”到“能够独立完成一个小功能”的中文学习路线。它假设你知道最基础的编程概念，但不要求你已经熟悉 Flutter、Riverpod、Drift、音频播放或 ASP.NET Core。
 

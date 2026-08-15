@@ -32,7 +32,7 @@ class WindowsTitleBar extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        'Flutter Music',
+                        'SimulGroove Music',
                         style: Theme.of(context).textTheme.labelLarge,
                       ),
                     ],

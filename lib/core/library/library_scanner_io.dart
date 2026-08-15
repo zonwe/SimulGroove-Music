@@ -18,7 +18,7 @@ LibraryScanner createLibraryScanner() => IoLibraryScanner();
 class IoLibraryScanner implements LibraryScanner {
   final Uuid _uuid = const Uuid();
   static const MethodChannel _mediaStore = MethodChannel(
-    'top.zonwe.music_player/media_store',
+    'top.comwe.simul_groove_player/media_store',
   );
 
   @override

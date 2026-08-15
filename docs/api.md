@@ -1,4 +1,4 @@
-# Flutter Music API
+# SimulGroove Music API
 
 后端项目位于 `backend/Music.Api`，使用 ASP.NET Core 10 和 SQLite。服务默认监听 `http://localhost:5080`。
 

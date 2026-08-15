@@ -213,7 +213,7 @@ class _DesktopNavigation extends StatelessWidget {
                       Icon(Icons.music_note_rounded),
                       SizedBox(width: 10),
                       Text(
-                        'Flutter Music',
+                        'SimulGroove Music',
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
                     ],
@@ -278,7 +278,7 @@ class _DrawerNavigation extends StatelessWidget {
       const ListTile(
         leading: Icon(Icons.music_note_rounded),
         title: Text(
-          'Flutter Music',
+          'SimulGroove Music',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
       ),

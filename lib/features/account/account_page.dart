@@ -62,7 +62,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
       ),
       const SizedBox(height: 6),
       const Text(
-        '连接 Flutter Music API。首次使用的账号会由开发后端自动创建。',
+        '连接 SimulGroove Music API。首次使用的账号会由开发后端自动创建。',
         textAlign: TextAlign.center,
       ),
       const SizedBox(height: 22),

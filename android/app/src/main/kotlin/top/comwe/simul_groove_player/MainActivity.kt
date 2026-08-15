@@ -1,4 +1,4 @@
-package top.zonwe.music_player.flutter_music
+package top.comwe.simul_groove_player
 
 import android.app.Activity
 import android.content.ContentUris
@@ -22,7 +22,7 @@ import java.util.concurrent.Executors
 import kotlin.math.min
 
 class MainActivity : AudioServiceActivity() {
-    private val channelName = "top.zonwe.music_player/media_store"
+    private val channelName = "top.comwe.simul_groove_player/media_store"
     private val pickDirectoryRequest = 4812
     private val pickDownloadDirectoryRequest = 4813
     private val scanExecutor = Executors.newSingleThreadExecutor()

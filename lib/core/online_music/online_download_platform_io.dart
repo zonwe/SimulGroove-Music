@@ -15,7 +15,7 @@ OnlineDownloadPlatform createOnlineDownloadPlatform() =>
 class IoOnlineDownloadPlatform
     implements OnlineDownloadPlatform, OnlineDownloadCompanionPlatform {
   static const MethodChannel _androidChannel = MethodChannel(
-    'top.zonwe.music_player/media_store',
+    'top.comwe.simul_groove_player/media_store',
   );
 
   @override

@@ -1,10 +1,10 @@
-# Flutter Music 项目协作指南
+# SimulGroove Music 项目协作指南
 
 本文是仓库根目录级别的开发与智能体协作说明，适用于整个仓库。无论是人类开发者还是自动化编码智能体，在修改代码前都应先阅读本文件。面向第一次接触项目的学习路线见 [`BEGINNER_GUIDE.md`](BEGINNER_GUIDE.md)。
 
 ## 1. 项目目标与当前边界
 
-Flutter Music 是一个面向 Android、Windows、Linux 和 Web 的私人本地音乐播放器。核心目标是提供接近 Groove Music 的本地音乐体验，同时为账号、同步和服务器音乐目录扫描保留清晰的扩展边界。
+SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本地音乐播放器。核心目标是提供接近 Groove Music 的本地音乐体验，同时为账号、同步和服务器音乐目录扫描保留清晰的扩展边界。
 
 当前主要能力：
 
@@ -186,7 +186,7 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 - `library_scanner.dart` 定义接口。
 - `scanner_factory.dart` 使用条件导出，在 IO 平台选择真实实现，在 Web 选择 stub。
 - Windows 目录选择器在 UI isolate 调用，递归遍历和同步元数据解析放入 `Isolate.run`。
-- Android 通过 `top.zonwe.music_player/media_store` MethodChannel 调用 Kotlin。
+- Android 通过 `top.comwe.simul_groove_player/media_store` MethodChannel 调用 Kotlin。
 - `ScannedTrack` 是扫描层模型，页面再映射成 Drift `TracksCompanion`。
 
 必须保持的行为：

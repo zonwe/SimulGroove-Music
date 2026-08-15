@@ -30,7 +30,7 @@ go-music-dl sidecar（音乐源适配、解析、代理流）
 
 ## 2. 背景与上游现状
 
-Flutter Music 的在线搜索页已通过 `OnlineMusicGateway`/`AuthRepository` 接入 `Music.Api`，真实账号与后端请求继续沿用既有认证边界。页面不自行管理另一个服务的 URL、Cookie 或 HTTP 客户端。
+SimulGroove Music 的在线搜索页已通过 `OnlineMusicGateway`/`AuthRepository` 接入 `Music.Api`，真实账号与后端请求继续沿用既有认证边界。页面不自行管理另一个服务的 URL、Cookie 或 HTTP 客户端。
 
 仓库内的 `go-music-dl` clone 以集成提交 `11bfd8b` 固定本地改动，该提交基于上游 `c5a30343f12fafbad83245eee2119768a77be575`，并包含跨音乐源搜索、播放、歌词、封面和下载相关能力。它当前的 Web 实现有以下可复用点和限制：
 
@@ -213,7 +213,7 @@ GET  /api/online-music/tracks/{source}/{trackId}/lyrics
 GET  /api/online-music/tracks/{source}/{trackId}/cover
 ```
 
-除健康检查外，公开接口统一使用 Flutter Music 的 Bearer Token。客户端不能传入任意 sidecar URL、第三方 URL、请求头或 Cookie。
+除健康检查外，公开接口统一使用 SimulGroove Music 的 Bearer Token。客户端不能传入任意 sidecar URL、第三方 URL、请求头或 Cookie。
 
 ### 7.1 公开搜索契约
 
@@ -568,5 +568,5 @@ lib/features/online_search/
 - [go-music-dl Web 服务路由](https://github.com/guohuiyuan/go-music-dl/blob/main/internal/web/server.go)
 - [go-music-dl 搜索、解析与流代理实现](https://github.com/guohuiyuan/go-music-dl/blob/main/internal/web/music.go)
 - [go-music-dl AGPL-3.0 许可证](https://github.com/guohuiyuan/go-music-dl/blob/main/LICENSE)
-- [Flutter Music API 文档](api.md)
+- [SimulGroove Music API 文档](api.md)
 - [现有音乐服务 API 评估](music_service_api_evaluation.md)
