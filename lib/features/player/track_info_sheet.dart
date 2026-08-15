@@ -14,6 +14,19 @@ Future<void> showTrackInfo(BuildContext context, MediaItem item) {
   );
 }
 
+class TrackInfoButton extends StatelessWidget {
+  const TrackInfoButton({super.key, required this.item});
+
+  final MediaItem item;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: '歌曲信息',
+    onPressed: () => showTrackInfo(context, item),
+    icon: const Icon(Icons.info_outline_rounded),
+  );
+}
+
 class _TrackInfoPanel extends StatelessWidget {
   const _TrackInfoPanel({required this.item});
 

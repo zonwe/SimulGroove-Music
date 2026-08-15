@@ -1,18 +1,47 @@
+import 'dart:math' as math;
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../core/library/artist_names.dart';
 import '../../core/lyrics/lrc_parser.dart';
+import '../../core/online_music/online_track.dart';
 import '../../core/player/music_audio_handler.dart';
+import '../../core/player/now_playing_layout.dart';
 import '../../core/window/desktop_window_controller.dart';
 import '../library/artwork_view.dart';
+import '../library/collection_page.dart';
+import '../online_search/online_collection_page.dart';
 import '../shell/windows_title_bar.dart';
 import 'compact_player.dart';
 import 'queue_sheet.dart';
 import 'track_info_sheet.dart';
 import 'volume_control.dart';
+
+@visibleForTesting
+bool shouldShowNowPlayingTrackInfoButton(
+  TargetPlatform platform, {
+  required bool isWeb,
+}) =>
+    !isWeb &&
+    (platform == TargetPlatform.android ||
+        platform == TargetPlatform.windows ||
+        platform == TargetPlatform.linux);
+
+@visibleForTesting
+bool shouldUseSplitNowPlayingLayout({
+  required NowPlayingLayout layout,
+  required TargetPlatform platform,
+  required bool isWeb,
+  required double availableWidth,
+}) =>
+    layout == NowPlayingLayout.split &&
+    !isWeb &&
+    (platform == TargetPlatform.windows || platform == TargetPlatform.linux) &&
+    availableWidth >= 900;
 
 class NowPlayingPage extends ConsumerStatefulWidget {
   const NowPlayingPage({super.key});
@@ -25,11 +54,45 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
   bool _showLyrics = false;
   int _lyricsViewGeneration = 0;
 
+  Future<void> _openArtist(MediaItem item, String artist) async {
+    final onlineTrack = _onlineTrackFromMediaItem(item);
+    if (onlineTrack != null) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (routeContext) => OnlineCollectionPage(
+            request: OnlineCollectionRequest(
+              kind: OnlineCollectionKind.artist,
+              value: artist,
+              seedTracks: [onlineTrack],
+            ),
+            onBack: () => Navigator.of(routeContext).pop(),
+            standalone: true,
+          ),
+        ),
+      );
+      return;
+    }
+
+    final tracks = await ref.read(databaseProvider).allTracks();
+    if (!mounted) return;
+    openCollectionPage(context, tracks, CollectionKind.artist, artist);
+  }
+
   @override
   Widget build(BuildContext context) {
     final handler = ref.watch(audioHandlerProvider);
+    final configuredLayout =
+        ref.watch(nowPlayingLayoutProvider).value ?? NowPlayingLayout.classic;
     final isAndroid =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final isDesktop =
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux);
+    final showTrackInfoButton = shouldShowNowPlayingTrackInfoButton(
+      defaultTargetPlatform,
+      isWeb: kIsWeb,
+    );
     final regularPlayer = Column(
       children: [
         const WindowsTitleBar(),
@@ -38,7 +101,7 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
             valueListenable: playbackQueueDockOpen,
             builder: (context, queueOpen, _) {
               final docked =
-                  WindowsTitleBar.isVisible &&
+                  isDesktop &&
                   MediaQuery.sizeOf(context).width >= 900 &&
                   queueOpen;
               return Row(
@@ -64,6 +127,15 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                           if (item == null) {
                             return const Center(child: Text('当前没有播放歌曲'));
                           }
+                          final availableWidth =
+                              MediaQuery.sizeOf(context).width -
+                              (docked ? 336 : 0);
+                          final splitLayout = shouldUseSplitNowPlayingLayout(
+                            layout: configuredLayout,
+                            platform: defaultTargetPlatform,
+                            isWeb: kIsWeb,
+                            availableWidth: availableWidth,
+                          );
                           return SafeArea(
                             child: Padding(
                               padding: const EdgeInsets.fromLTRB(
@@ -75,56 +147,69 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                               child: Column(
                                 children: [
                                   Expanded(
-                                    child: GestureDetector(
-                                      behavior: HitTestBehavior.opaque,
-                                      onTap: () => setState(() {
-                                        _showLyrics = !_showLyrics;
-                                        if (_showLyrics) {
-                                          _lyricsViewGeneration++;
-                                        }
-                                      }),
-                                      child: AnimatedSwitcher(
-                                        duration: const Duration(
-                                          milliseconds: 220,
-                                        ),
-                                        child: _showLyrics
-                                            ? _LyricsPanel(
-                                                key: ValueKey((
-                                                  item.id,
-                                                  _lyricsViewGeneration,
-                                                )),
-                                                lyrics:
-                                                    item.extras?['lyrics']
-                                                        as String?,
-                                                positionStream:
-                                                    handler.positionStream,
-                                                initialPosition: handler
-                                                    .playbackState
-                                                    .value
-                                                    .position,
-                                              )
-                                            : LayoutBuilder(
-                                                builder: (context, constraints) {
-                                                  final size = constraints
-                                                      .biggest
-                                                      .shortestSide
-                                                      .clamp(180.0, 320.0);
-                                                  return Center(
-                                                    child: ArtworkView(
-                                                      key: const ValueKey(
-                                                        'cover',
-                                                      ),
-                                                      bytes:
-                                                          item.extras?['artwork']
-                                                              as Uint8List?,
-                                                      size: size,
-                                                      borderRadius: 12,
-                                                    ),
-                                                  );
-                                                },
+                                    child: splitLayout
+                                        ? NowPlayingSplitArtworkLyrics(
+                                            item: item,
+                                            positionStream:
+                                                handler.positionStream,
+                                            initialPosition: handler
+                                                .playbackState
+                                                .value
+                                                .position,
+                                          )
+                                        : GestureDetector(
+                                            behavior: HitTestBehavior.opaque,
+                                            onTap: () => setState(() {
+                                              _showLyrics = !_showLyrics;
+                                              if (_showLyrics) {
+                                                _lyricsViewGeneration++;
+                                              }
+                                            }),
+                                            child: AnimatedSwitcher(
+                                              duration: const Duration(
+                                                milliseconds: 220,
                                               ),
-                                      ),
-                                    ),
+                                              child: _showLyrics
+                                                  ? _LyricsPanel(
+                                                      key: ValueKey((
+                                                        item.id,
+                                                        _lyricsViewGeneration,
+                                                      )),
+                                                      lyrics:
+                                                          item.extras?['lyrics']
+                                                              as String?,
+                                                      positionStream: handler
+                                                          .positionStream,
+                                                      initialPosition: handler
+                                                          .playbackState
+                                                          .value
+                                                          .position,
+                                                    )
+                                                  : LayoutBuilder(
+                                                      builder: (context, constraints) {
+                                                        final size = constraints
+                                                            .biggest
+                                                            .shortestSide
+                                                            .clamp(
+                                                              180.0,
+                                                              320.0,
+                                                            );
+                                                        return Center(
+                                                          child: ArtworkView(
+                                                            key: const ValueKey(
+                                                              'cover',
+                                                            ),
+                                                            bytes:
+                                                                item.extras?['artwork']
+                                                                    as Uint8List?,
+                                                            size: size,
+                                                            borderRadius: 12,
+                                                          ),
+                                                        );
+                                                      },
+                                                    ),
+                                            ),
+                                          ),
                                   ),
                                   const SizedBox(height: 16),
                                   Row(
@@ -171,18 +256,11 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                                     ],
                                   ),
                                   const SizedBox(height: 4),
-                                  Text(
-                                    '${item.artist ?? '未知艺术家'} · ${item.album ?? '未知专辑'}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyMedium
-                                        ?.copyWith(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant,
-                                        ),
+                                  NowPlayingArtistLinks(
+                                    artistTag: item.artist ?? '未知艺术家',
+                                    album: item.album ?? '未知专辑',
+                                    onArtistTap: (artist) =>
+                                        _openArtist(item, artist),
                                   ),
                                   const SizedBox(height: 18),
                                   StreamBuilder<Duration>(
@@ -238,8 +316,9 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                                           _playbackModeFromState(state);
                                       final compactControls =
                                           isAndroid ||
+                                          docked ||
                                           MediaQuery.sizeOf(context).width <
-                                              700;
+                                              760;
                                       final modeButton = IconButton(
                                         tooltip: _playbackModeLabel(
                                           playbackMode,
@@ -255,24 +334,25 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                                           ).colorScheme.primary,
                                         ),
                                       );
-                                      final infoButton = IconButton(
-                                        tooltip: '歌曲信息',
-                                        onPressed: () =>
-                                            showTrackInfo(context, item),
-                                        icon: const Icon(
-                                          Icons.info_outline_rounded,
-                                        ),
+                                      final infoButton = TrackInfoButton(
+                                        item: item,
                                       );
-                                      final trailingControls =
-                                          WindowsTitleBar.isVisible
-                                          ? VolumeControl(
-                                              handler: handler,
-                                              showSlider: !compactControls,
+                                      final trailingControls = isDesktop
+                                          ? Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (showTrackInfoButton)
+                                                  infoButton,
+                                                VolumeControl(
+                                                  handler: handler,
+                                                  showSlider: !compactControls,
+                                                ),
+                                              ],
                                             )
                                           : const SizedBox.shrink();
                                       final leftControls = Row(
                                         mainAxisSize: MainAxisSize.min,
-                                        children: [modeButton],
+                                        children: [if (!isDesktop) modeButton],
                                       );
                                       final primaryControls = Row(
                                         mainAxisSize: MainAxisSize.min,
@@ -311,6 +391,12 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                                               Icons.skip_next_rounded,
                                             ),
                                           ),
+                                          if (isDesktop) ...[
+                                            SizedBox(
+                                              width: compactControls ? 4 : 10,
+                                            ),
+                                            modeButton,
+                                          ],
                                         ],
                                       );
                                       if (isAndroid) {
@@ -439,6 +525,157 @@ String _repeatLabel(AudioServiceRepeatMode mode) => switch (mode) {
   AudioServiceRepeatMode.one => '单曲循环，点击关闭循环',
   AudioServiceRepeatMode.group => '分组循环，点击关闭循环',
 };
+
+@visibleForTesting
+class NowPlayingSplitArtworkLyrics extends StatelessWidget {
+  const NowPlayingSplitArtworkLyrics({
+    super.key,
+    required this.item,
+    required this.positionStream,
+    required this.initialPosition,
+  });
+
+  final MediaItem item;
+  final Stream<Duration> positionStream;
+  final Duration initialPosition;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final gap = constraints.maxWidth < 1100 ? 28.0 : 48.0;
+      final coverSpace = (constraints.maxWidth - gap) * 0.44;
+      final coverSize = math
+          .min(math.min(coverSpace, constraints.maxHeight), 400.0)
+          .clamp(0.0, 400.0);
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            flex: 9,
+            child: Center(
+              child: ArtworkView(
+                key: ValueKey(('split-cover', item.id)),
+                bytes: item.extras?['artwork'] as Uint8List?,
+                size: coverSize,
+                borderRadius: 14,
+              ),
+            ),
+          ),
+          SizedBox(width: gap),
+          Expanded(
+            flex: 11,
+            child: _LyricsPanel(
+              key: ValueKey(('split-lyrics', item.id)),
+              lyrics: item.extras?['lyrics'] as String?,
+              positionStream: positionStream,
+              initialPosition: initialPosition,
+            ),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+@visibleForTesting
+class NowPlayingArtistLinks extends StatelessWidget {
+  const NowPlayingArtistLinks({
+    super.key,
+    required this.artistTag,
+    required this.album,
+    required this.onArtistTap,
+  });
+
+  final String artistTag;
+  final String album;
+  final ValueChanged<String> onArtistTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final artists = splitArtistNames(artistTag);
+    final displayArtists = artists.isEmpty ? const ['未知艺术家'] : artists;
+    final secondaryStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+    );
+    final children = <Widget>[];
+    for (var index = 0; index < displayArtists.length; index++) {
+      final artist = displayArtists[index];
+      if (index > 0) {
+        children.add(Text('/', style: secondaryStyle));
+      }
+      if (artist == '未知艺术家') {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(artist, style: secondaryStyle),
+          ),
+        );
+      } else {
+        children.add(
+          Tooltip(
+            message: '查看歌手：$artist',
+            child: TextButton(
+              key: ValueKey('now-playing-artist-$artist'),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 44),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+              ),
+              onPressed: () => onArtistTap(artist),
+              child: Text(artist),
+            ),
+          ),
+        );
+      }
+    }
+    children.addAll([
+      Text('·', style: secondaryStyle),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Text(
+          album.trim().isEmpty ? '未知专辑' : album,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: secondaryStyle,
+        ),
+      ),
+    ]);
+    return Semantics(
+      container: true,
+      label: '歌手与专辑',
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 4,
+        runSpacing: 0,
+        children: children,
+      ),
+    );
+  }
+}
+
+OnlineTrack? _onlineTrackFromMediaItem(MediaItem item) {
+  final extras = item.extras;
+  if (extras?['sourceType'] != 'online') return null;
+  final provider = extras?['provider'] as String?;
+  final trackId = extras?['trackId'] as String?;
+  if (provider == null ||
+      provider.trim().isEmpty ||
+      trackId == null ||
+      trackId.trim().isEmpty) {
+    return null;
+  }
+  final lyrics = extras?['lyrics'] as String?;
+  return OnlineTrack(
+    provider: provider,
+    trackId: trackId,
+    title: item.title,
+    artists: splitArtistNames(item.artist ?? ''),
+    album: item.album ?? '',
+    durationMs: item.duration?.inMilliseconds,
+    playable: true,
+    capabilities: {'playback', if (lyrics?.trim().isNotEmpty == true) 'lyrics'},
+  );
+}
 
 class _LyricsPanel extends StatefulWidget {
   const _LyricsPanel({

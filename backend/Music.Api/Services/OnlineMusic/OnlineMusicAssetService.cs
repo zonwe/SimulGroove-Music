@@ -44,6 +44,8 @@ public interface IOnlineMusicAssetService
 public sealed class OnlineMusicAssetService : IOnlineMusicAssetService, IDisposable
 {
     private const int MaximumTrackIdLength = 512;
+    private static readonly TimeSpan StableFailureCacheDuration = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan TransientFailureCacheDuration = TimeSpan.FromSeconds(15);
 
     private readonly IOnlineMusicGateway _gateway;
     private readonly OnlineMusicOptions _options;
@@ -107,9 +109,15 @@ public sealed class OnlineMusicAssetService : IOnlineMusicAssetService, IDisposa
     {
         (source, trackId) = ValidateTrack(source, trackId);
         var cacheKey = $"online-music:artwork:{source}:{trackId}";
+        var failureCacheKey = $"{cacheKey}:failure";
         if (_cache.TryGetValue<OnlineMusicArtwork>(cacheKey, out var cached) && cached is not null)
         {
             return cached;
+        }
+        if (_cache.TryGetValue<CachedAssetFailure>(failureCacheKey, out var cachedFailure) &&
+            cachedFailure is not null)
+        {
+            throw cachedFailure.ToException();
         }
 
         try
@@ -123,11 +131,22 @@ public sealed class OnlineMusicAssetService : IOnlineMusicAssetService, IDisposa
                 new MemoryCacheEntryOptions()
                     .SetAbsoluteExpiration(TimeSpan.FromSeconds(Math.Clamp(_options.ArtworkCacheSeconds, 60, 86400)))
                     .SetSize(Math.Max(1, asset.Bytes.Length)));
+            _cache.Remove(failureCacheKey);
             return result;
         }
         catch (OnlineMusicGatewayException exception)
         {
-            throw Map(exception);
+            var mapped = Map(exception);
+            var duration = mapped.Failure is OnlineMusicAssetFailure.NotFound or OnlineMusicAssetFailure.TooLarge
+                ? StableFailureCacheDuration
+                : TransientFailureCacheDuration;
+            _cache.Set(
+                failureCacheKey,
+                new CachedAssetFailure(mapped.Failure, mapped.Message),
+                new MemoryCacheEntryOptions()
+                    .SetAbsoluteExpiration(duration)
+                    .SetSize(1));
+            throw mapped;
         }
     }
 
@@ -162,4 +181,11 @@ public sealed class OnlineMusicAssetService : IOnlineMusicAssetService, IDisposa
             _ => OnlineMusicAssetFailure.Unavailable
         },
         exception.Message);
+
+    private sealed record CachedAssetFailure(
+        OnlineMusicAssetFailure Failure,
+        string Message)
+    {
+        public OnlineMusicAssetException ToException() => new(Failure, Message);
+    }
 }

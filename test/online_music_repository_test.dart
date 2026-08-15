@@ -14,10 +14,11 @@ void main() {
     final gateway = _RetryGateway();
     final repository = AuthenticatedOnlineMusicRepository(auth, gateway);
 
-    final result = await repository.search('Song');
+    final result = await repository.search('Song', cursor: 'next-page');
 
     expect(auth.forceRefreshCount, 1);
     expect(gateway.tokens, ['expired-token', 'refreshed-token']);
+    expect(gateway.cursors, ['next-page', 'next-page']);
     expect(result.items.single.title, 'Song');
   });
 
@@ -75,6 +76,7 @@ class _FakeAuthRepository implements AuthRepository {
 
 class _RetryGateway implements OnlineMusicGateway {
   final tokens = <String>[];
+  final cursors = <String?>[];
 
   @override
   Future<OnlineMusicSearchResult> search(
@@ -85,6 +87,7 @@ class _RetryGateway implements OnlineMusicGateway {
     String? cursor,
   }) async {
     tokens.add(session.token);
+    cursors.add(cursor);
     if (tokens.length == 1) {
       throw const OnlineMusicException('Unauthorized', statusCode: 401);
     }

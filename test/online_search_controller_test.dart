@@ -75,6 +75,55 @@ void main() {
     expect(controller.state.message, contains('Service unavailable'));
     controller.dispose();
   });
+
+  test('清空输入会保持空闲并忽略尚未返回的搜索', () async {
+    final repository = _DeferredRepository();
+    final controller = OnlineSearchController(repository);
+
+    final search = controller.searchNow('Song');
+    await Future<void>.delayed(Duration.zero);
+    controller.clear();
+    repository.complete('Song', _result('Late Song'));
+    await search;
+
+    expect(controller.state.status, OnlineSearchStatus.idle);
+    expect(controller.state.items, isEmpty);
+    controller.dispose();
+  });
+
+  test('使用服务端游标前后翻页并维护页码', () async {
+    final repository = _PagingRepository();
+    final controller = OnlineSearchController(repository);
+
+    await controller.searchNow('Song');
+    expect(controller.state.page, 1);
+    expect(controller.state.items.single.title, 'Page 1');
+    expect(controller.state.hasPreviousPage, isFalse);
+    expect(controller.state.hasNextPage, isTrue);
+
+    await controller.nextPage();
+    expect(controller.state.page, 2);
+    expect(controller.state.items.single.title, 'Page 2');
+    expect(controller.state.hasPreviousPage, isTrue);
+    expect(controller.state.hasNextPage, isTrue);
+
+    await controller.nextPage();
+    expect(controller.state.page, 3);
+    expect(controller.state.hasNextPage, isFalse);
+
+    await controller.previousPage();
+    await controller.previousPage();
+    expect(controller.state.page, 1);
+    expect(repository.cursors, <String?>[
+      null,
+      'cursor-2',
+      'cursor-3',
+      'cursor-2',
+      null,
+    ]);
+
+    controller.dispose();
+  });
 }
 
 OnlineMusicSearchResult _result(String title) => OnlineMusicSearchResult(
@@ -99,8 +148,10 @@ class _QueuedRepository implements OnlineMusicSearchRepository {
   void completeNext(OnlineMusicSearchResult result) => _results.add(result);
 
   @override
-  Future<OnlineMusicSearchResult> search(String query) async =>
-      _results.removeAt(0);
+  Future<OnlineMusicSearchResult> search(
+    String query, {
+    String? cursor,
+  }) async => _results.removeAt(0);
 
   @override
   Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
@@ -120,7 +171,7 @@ class _DeferredRepository implements OnlineMusicSearchRepository {
       _requests[query]!.complete(result);
 
   @override
-  Future<OnlineMusicSearchResult> search(String query) {
+  Future<OnlineMusicSearchResult> search(String query, {String? cursor}) {
     final completer = Completer<OnlineMusicSearchResult>();
     _requests[query] = completer;
     return completer.future;
@@ -139,7 +190,7 @@ class _DeferredRepository implements OnlineMusicSearchRepository {
 
 class _FailingRepository implements OnlineMusicSearchRepository {
   @override
-  Future<OnlineMusicSearchResult> search(String query) =>
+  Future<OnlineMusicSearchResult> search(String query, {String? cursor}) =>
       Future.error(StateError('Service unavailable'));
 
   @override
@@ -152,3 +203,46 @@ class _FailingRepository implements OnlineMusicSearchRepository {
   @override
   Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
 }
+
+class _PagingRepository implements OnlineMusicSearchRepository {
+  final cursors = <String?>[];
+
+  @override
+  Future<OnlineMusicSearchResult> search(String query, {String? cursor}) async {
+    cursors.add(cursor);
+    return switch (cursor) {
+      null => _pageResult('Page 1', 'cursor-2'),
+      'cursor-2' => _pageResult('Page 2', 'cursor-3'),
+      'cursor-3' => _pageResult('Page 3', null),
+      _ => throw StateError('Unexpected cursor: $cursor'),
+    };
+  }
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async => null;
+
+  @override
+  Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
+      throw UnimplementedError();
+}
+
+OnlineMusicSearchResult _pageResult(String title, String? nextCursor) =>
+    OnlineMusicSearchResult(
+      items: [
+        OnlineTrack(
+          provider: 'source-a',
+          trackId: title,
+          title: title,
+          artists: const ['Artist'],
+          album: 'Album',
+          playable: true,
+          capabilities: const {'playback'},
+        ),
+      ],
+      partial: false,
+      warnings: const [],
+      nextCursor: nextCursor,
+    );

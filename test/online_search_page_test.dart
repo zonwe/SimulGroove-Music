@@ -24,20 +24,25 @@ void main() {
             const _ResultRepository(),
           ),
           onlineTrackPlaybackProvider.overrideWithValue(playback),
+          onlineSearchShowArtworkProvider.overrideWithValue(
+            const AsyncData(true),
+          ),
         ],
         child: const MaterialApp(home: Scaffold(body: OnlineSearchPage())),
       ),
     );
 
-    expect(find.text('输入关键字开始搜索'), findsNWidgets(2));
+    expect(find.text('输入关键字后点击搜索'), findsNWidgets(2));
     await tester.enterText(find.byType(TextField), 'Song');
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Test Song'), findsNothing);
     await tester.tap(find.byTooltip('立即搜索'));
     await tester.pumpAndSettle();
 
     expect(find.text('Test Song'), findsOneWidget);
     expect(find.textContaining('source-b 暂时不可用'), findsOneWidget);
-    expect(find.byTooltip('播放 Test Song'), findsOneWidget);
-    await tester.tap(find.byTooltip('播放 Test Song'));
+    expect(find.byTooltip('播放 Test Song'), findsNothing);
+    await tester.tap(find.text('Test Song'));
     await tester.pumpAndSettle();
     expect(playback.played.single.title, 'Test Song');
     expect(tester.takeException(), isNull);
@@ -51,6 +56,9 @@ void main() {
             const _ErrorRepository(),
           ),
           onlineTrackPlaybackProvider.overrideWithValue(_FakePlayback()),
+          onlineSearchShowArtworkProvider.overrideWithValue(
+            const AsyncData(true),
+          ),
         ],
         child: const MaterialApp(home: Scaffold(body: OnlineSearchPage())),
       ),
@@ -77,6 +85,9 @@ void main() {
             const _ResultRepository(),
           ),
           onlineTrackPlaybackProvider.overrideWithValue(_FakePlayback()),
+          onlineSearchShowArtworkProvider.overrideWithValue(
+            const AsyncData(true),
+          ),
         ],
         child: MaterialApp(
           theme: ThemeData.dark(useMaterial3: true),
@@ -110,6 +121,9 @@ void main() {
             const _ResultRepository(),
           ),
           onlineTrackPlaybackProvider.overrideWithValue(_FakePlayback()),
+          onlineSearchShowArtworkProvider.overrideWithValue(
+            const AsyncData(true),
+          ),
         ],
         child: MaterialApp(
           home: StatefulBuilder(
@@ -141,34 +155,99 @@ void main() {
     expect(find.text('Song'), findsOneWidget);
     expect(find.text('Test Song'), findsOneWidget);
   });
+
+  testWidgets('关闭搜索封面后不展示也不请求封面', (tester) async {
+    final repository = _ArtworkResultRepository();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          onlineMusicRepositoryProvider.overrideWithValue(repository),
+          onlineTrackPlaybackProvider.overrideWithValue(_FakePlayback()),
+          onlineSearchShowArtworkProvider.overrideWithValue(
+            const AsyncData(false),
+          ),
+        ],
+        child: const MaterialApp(home: Scaffold(body: OnlineSearchPage())),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'Song');
+    await tester.tap(find.byTooltip('立即搜索'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Artwork Song'), findsOneWidget);
+    expect(find.byIcon(Icons.music_note_rounded), findsNothing);
+    expect(repository.artworkCalls, 0);
+  });
+
+  testWidgets('搜索结果可使用上一页和下一页翻页', (tester) async {
+    tester.view.physicalSize = const Size(375, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final repository = _PagedResultRepository();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          onlineMusicRepositoryProvider.overrideWithValue(repository),
+          onlineTrackPlaybackProvider.overrideWithValue(_FakePlayback()),
+          onlineSearchShowArtworkProvider.overrideWithValue(
+            const AsyncData(true),
+          ),
+        ],
+        child: const MaterialApp(home: Scaffold(body: OnlineSearchPage())),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'Song');
+    await tester.tap(find.byTooltip('立即搜索'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Page 1 Song'), findsOneWidget);
+    expect(find.text('第 1 页'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '下一页'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Page 2 Song'), findsOneWidget);
+    expect(find.text('第 2 页'), findsOneWidget);
+    expect(repository.cursors, <String?>[null, 'next-page']);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '上一页'));
+    await tester.pumpAndSettle();
+    expect(find.text('Page 1 Song'), findsOneWidget);
+    expect(repository.cursors, <String?>[null, 'next-page', null]);
+  });
 }
 
 class _ResultRepository implements OnlineMusicSearchRepository {
   const _ResultRepository();
 
   @override
-  Future<OnlineMusicSearchResult> search(String query) async =>
-      const OnlineMusicSearchResult(
-        items: [
-          OnlineTrack(
-            provider: 'source-a',
-            trackId: 'track-1',
-            title: 'Test Song',
-            artists: ['Test Artist'],
-            album: 'Test Album',
-            playable: true,
-            capabilities: {'playback'},
-          ),
-        ],
-        partial: true,
-        warnings: [
-          OnlineMusicWarning(
-            provider: 'source-b',
-            code: 'online_music_source_unavailable',
-            message: 'Unavailable',
-          ),
-        ],
-      );
+  Future<OnlineMusicSearchResult> search(
+    String query, {
+    String? cursor,
+  }) async => const OnlineMusicSearchResult(
+    items: [
+      OnlineTrack(
+        provider: 'source-a',
+        trackId: 'track-1',
+        title: 'Test Song',
+        artists: ['Test Artist'],
+        album: 'Test Album',
+        playable: true,
+        capabilities: {'playback'},
+      ),
+    ],
+    partial: true,
+    warnings: [
+      OnlineMusicWarning(
+        provider: 'source-b',
+        code: 'online_music_source_unavailable',
+        message: 'Unavailable',
+      ),
+    ],
+  );
 
   @override
   Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
@@ -185,7 +264,7 @@ class _ErrorRepository implements OnlineMusicSearchRepository {
   const _ErrorRepository();
 
   @override
-  Future<OnlineMusicSearchResult> search(String query) =>
+  Future<OnlineMusicSearchResult> search(String query, {String? cursor}) =>
       Future.error(StateError('Service unavailable'));
 
   @override
@@ -197,6 +276,79 @@ class _ErrorRepository implements OnlineMusicSearchRepository {
 
   @override
   Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
+}
+
+class _ArtworkResultRepository implements OnlineMusicSearchRepository {
+  var artworkCalls = 0;
+
+  @override
+  Future<OnlineMusicSearchResult> search(
+    String query, {
+    String? cursor,
+  }) async => const OnlineMusicSearchResult(
+    items: [
+      OnlineTrack(
+        provider: 'source-a',
+        trackId: 'artwork-track',
+        title: 'Artwork Song',
+        artists: ['Test Artist'],
+        album: 'Test Album',
+        playable: true,
+        capabilities: {'playback', 'artwork'},
+      ),
+    ],
+    partial: false,
+    warnings: [],
+  );
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async {
+    artworkCalls++;
+    return null;
+  }
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async => null;
+
+  @override
+  Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
+      throw UnimplementedError();
+}
+
+class _PagedResultRepository implements OnlineMusicSearchRepository {
+  final cursors = <String?>[];
+
+  @override
+  Future<OnlineMusicSearchResult> search(String query, {String? cursor}) async {
+    cursors.add(cursor);
+    final firstPage = cursor == null;
+    return OnlineMusicSearchResult(
+      items: [
+        OnlineTrack(
+          provider: 'source-a',
+          trackId: firstPage ? 'page-1' : 'page-2',
+          title: firstPage ? 'Page 1 Song' : 'Page 2 Song',
+          artists: const ['Artist'],
+          album: 'Album',
+          playable: true,
+          capabilities: const {'playback'},
+        ),
+      ],
+      partial: false,
+      warnings: const [],
+      nextCursor: firstPage ? 'next-page' : null,
+    );
+  }
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async => null;
+
+  @override
+  Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
+      throw UnimplementedError();
 }
 
 class _FakePlayback implements OnlineTrackPlayback {

@@ -9,6 +9,7 @@ import '../library/library_page.dart';
 import '../library/favorites_page.dart';
 import '../placeholders/recognition_page.dart';
 import '../placeholders/settings_page.dart';
+import '../online_search/online_collection_page.dart';
 import '../online_search/online_search_page.dart';
 import '../player/compact_player.dart';
 import '../player/mini_player_bar.dart';
@@ -28,6 +29,7 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   AppDestination _destination = AppDestination.playlists;
   Playlist? _selectedPlaylist;
+  OnlineCollectionRequest? _selectedOnlineCollection;
 
   @override
   Widget build(BuildContext context) {
@@ -46,11 +48,11 @@ class _AppShellState extends State<AppShell> {
           return LayoutBuilder(
             builder: (context, constraints) {
               final wide = constraints.maxWidth >= 900;
+              final showingDetail =
+                  _selectedPlaylist != null ||
+                  _selectedOnlineCollection != null;
               return Scaffold(
-                appBar:
-                    !wide &&
-                        !WindowsTitleBar.isVisible &&
-                        _selectedPlaylist == null
+                appBar: !wide && !WindowsTitleBar.isVisible && !showingDetail
                     ? AppBar(
                         title: Text(_destination.label),
                         leading: _destination == AppDestination.playlists
@@ -114,11 +116,14 @@ class _AppShellState extends State<AppShell> {
     setState(() {
       _destination = AppDestination.playlists;
       _selectedPlaylist = null;
+      _selectedOnlineCollection = null;
     });
   }
 
   void _navigateBack() {
-    if (_selectedPlaylist != null) {
+    if (_selectedOnlineCollection != null) {
+      setState(() => _selectedOnlineCollection = null);
+    } else if (_selectedPlaylist != null) {
       setState(() => _selectedPlaylist = null);
     } else {
       _goToPlaylists();
@@ -129,6 +134,15 @@ class _AppShellState extends State<AppShell> {
     setState(() {
       _destination = AppDestination.playlists;
       _selectedPlaylist = playlist;
+      _selectedOnlineCollection = null;
+    });
+  }
+
+  void _openOnlineCollection(OnlineCollectionRequest request) {
+    setState(() {
+      _destination = AppDestination.onlineSearch;
+      _selectedPlaylist = null;
+      _selectedOnlineCollection = request;
     });
   }
 
@@ -136,6 +150,7 @@ class _AppShellState extends State<AppShell> {
     setState(() {
       _destination = value;
       _selectedPlaylist = null;
+      _selectedOnlineCollection = null;
     });
     if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
       Navigator.of(context).pop();
@@ -152,7 +167,17 @@ class _AppShellState extends State<AppShell> {
               playlist: _selectedPlaylist!,
               onBack: _navigateBack,
             ),
-    AppDestination.onlineSearch => const OnlineSearchPage(),
+    AppDestination.onlineSearch =>
+      _selectedOnlineCollection == null
+          ? OnlineSearchPage(onOpenCollection: _openOnlineCollection)
+          : OnlineCollectionPage(
+              key: ValueKey(
+                '${_selectedOnlineCollection!.kind.name}:'
+                '${_selectedOnlineCollection!.value}',
+              ),
+              request: _selectedOnlineCollection!,
+              onBack: _navigateBack,
+            ),
     AppDestination.recognition => const RecognitionPage(),
     AppDestination.account => const AccountPage(),
     AppDestination.settings => const SettingsPage(),

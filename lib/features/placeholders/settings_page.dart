@@ -1,13 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 
 import '../../app/providers.dart';
+import '../../core/online_music/online_search_settings.dart';
+import '../../core/online_music/online_track_downloader.dart';
+import '../../core/player/now_playing_layout.dart';
 import '../../core/theme/app_appearance.dart';
 import '../../core/shortcuts/desktop_shortcut_service.dart';
 import '../../core/window/desktop_window_controller.dart';
 import '../../core/window/window_settings.dart';
+import '../library/library_scan_settings_section.dart';
 import 'desktop_shortcut_settings_section.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -26,6 +32,10 @@ class SettingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final isDesktop =
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux);
     final appearance =
         ref.watch(appearanceProvider).value ??
         const AppAppearance(
@@ -53,7 +63,7 @@ class SettingsPage extends ConsumerWidget {
                   const ListTile(
                     leading: Icon(Icons.brightness_6_outlined),
                     title: Text('显示模式'),
-                    subtitle: Text('默认跟随 Android、Windows 或浏览器的系统设置'),
+                    subtitle: Text('默认跟随系统的浅色或深色设置'),
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -131,8 +141,14 @@ class SettingsPage extends ConsumerWidget {
             ),
           ],
         ),
+        if (isDesktop) ...[
+          const SizedBox(height: 16),
+          const NowPlayingLayoutSettingsSection(),
+        ],
         const SizedBox(height: 16),
         const _EqualizerSection(),
+        const SizedBox(height: 16),
+        const LibraryScanSettingsSection(),
         const SizedBox(height: 16),
         const _SettingsSection(
           title: '音乐与同步',
@@ -140,7 +156,7 @@ class SettingsPage extends ConsumerWidget {
             ListTile(
               leading: Icon(Icons.audio_file_outlined),
               title: Text('本地格式'),
-              subtitle: Text('MP3、FLAC、M4A/AAC、WAV、OGG、Opus；Windows 尝试支持 WMA'),
+              subtitle: Text('MP3、FLAC、M4A/AAC、WAV、OGG、Opus、WMA'),
             ),
             Divider(height: 1),
             ListTile(
@@ -151,11 +167,224 @@ class SettingsPage extends ConsumerWidget {
             ),
           ],
         ),
+        const SizedBox(height: 16),
+        _OnlineMusicSettingsSection(
+          downloadSupported: ref.watch(onlineTrackDownloaderProvider).supported,
+        ),
         if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) ...[
           const SizedBox(height: 16),
           const _TraySettingsSection(),
+        ],
+        if (isDesktop) ...[
           const SizedBox(height: 16),
           const DesktopShortcutSettingsSection(),
+        ],
+      ],
+    );
+  }
+}
+
+@visibleForTesting
+class NowPlayingLayoutSettingsSection extends ConsumerWidget {
+  const NowPlayingLayoutSettingsSection({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final layout =
+        ref.watch(nowPlayingLayoutProvider).value ?? NowPlayingLayout.classic;
+    return _SettingsSection(
+      title: '播放界面',
+      children: [
+        const ListTile(
+          leading: Icon(Icons.view_week_outlined),
+          title: Text('正在播放页布局'),
+          subtitle: Text('双栏模式在宽窗口显示左侧封面和右侧歌词；窄窗口会自动使用经典模式'),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<NowPlayingLayout>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                  value: NowPlayingLayout.classic,
+                  icon: Icon(Icons.crop_square_rounded),
+                  label: Text('经典'),
+                ),
+                ButtonSegment(
+                  value: NowPlayingLayout.split,
+                  icon: Icon(Icons.view_week_rounded),
+                  label: Text('封面歌词双栏'),
+                ),
+              ],
+              selected: {layout},
+              onSelectionChanged: (selection) => ref
+                  .read(databaseProvider)
+                  .setSetting(
+                    nowPlayingLayoutSettingKey,
+                    serializeNowPlayingLayout(selection.first),
+                  ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _OnlineMusicSettingsSection extends ConsumerStatefulWidget {
+  const _OnlineMusicSettingsSection({required this.downloadSupported});
+
+  final bool downloadSupported;
+
+  @override
+  ConsumerState<_OnlineMusicSettingsSection> createState() =>
+      _OnlineMusicSettingsSectionState();
+}
+
+class _OnlineMusicSettingsSectionState
+    extends ConsumerState<_OnlineMusicSettingsSection> {
+  String? _destinationLabel;
+  bool _loading = true;
+  bool _choosing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.downloadSupported) {
+      unawaited(_loadDestination());
+    } else {
+      _loading = false;
+    }
+  }
+
+  Future<void> _loadDestination() async {
+    try {
+      final destination = await ref
+          .read(onlineTrackDownloaderProvider)
+          .destination();
+      if (!mounted) return;
+      setState(() {
+        _destinationLabel = destination?.label;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      _showError('无法读取下载目录：$error');
+    }
+  }
+
+  Future<void> _chooseDestination() async {
+    if (_choosing) return;
+    setState(() => _choosing = true);
+    try {
+      final destination = await ref
+          .read(onlineTrackDownloaderProvider)
+          .chooseDestination();
+      if (!mounted || destination == null) return;
+      setState(() => _destinationLabel = destination.label);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('下载目录已设为：${destination.label}')));
+    } catch (error) {
+      if (mounted) _showError('无法设置下载目录：$error');
+    } finally {
+      if (mounted) setState(() => _choosing = false);
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final showArtwork =
+        ref.watch(onlineSearchShowArtworkProvider).value ?? true;
+    final filenameFormat =
+        ref.watch(onlineDownloadFilenameFormatProvider).value ??
+        OnlineDownloadFilenameFormat.artistTitle;
+    return _SettingsSection(
+      title: '在线音乐',
+      children: [
+        SwitchListTile(
+          secondary: const Icon(Icons.image_outlined),
+          title: const Text('显示搜索结果封面'),
+          subtitle: const Text('关闭后不加载封面，搜索结果会更紧凑'),
+          value: showArtwork,
+          onChanged: (value) => ref
+              .read(databaseProvider)
+              .setSetting(onlineSearchShowArtworkSettingKey, '$value'),
+        ),
+        if (widget.downloadSupported) ...[
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.download_outlined),
+            title: const Text('下载目录'),
+            subtitle: Text(
+              _loading ? '正在读取…' : _destinationLabel ?? '尚未设置；下载在线歌曲前需要先选择目录',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: _loading
+                ? const SizedBox.square(
+                    dimension: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : FilledButton.tonalIcon(
+                    onPressed: _choosing ? null : _chooseDestination,
+                    icon: _choosing
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.folder_open_outlined),
+                    label: Text(_destinationLabel == null ? '选择' : '更改'),
+                  ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
+            child: Text('Windows、Linux 和 Android 会记住此目录；搜索页只负责选择歌曲和开始下载。'),
+          ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: DropdownButtonFormField<OnlineDownloadFilenameFormat>(
+              initialValue: filenameFormat,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.drive_file_rename_outline),
+                labelText: '下载文件命名',
+                helperText: '选择默认文件名顺序，不改变音频编码格式',
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: OnlineDownloadFilenameFormat.artistTitle,
+                  child: Text('歌手 - 歌曲名'),
+                ),
+                DropdownMenuItem(
+                  value: OnlineDownloadFilenameFormat.titleArtist,
+                  child: Text('歌曲名 - 歌手'),
+                ),
+                DropdownMenuItem(
+                  value: OnlineDownloadFilenameFormat.titleOnly,
+                  child: Text('只有歌曲名'),
+                ),
+              ],
+              onChanged: (value) {
+                if (value == null) return;
+                ref
+                    .read(databaseProvider)
+                    .setSetting(
+                      onlineDownloadFilenameFormatSettingKey,
+                      serializeOnlineDownloadFilenameFormat(value),
+                    );
+              },
+            ),
+          ),
         ],
       ],
     );
@@ -273,8 +502,10 @@ class _EqualizerSection extends ConsumerWidget {
       stream: ref.watch(databaseProvider).watchSettings(),
       builder: (context, snapshot) {
         final settings = snapshot.data ?? const <String, String>{};
-        final windows =
-            !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+        final mediaKitDesktop =
+            !kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.windows ||
+                defaultTargetPlatform == TargetPlatform.linux);
         final selected =
             _presets.containsKey(settings['audio.equalizer.preset'])
             ? settings['audio.equalizer.preset']!
@@ -286,8 +517,8 @@ class _EqualizerSection extends ConsumerWidget {
               leading: const Icon(Icons.equalizer_outlined),
               title: const Text('均衡器'),
               subtitle: Text(
-                windows
-                    ? 'Windows media_kit 音频后端当前不提供 DSP 均衡器'
+                mediaKitDesktop
+                    ? '桌面 media_kit 音频后端当前不提供 DSP 均衡器'
                     : '选择当前播放使用的音效预设',
               ),
               trailing: SizedBox(
@@ -301,7 +532,7 @@ class _EqualizerSection extends ConsumerWidget {
                         child: Text(entry.value),
                       ),
                   ],
-                  onChanged: windows
+                  onChanged: mediaKitDesktop
                       ? null
                       : (value) async {
                           if (value == null) return;
@@ -318,8 +549,8 @@ class _EqualizerSection extends ConsumerWidget {
             Padding(
               padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
               child: Text(
-                windows
-                    ? '当前 Windows 后端不支持真正的频段 DSP；预设不会改变音色。'
+                mediaKitDesktop
+                    ? '当前桌面后端不支持真正的频段 DSP；预设不会改变音色。'
                     : '当前后端使用预设增益；后续可接入平台音频 DSP。',
               ),
             ),

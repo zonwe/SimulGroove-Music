@@ -2,6 +2,7 @@ using Music.Api.Models;
 using Music.Api.Services;
 using Music.Api.Services.OnlineMusic;
 using Music.Api.Tools;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Music.Api.Endpoints;
 
@@ -182,6 +183,44 @@ public static class OnlineMusicEndpoints
             }
         });
 
+        endpoints.MapGet("/api/online-music/tracks/{source}/{trackId}/download", async (
+            string source,
+            string trackId,
+            HttpContext httpContext,
+            IAuthService auth,
+            [FromServices] IOnlineMusicGateway gateway,
+            CancellationToken cancellationToken) =>
+        {
+            if (auth.Authenticate(httpContext.Request.ReadBearerToken()) is null) return Results.Unauthorized();
+            if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(trackId))
+            {
+                return InvalidRequest("歌曲来源或标识无效。");
+            }
+
+            try
+            {
+                return new OnlineMusicDownloadResult(await gateway.OpenDownloadAsync(
+                    source.Trim(),
+                    trackId.Trim(),
+                    cancellationToken));
+            }
+            catch (OnlineMusicGatewayException exception)
+            {
+                return exception.Failure switch
+                {
+                    OnlineMusicGatewayFailure.NotFound => Results.Json(
+                        new ProblemResponse("online_music_asset_not_found", "该歌曲暂无可用下载。"),
+                        statusCode: StatusCodes.Status404NotFound),
+                    OnlineMusicGatewayFailure.Timeout => Results.Json(
+                        new ProblemResponse("online_music_upstream_timeout", "在线音乐来源响应超时，请稍后重试。"),
+                        statusCode: StatusCodes.Status504GatewayTimeout),
+                    _ => Results.Json(
+                        new ProblemResponse("online_music_source_unavailable", "在线音乐下载暂时不可用。"),
+                        statusCode: StatusCodes.Status502BadGateway)
+                };
+            }
+        });
+
         return endpoints;
     }
 
@@ -289,6 +328,25 @@ public static class OnlineMusicEndpoints
         private static void SetHeader(HttpResponse response, string name, string? value)
         {
             if (!string.IsNullOrWhiteSpace(value)) response.Headers[name] = value;
+        }
+    }
+
+    private sealed class OnlineMusicDownloadResult(OnlineMusicStreamResponse stream) : IResult
+    {
+        public async Task ExecuteAsync(HttpContext httpContext)
+        {
+            await using (stream)
+            {
+                httpContext.Response.StatusCode = StatusCodes.Status200OK;
+                httpContext.Response.ContentLength = stream.ContentLength;
+                httpContext.Response.ContentType = stream.ContentType;
+                httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                httpContext.Response.Headers["X-Online-Lyrics-Embedded"] = stream.LyricsEmbedded.ToString().ToLowerInvariant();
+                httpContext.Response.Headers["X-Online-Artwork-Embedded"] = stream.ArtworkEmbedded.ToString().ToLowerInvariant();
+                await stream.Content.CopyToAsync(
+                    httpContext.Response.Body,
+                    httpContext.RequestAborted);
+            }
         }
     }
 }

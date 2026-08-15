@@ -7,29 +7,33 @@ import 'online_music_gateway.dart';
 import 'online_track.dart';
 
 abstract interface class OnlineMusicSearchRepository {
-  Future<OnlineMusicSearchResult> search(String query);
+  Future<OnlineMusicSearchResult> search(String query, {String? cursor});
   Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track);
   Future<String?> loadLyrics(OnlineTrack track);
   Future<Uint8List?> loadArtwork(OnlineTrack track);
 }
 
+abstract interface class OnlineMusicDownloadRepository {
+  Future<OnlinePlaybackSource> prepareDownload(OnlineTrack track);
+}
+
 class AuthenticatedOnlineMusicRepository
-    implements OnlineMusicSearchRepository {
+    implements OnlineMusicSearchRepository, OnlineMusicDownloadRepository {
   AuthenticatedOnlineMusicRepository(this._auth, this._gateway);
 
   final AuthRepository _auth;
   final OnlineMusicGateway _gateway;
 
   @override
-  Future<OnlineMusicSearchResult> search(String query) async {
+  Future<OnlineMusicSearchResult> search(String query, {String? cursor}) async {
     var session = await _requireSession();
 
     try {
-      return await _gateway.search(session, query: query);
+      return await _gateway.search(session, query: query, cursor: cursor);
     } on OnlineMusicException catch (error) {
       if (!error.isUnauthorized) rethrow;
       session = await _requireSession(forceRefresh: true);
-      return _gateway.search(session, query: query);
+      return _gateway.search(session, query: query, cursor: cursor);
     }
   }
 
@@ -48,6 +52,29 @@ class AuthenticatedOnlineMusicRepository
       if (!error.isUnauthorized) rethrow;
       session = await _requireSession(forceRefresh: true);
       return _gateway.requestPlayback(session, track);
+    }
+  }
+
+  @override
+  Future<OnlinePlaybackSource> prepareDownload(OnlineTrack track) async {
+    if (!track.playable || !track.capabilities.contains('playback')) {
+      throw const OnlineMusicException(
+        '当前在线音乐来源不支持下载这首歌曲。',
+        code: 'online_music_not_playable',
+      );
+    }
+    final gateway = _gateway;
+    if (gateway is! OnlineMusicDownloadGateway) {
+      return preparePlayback(track);
+    }
+    final downloadGateway = gateway as OnlineMusicDownloadGateway;
+    var session = await _requireSession();
+    try {
+      return await downloadGateway.requestDownload(session, track);
+    } on OnlineMusicException catch (error) {
+      if (!error.isUnauthorized) rethrow;
+      session = await _requireSession(forceRefresh: true);
+      return downloadGateway.requestDownload(session, track);
     }
   }
 

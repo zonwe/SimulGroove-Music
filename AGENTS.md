@@ -4,23 +4,24 @@
 
 ## 1. 项目目标与当前边界
 
-Flutter Music 是一个面向 Android、Windows 和 Web 的私人本地音乐播放器。核心目标是提供接近 Groove Music 的本地音乐体验，同时为账号、同步和服务器音乐目录扫描保留清晰的扩展边界。
+Flutter Music 是一个面向 Android、Windows、Linux 和 Web 的私人本地音乐播放器。核心目标是提供接近 Groove Music 的本地音乐体验，同时为账号、同步和服务器音乐目录扫描保留清晰的扩展边界。
 
 当前主要能力：
 
 - Android：授权目录或扫描整台设备、读取 MediaStore/Document Tree、后台播放、媒体通知、锁屏和耳机控制。
 - Windows：递归扫描本地目录、读取音频元数据、桌面快捷键、系统托盘、自绘标题栏和紧凑悬浮播放器。
+- Linux：递归扫描本地目录、读取音频元数据、media_kit 播放、MPRIS 媒体控制、桌面快捷键、原生标题栏和紧凑悬浮播放器。
 - Web：响应式界面、Drift Web 数据库、真实后端账号和在线搜索；不支持本地目录扫描与本地音乐播放。
 - 通用功能：歌曲/专辑/艺术家视图、搜索、封面、歌词、播放队列、歌单、喜欢、主题外观和设置持久化。
-- 实验性后端：`backend/Music.Api` 提供 ASP.NET Core + SQLite 的认证、歌单同步、服务器目录扫描和审计日志接口。
+- 实验性后端：`backend/Music.Api` 提供 ASP.NET Core + SQLite 的认证、歌单同步、服务器目录扫描、在线音乐 BFF 和审计日志接口；在线音乐链路已具备存活/就绪检查、关联 ID、低基数指标和进程内熔断。
 
 以下内容尚未视为完整产品能力：
 
 - Flutter 账号页通过 `HttpBackendGateway` 连接真实后端，令牌由安全存储保存；修改认证时必须继续保持刷新轮换和 401 单次重试。
 - 服务器扫描管理位于 `backend/Music.Api/Pages/Admin/` Razor Pages，不放入 Flutter 客户端；扫描的是后端机器目录，结果目前只供查看，尚不能直接播放。
-- 在线搜索、歌词/封面与 Windows/Android 在线播放已通过 `Music.Api` 接入受控 sidecar 契约；播放使用账号绑定短期票据与 Range 代理，Web 因认证请求头限制暂不开放在线播放；听歌识曲仍是占位页。
+- 在线搜索、歌词/封面与 Windows/Linux/Android 在线播放已通过 `Music.Api` 接入受控 sidecar 契约；播放使用账号绑定短期票据与 Range 代理，Web 因认证请求头限制暂不开放在线播放。仓库提供非 root API 镜像与单机 Compose 编排模板，但生产指标导出、告警和 HTTPS 入口仍由部署环境提供；听歌识曲仍是占位页。
 - Web 本地文件扫描和播放未实现。
-- `ios/`、`macos/`、`linux/` 保留 Flutter 平台脚手架，但不是 README 声明的主要交付目标。涉及这些平台时必须单独验证，不能根据 Android/Windows 的结果推断可用。
+- `ios/`、`macos/` 保留 Flutter 平台脚手架，但不是 README 声明的主要交付目标。涉及这些平台时必须单独验证，不能根据 Android/Windows/Linux 的结果推断可用。
 
 ## 2. 修改前必须做的事
 
@@ -37,7 +38,7 @@ Flutter Music 是一个面向 Android、Windows 和 Web 的私人本地音乐播
 | `lib/main.dart` | 进程启动、音频后端、数据库、窗口/托盘/快捷键初始化、Provider 覆盖 | 启动顺序敏感；异步初始化必须发生在 `runApp` 前还是后需要明确判断 |
 | `lib/app/` | `MaterialApp`、主题和全局 Riverpod Provider | `databaseProvider`、`audioHandlerProvider` 必须由根部覆盖 |
 | `lib/core/database/` | Drift 表定义、迁移、查询和持久化操作 | 修改表结构后更新版本、迁移并重新生成代码 |
-| `lib/core/library/` | 本地音乐扫描抽象、Android/Windows 实现和扫描模型 | 保持 Web/不支持平台的 stub 可编译 |
+| `lib/core/library/` | 本地音乐扫描抽象、Android/Windows/Linux 实现和扫描模型 | 保持 Web/不支持平台的 stub 可编译 |
 | `lib/core/player/` | `just_audio`/`audio_service` 播放器、队列、平台音源和封面缓存 | 不要让 Widget 直接持有第二个 `AudioPlayer` |
 | `lib/core/lyrics/` | LRC 解析 | 适合优先写纯 Dart 单元测试 |
 | `lib/core/theme/` | 外观设置模型 | 设置最终保存在 Drift `AppSettings` 表中 |
@@ -53,9 +54,13 @@ Flutter Music 是一个面向 Android、Windows 和 Web 的私人本地音乐播
 | `lib/features/online_search/` | 在线音乐搜索状态、页面和结果项 | 只调用 `Music.Api`；不得直连 sidecar 或保存第三方 URL/Cookie |
 | `android/` | Android 宿主、权限和 MediaStore MethodChannel | 修改 Kotlin 后至少做 Android 编译或实机验证 |
 | `windows/` | Windows Runner、CMake、图标和生成的插件注册 | 生成的 registrant 不手改；CMake 有 MSVC 兼容设置 |
+| `linux/` | Linux GTK Runner、CMake 与生成的插件注册 | 在 Linux 主机验证 GTK、libmpv、MPRIS、X11/Wayland 和桌面环境差异 |
 | `web/` | Web 启动页、PWA 资源、Drift worker 和 SQLite WASM | 不要遗漏 `sqlite3.wasm`、`drift_worker.js` 的部署路径 |
 | `backend/Music.Api/` | ASP.NET Core 10 Minimal API + SQLite 后端 | 与 Flutter 主工程是独立构建单元 |
+| `backend/Music.Api/Services/OnlineMusic/` | sidecar 网关、缓存、票据、资源代理、指标和熔断 | 指标标签保持低基数；不得包含搜索词、曲目 ID、Token、Cookie 或 URL |
 | `go-music-dl/` | 固定上游 clone 与私有 JSON sidecar | 集成模式默认仅监听 `127.0.0.1`；搜索私有字段与上游 URL 只进短期内存注册表，不得向公网或 Flutter 暴露 |
+| `compose.online-music.yml` | `Music.Api` 与 sidecar 的单机容器编排模板 | 只发布 API 端口；sidecar 仅加入 Compose 私有网络并保留必要的外网访问能力 |
+| `.env.example` | Compose 环境变量模板 | 只能保存占位值；真实 JWT、管理员密码和 Cookie 写入未提交的 `.env` 或密钥系统 |
 | `backend/Music.Api/Pages/Admin/` | 后端托管的服务器扫描 Razor Pages | 使用独立管理员 Cookie；PageModel 调用扫描 Service，不复用 Flutter JWT |
 | `backend/Music.Api/wwwroot/admin/scanning/` | 管理页面样式资源 | 不应再放置独立 HTML/JavaScript 应用 |
 | `docs/api.md` | 后端配置和接口契约 | 接口行为变化时同步更新 |
@@ -69,6 +74,7 @@ Flutter Music 是一个面向 Android、Windows 和 Web 的私人本地音乐播
 - 各平台的 `generated_plugin_registrant.*`、`generated_plugins.cmake`
 - `backend/Music.Api/bin/`、`backend/Music.Api/obj/`
 - `backend/Music.Api/storage/music.db*`
+- `.env`、`.env.*`（`.env.example` 除外）
 - 本地 IDE、NuGet、Dart 运行缓存目录
 
 如果这些内容已经出现在用户工作区中，只忽略它们，不要未经授权清理。
@@ -240,7 +246,7 @@ export 'feature_stub.dart'
 新增平台功能时优先沿用这个结构：
 
 - 公共文件只暴露统一 API，不导入 `dart:io`。
-- `_io.dart` 中实现 Android/Windows 等本地能力。
+- `_io.dart` 中实现 Android/Windows/Linux 等本地能力。
 - `_stub.dart` 为 Web/不支持平台提供安全的空实现或明确错误。
 - 仅靠运行时 `kIsWeb` 判断并不能阻止 Web 编译器解析一个直接导入的 `dart:io` 文件。
 
@@ -263,9 +269,10 @@ Windows 相关改动还要检查窗口生命周期、托盘释放、快捷键注
 - `Endpoints/`：请求校验、认证上下文和 HTTP 响应。
 - `Services/Auth/`：密码哈希、JWT 和 Refresh Token。
 - `Services/Scanning/`：服务器目录扫描与定时后台任务。
+- `Services/OnlineMusic/`：sidecar HTTP 契约、搜索/资源缓存、播放票据、调用指标和熔断。
 - `Data/`：SQLite 表和 Store。
 - `Models/`：请求/响应 DTO。
-- `Middleware/`：审计日志。
+- `Middleware/`：关联 ID 与审计日志。
 - `OpenApi/`：OpenAPI 文档。
 
 后端修改规则：
@@ -276,18 +283,24 @@ Windows 相关改动还要检查窗口生命周期、托盘释放、快捷键注
 - Refresh Token 轮换、重复使用检测和撤销语义不能因 UI 方便而弱化。
 - 文件扫描必须进行绝对路径、存在性和 `Scanning:AllowedRoots` 校验。
 - API 请求/响应变化同时更新 `docs/api.md`、OpenAPI 和 `FlutterMusic.Api.http` 示例。
+- `/health` 只表示 API 进程存活；`/health/ready` 在在线音乐启用时探测 sidecar。就绪检查使用独立客户端绕过业务熔断，避免依赖恢复后仍被旧熔断状态遮蔽。
+- 入站 `X-Correlation-ID` 必须限制长度和字符集；响应、审计记录与 sidecar 请求复用同一安全 ID，不接受可造成日志注入的任意文本。
+- 在线音乐指标只使用规范操作名、失败类型等低基数标签，不记录搜索词、来源、曲目 ID、账号、Token、Cookie、`streamRef` 或 URL。
+- sidecar 业务调用的熔断只统计网络错误、超时、HTTP 408/429/5xx 等瞬时失败；404、资源超限等稳定业务响应不得错误打开熔断。
 - 生产环境必须覆盖默认 JWT 密钥；代码和文档中不得加入真实密钥。
 - 数据库文件、WAL/SHM、`bin/` 和 `obj/` 不应纳入功能改动。
+- Compose 编排只发布 `Music.Api` 端口，sidecar 不映射宿主机端口；`.env`、数据卷导出、Data Protection 密钥和 sidecar Cookie 不得提交。
 
 后端标准命令：
 
 ```powershell
 dotnet restore backend/Music.Api/Music.Api.csproj --configfile backend/NuGet.Config
 dotnet build backend/Music.Api/Music.Api.csproj --no-restore
+dotnet test backend/Music.Api.Tests/Music.Api.Tests.csproj --no-restore -c Release
 dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:5080
 ```
 
-当前仓库没有独立后端测试工程。修改认证、路径隔离、数据库写入或扫描删除逻辑时，应优先补测试工程，而不是只用手工 HTTP 请求证明成功路径。
+`backend/Music.Api.Tests` 已覆盖认证、在线搜索/播放/资源代理、关联 ID、健康检查、指标与熔断等边界。修改认证、路径隔离、数据库写入、扫描删除、票据隔离或 sidecar 失败映射时，应继续在该工程补回归测试，不能只用手工 HTTP 请求证明成功路径。
 
 ## 13. 常见任务的建议落点
 
@@ -369,6 +382,7 @@ flutter test test/playlists_page_test.dart
 
 ```powershell
 flutter build windows
+flutter build linux
 flutter build apk --debug
 flutter build web
 ```
@@ -380,14 +394,25 @@ flutter build web
 ```powershell
 dotnet restore backend/Music.Api/Music.Api.csproj --configfile backend/NuGet.Config
 dotnet build backend/Music.Api/Music.Api.csproj --no-restore
+dotnet test backend/Music.Api.Tests/Music.Api.Tests.csproj --no-restore -c Release
 ```
 
 启动后至少检查：
 
 ```powershell
 Invoke-RestMethod http://localhost:5080/health
+Invoke-WebRequest http://localhost:5080/health/ready
 Invoke-RestMethod http://localhost:5080/openapi.json
 ```
+
+修改 `Dockerfile`、`.env.example` 或 `compose.online-music.yml` 时，在 Docker 可用的环境至少运行：
+
+```powershell
+docker compose --env-file .env -f compose.online-music.yml config
+docker compose --env-file .env -f compose.online-music.yml build
+```
+
+若当前机器没有 Docker CLI，必须明确记录为“未执行”，不能仅凭 YAML 可读或后端单测通过推断镜像可构建。
 
 ### 手工验证重点
 
@@ -399,9 +424,10 @@ Invoke-RestMethod http://localhost:5080/openapi.json
 | 歌单/喜欢 | 新建、删除、加入、移除、空歌单、级联删除 |
 | 主题/设置 | 浅色、深色、跟随系统、重启后持久化 |
 | Windows | 标题栏、拖动、最小化托盘、紧凑窗、快捷键 |
+| Linux | 目录选择、递归扫描、本地/在线播放、MPRIS 媒体键、原生标题栏、紧凑窗、快捷键 |
 | Android | 权限拒绝/允许、目录授权、全设备扫描、后台通知、媒体键 |
 | Web | 首屏、响应式布局、刷新后数据库、无 IO 平台异常 |
-| 后端 | 未认证 401、账号隔离、路径越界、重复路径、令牌轮换 |
+| 后端 | 未认证 401、账号隔离、路径越界、重复路径、令牌轮换、`/health/ready`、关联 ID、sidecar 超时与熔断恢复 |
 
 如果工具命令卡住或超时：
 
@@ -416,6 +442,7 @@ Invoke-RestMethod http://localhost:5080/openapi.json
 - `test/lrc_parser_test.dart`：LRC 时间标签解析和排序。
 - `test/app_appearance_test.dart`：设置值到 `ThemeMode`/主题色的映射。
 - `test/playlists_page_test.dart`：歌单页面的 loading/error/empty 等 Widget 状态。
+- `backend/Music.Api.Tests/`：认证、账号隔离、在线音乐搜索/播放/歌词/封面、关联 ID、健康检查、指标和熔断测试。
 
 新测试建议：
 
@@ -424,7 +451,7 @@ Invoke-RestMethod http://localhost:5080/openapi.json
 - Widget 测试通过 `ProviderScope(overrides: ...)` 注入数据库、播放器或 AsyncValue。
 - 平台通道使用 mock method call handler，不让单元测试依赖真实文件选择器。
 - 音频层尽量把队列/模式转换逻辑与实际插件调用分开，否则测试容易依赖平台插件初始化。
-- 后端建立独立测试工程，覆盖认证失败、跨账号访问、扫描根目录限制和 SQLite 行为。
+- 后端继续扩展现有 `Music.Api.Tests`，重点补跨账号访问、扫描根目录限制、SQLite 迁移/并发和容器配置边界。
 
 ## 17. 安全与数据保护
 

@@ -398,6 +398,12 @@ Development 配置默认启用 `netease`、`kugou`、`kuwo`。生产部署需要
 
 歌词与封面共享一个独立、按字节计量的内存缓存，总容量默认 32 MiB；歌词默认缓存 15 分钟，封面默认缓存 6 小时。缓存不保存第三方 Cookie、原始封面 URL 或 sidecar 私有字段。
 
+### 8.7 下载歌曲
+
+`GET /api/online-music/tracks/{source}/{trackId}/download`
+
+请求必须携带 Bearer Token。API 通过私有 sidecar 下载歌曲，并在音频格式支持时优先写入封面和歌词元数据。响应头 `X-Online-Artwork-Embedded` 与 `X-Online-Lyrics-Embedded` 表示对应资源是否已成功内嵌；客户端可在值为 `false` 时将封面或同名 `.lrc` 文件保存到下载目录。当前 sidecar 没有独立的歌手照片或专辑级封面接口，封面仍按搜索结果中的歌曲标识获取。
+
 ## Flutter 客户端接入状态
 
 仓库内 Flutter 客户端已经按以下规则接入，具体运行步骤和已知限制见 [`flutter_backend_integration.md`](flutter_backend_integration.md)：

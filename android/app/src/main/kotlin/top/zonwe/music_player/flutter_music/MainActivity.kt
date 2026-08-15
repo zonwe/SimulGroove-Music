@@ -15,6 +15,8 @@ import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.ArrayDeque
 import java.util.concurrent.Executors
 import kotlin.math.min
@@ -22,8 +24,10 @@ import kotlin.math.min
 class MainActivity : AudioServiceActivity() {
     private val channelName = "top.zonwe.music_player/media_store"
     private val pickDirectoryRequest = 4812
+    private val pickDownloadDirectoryRequest = 4813
     private val scanExecutor = Executors.newSingleThreadExecutor()
     private var pendingDirectoryResult: MethodChannel.Result? = null
+    private var pendingDownloadDirectoryResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -31,6 +35,22 @@ class MainActivity : AudioServiceActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "pickAudioDirectory" -> pickAudioDirectory(result)
+                    "pickDownloadDirectory" -> pickDownloadDirectory(result)
+                    "downloadToTree" -> downloadToTree(
+                        result = result,
+                        treeUriValue = call.argument<String>("treeUri"),
+                        url = call.argument<String>("url"),
+                        headers = call.argument<Map<String, String>>("headers").orEmpty(),
+                        fileName = call.argument<String>("fileName"),
+                        mimeType = call.argument<String>("mimeType"),
+                    )
+                    "saveBytesToTree" -> saveBytesToTree(
+                        result = result,
+                        treeUriValue = call.argument<String>("treeUri"),
+                        fileName = call.argument<String>("fileName"),
+                        mimeType = call.argument<String>("mimeType"),
+                        bytes = call.argument<ByteArray>("bytes"),
+                    )
                     "scanAudioTree" -> {
                         val uri = call.argument<String>("uri")
                         if (uri == null) {
@@ -62,7 +82,7 @@ class MainActivity : AudioServiceActivity() {
     }
 
     private fun pickAudioDirectory(result: MethodChannel.Result) {
-        if (pendingDirectoryResult != null) {
+        if (pendingDirectoryResult != null || pendingDownloadDirectoryResult != null) {
             result.error("PICKER_BUSY", "目录选择器已经打开", null)
             return
         }
@@ -77,13 +97,35 @@ class MainActivity : AudioServiceActivity() {
         startActivityForResult(intent, pickDirectoryRequest)
     }
 
+    private fun pickDownloadDirectory(result: MethodChannel.Result) {
+        if (pendingDirectoryResult != null || pendingDownloadDirectoryResult != null) {
+            result.error("PICKER_BUSY", "下载目录选择器已经打开", null)
+            return
+        }
+        pendingDownloadDirectoryResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
+            )
+        }
+        startActivityForResult(intent, pickDownloadDirectoryRequest)
+    }
+
     @Deprecated("Uses the compatible document-tree result API for FlutterActivity")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != pickDirectoryRequest) return
-
-        val pending = pendingDirectoryResult ?: return
-        pendingDirectoryResult = null
+        val pending = when (requestCode) {
+            pickDirectoryRequest -> pendingDirectoryResult.also {
+                pendingDirectoryResult = null
+            }
+            pickDownloadDirectoryRequest -> pendingDownloadDirectoryResult.also {
+                pendingDownloadDirectoryResult = null
+            }
+            else -> null
+        } ?: return
         val treeUri = data?.data
         if (resultCode != Activity.RESULT_OK || treeUri == null) {
             pending.success(null)
@@ -95,7 +137,9 @@ class MainActivity : AudioServiceActivity() {
         try {
             contentResolver.takePersistableUriPermission(
                 treeUri,
-                flags and Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                flags and
+                    (Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION),
             )
         } catch (_: SecurityException) {
             // Some providers grant the directory for this session but do not persist it.
@@ -106,6 +150,179 @@ class MainActivity : AudioServiceActivity() {
                 "label" to treeDisplayPath(treeUri),
             ),
         )
+    }
+
+    private fun downloadToTree(
+        result: MethodChannel.Result,
+        treeUriValue: String?,
+        url: String?,
+        headers: Map<String, String>,
+        fileName: String?,
+        mimeType: String?,
+    ) {
+        if (treeUriValue.isNullOrBlank() || url.isNullOrBlank() || fileName.isNullOrBlank()) {
+            result.error("INVALID_DOWNLOAD", "下载目录、地址或文件名无效", null)
+            return
+        }
+        scanExecutor.execute {
+            try {
+                val saved = saveDownloadToTree(
+                    treeUri = Uri.parse(treeUriValue),
+                    url = url,
+                    headers = headers,
+                    requestedName = fileName,
+                    requestedMimeType = mimeType,
+                )
+                runOnUiThread { result.success(saved) }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error("DOWNLOAD_FAILED", error.message ?: "下载失败", null)
+                }
+            }
+        }
+    }
+
+    private fun saveDownloadToTree(
+        treeUri: Uri,
+        url: String,
+        headers: Map<String, String>,
+        requestedName: String,
+        requestedMimeType: String?,
+    ): Map<String, Any?> {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.requestMethod = "GET"
+        connection.connectTimeout = 15_000
+        // Enhanced downloads may fetch and embed artwork/lyrics before the API
+        // starts returning audio bytes.
+        connection.readTimeout = 180_000
+        connection.instanceFollowRedirects = true
+        headers.forEach(connection::setRequestProperty)
+        var documentUri: Uri? = null
+        try {
+            val status = connection.responseCode
+            if (status !in 200..299) error("下载请求失败（HTTP $status）")
+            val mimeType = requestedMimeType
+                ?.takeUnless { it.isBlank() || it == "application/octet-stream" }
+                ?: connection.contentType?.substringBefore(';')
+                ?: "audio/mpeg"
+            val name = uniqueDocumentName(treeUri, withAudioExtension(requestedName, mimeType))
+            val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+            val rootDocument = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId)
+            val targetUri = DocumentsContract.createDocument(
+                contentResolver,
+                rootDocument,
+                mimeType,
+                name,
+            ) ?: error("无法在所选目录创建文件")
+            documentUri = targetUri
+            val bytes = connection.inputStream.buffered().use { input ->
+                contentResolver.openOutputStream(targetUri, "w")?.buffered()?.use { output ->
+                    input.copyTo(output)
+                } ?: error("无法写入所选下载目录")
+            }
+            if (bytes <= 0) error("服务端返回了空的音频文件")
+            return mapOf(
+                "uri" to documentUri.toString(),
+                "name" to name,
+                "bytes" to bytes,
+                "lyricsEmbedded" to connection.getHeaderField("X-Online-Lyrics-Embedded")
+                    .equals("true", ignoreCase = true),
+                "artworkEmbedded" to connection.getHeaderField("X-Online-Artwork-Embedded")
+                    .equals("true", ignoreCase = true),
+            )
+        } catch (error: Exception) {
+            documentUri?.let {
+                try {
+                    DocumentsContract.deleteDocument(contentResolver, it)
+                } catch (_: Exception) {
+                    // Best effort cleanup for an incomplete document.
+                }
+            }
+            throw error
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun saveBytesToTree(
+        result: MethodChannel.Result,
+        treeUriValue: String?,
+        fileName: String?,
+        mimeType: String?,
+        bytes: ByteArray?,
+    ) {
+        if (treeUriValue.isNullOrBlank() || fileName.isNullOrBlank() || bytes == null || bytes.isEmpty()) {
+            result.error("INVALID_DOWNLOAD_ATTACHMENT", "下载附件参数无效", null)
+            return
+        }
+        scanExecutor.execute {
+            try {
+                val treeUri = Uri.parse(treeUriValue)
+                val name = uniqueDocumentName(treeUri, fileName)
+                val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+                val rootDocument = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId)
+                val targetUri = DocumentsContract.createDocument(
+                    contentResolver,
+                    rootDocument,
+                    mimeType?.takeUnless(String::isBlank) ?: "application/octet-stream",
+                    name,
+                ) ?: error("无法在所选目录创建附件")
+                try {
+                    contentResolver.openOutputStream(targetUri, "w")?.use { output ->
+                        output.write(bytes)
+                    } ?: error("无法写入下载附件")
+                    runOnUiThread { result.success(null) }
+                } catch (error: Exception) {
+                    try {
+                        DocumentsContract.deleteDocument(contentResolver, targetUri)
+                    } catch (_: Exception) {
+                        // Best effort cleanup for an incomplete attachment.
+                    }
+                    throw error
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error("DOWNLOAD_ATTACHMENT_FAILED", error.message ?: "附件保存失败", null)
+                }
+            }
+        }
+    }
+
+    private fun withAudioExtension(requestedName: String, mimeType: String): String {
+        val extension = when (mimeType.lowercase()) {
+            "audio/flac" -> ".flac"
+            "audio/mp4", "audio/x-m4a" -> ".m4a"
+            "audio/aac" -> ".aac"
+            "audio/wav", "audio/x-wav" -> ".wav"
+            "audio/ogg" -> ".ogg"
+            "audio/opus" -> ".opus"
+            else -> ".mp3"
+        }
+        val dot = requestedName.lastIndexOf('.')
+        val stem = if (dot > 0) requestedName.substring(0, dot) else requestedName
+        return stem + extension
+    }
+
+    private fun uniqueDocumentName(treeUri: Uri, requestedName: String): String {
+        val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, rootId)
+        val existing = mutableSetOf<String>()
+        contentResolver.query(
+            children,
+            arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) existing.add(cursor.getString(0))
+        }
+        if (requestedName !in existing) return requestedName
+        val dot = requestedName.lastIndexOf('.')
+        val stem = if (dot > 0) requestedName.substring(0, dot) else requestedName
+        val extension = if (dot > 0) requestedName.substring(dot) else ""
+        var suffix = 2
+        while ("$stem ($suffix)$extension" in existing) suffix++
+        return "$stem ($suffix)$extension"
     }
 
     private data class TreeEntry(
@@ -347,6 +564,8 @@ class MainActivity : AudioServiceActivity() {
         scanExecutor.shutdownNow()
         pendingDirectoryResult?.success(null)
         pendingDirectoryResult = null
+        pendingDownloadDirectoryResult?.success(null)
+        pendingDownloadDirectoryResult = null
         super.onDestroy()
     }
 }

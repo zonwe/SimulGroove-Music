@@ -10,11 +10,16 @@ import '../core/database/app_database.dart';
 import '../core/library/library_scanner.dart';
 import '../core/library/scanner_factory.dart';
 import '../core/online_music/http_online_music_gateway.dart';
+import '../core/online_music/online_download_platform.dart';
+import '../core/online_music/online_download_platform_factory.dart';
 import '../core/online_music/online_music_gateway.dart';
 import '../core/online_music/online_music_repository.dart';
+import '../core/online_music/online_search_settings.dart';
 import '../core/online_music/online_track.dart';
+import '../core/online_music/online_track_downloader.dart';
 import '../core/online_music/online_track_playback.dart';
 import '../core/player/music_audio_handler.dart';
+import '../core/player/now_playing_layout.dart';
 import '../core/theme/app_appearance.dart';
 import '../core/window/window_settings.dart';
 import '../features/online_search/online_search_controller.dart';
@@ -57,17 +62,42 @@ final onlineSearchControllerProvider = Provider<OnlineSearchController>((ref) {
   ref.onDispose(controller.dispose);
   return controller;
 });
+final onlineSearchShowArtworkProvider = StreamProvider<bool>(
+  (ref) => ref
+      .watch(databaseProvider)
+      .watchSettings()
+      .map(onlineSearchShowArtworkFromSettings),
+);
 final onlineTrackPlaybackProvider = Provider<OnlineTrackPlayback>(
   (ref) => DefaultOnlineTrackPlayback(
     ref.watch(onlineMusicRepositoryProvider),
     ref.watch(audioHandlerProvider),
   ),
 );
+final onlineDownloadPlatformProvider = Provider<OnlineDownloadPlatform>(
+  (ref) => createOnlineDownloadPlatform(),
+);
+final onlineTrackDownloaderProvider = Provider<OnlineTrackDownloader>(
+  (ref) => DefaultOnlineTrackDownloader(
+    repository: ref.watch(onlineMusicRepositoryProvider),
+    platform: ref.watch(onlineDownloadPlatformProvider),
+    readSetting: (key) => ref.read(databaseProvider).readSetting(key),
+    writeSetting: (key, value) =>
+        ref.read(databaseProvider).setSetting(key, value),
+    saveDownloadedTrack: (track) =>
+        ref.read(databaseProvider).upsertTracks([track]),
+  ),
+);
 final onlineTrackArtworkProvider = FutureProvider.autoDispose
-    .family<Uint8List?, OnlineTrack>((ref, track) {
-      if (!track.capabilities.contains('artwork')) return null;
-      return ref.watch(onlineMusicRepositoryProvider).loadArtwork(track);
-    });
+    .family<Uint8List?, OnlineTrack>(
+      (ref, track) {
+        if (!track.capabilities.contains('artwork')) return null;
+        return ref.watch(onlineMusicRepositoryProvider).loadArtwork(track);
+      },
+      // Artwork failures are already represented by a fallback in the UI.
+      // Retrying every failed image ten times only amplifies upstream errors.
+      retry: (_, _) => null,
+    );
 final tracksProvider = StreamProvider<List<Track>>(
   (ref) => ref.watch(databaseProvider).watchTracks(),
 );
@@ -80,6 +110,17 @@ final playlistsProvider = StreamProvider<List<Playlist>>(
 final scanSourcesProvider = StreamProvider<List<ScanSource>>(
   (ref) => ref.watch(databaseProvider).watchScanSources(),
 );
+final onlineDownloadFilenameFormatProvider =
+    StreamProvider<OnlineDownloadFilenameFormat>(
+      (ref) => ref
+          .watch(databaseProvider)
+          .watchSettings()
+          .map(
+            (settings) => parseOnlineDownloadFilenameFormat(
+              settings[onlineDownloadFilenameFormatSettingKey],
+            ),
+          ),
+    );
 final likedTracksProvider = StreamProvider<List<Track>>(
   (ref) => ref.watch(databaseProvider).watchLikedTracks(),
 );
@@ -91,6 +132,15 @@ final appearanceProvider = StreamProvider<AppAppearance>(
       .watch(databaseProvider)
       .watchSettings()
       .map(AppAppearance.fromSettings),
+);
+final nowPlayingLayoutProvider = StreamProvider<NowPlayingLayout>(
+  (ref) => ref
+      .watch(databaseProvider)
+      .watchSettings()
+      .map(
+        (settings) =>
+            parseNowPlayingLayout(settings[nowPlayingLayoutSettingKey]),
+      ),
 );
 final trayMinimizeOnCloseProvider = StreamProvider<bool>(
   (ref) => ref

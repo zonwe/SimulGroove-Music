@@ -167,6 +167,11 @@ GET {{baseUrl}}/api/online-music/tracks/netease/496869422/cover
 Authorization: Bearer {{access_token}}
 Accept: image/*
 
+### Download online track with embedded metadata when supported
+GET {{baseUrl}}/api/online-music/tracks/netease/496869422/download
+Authorization: Bearer {{access_token}}
+Accept: audio/*
+
 ### Logout
 POST {{baseUrl}}/api/auth/logout
 Authorization: Bearer {{access_token}}

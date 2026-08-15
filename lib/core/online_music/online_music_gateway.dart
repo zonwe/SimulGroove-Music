@@ -21,3 +21,10 @@ abstract interface class OnlineMusicGateway {
 
   Future<Uint8List?> fetchArtwork(BackendSession session, OnlineTrack track);
 }
+
+abstract interface class OnlineMusicDownloadGateway {
+  Future<OnlinePlaybackSource> requestDownload(
+    BackendSession session,
+    OnlineTrack track,
+  );
+}

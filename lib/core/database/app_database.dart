@@ -107,6 +107,21 @@ class LikedTracks extends Table {
   Set<Column<Object>> get primaryKey => {trackId};
 }
 
+String _withTrailingSeparator(String value, String separator) =>
+    value.endsWith(separator) ? value : '$value$separator';
+
+Expression<bool> _startsWithLiteral(
+  Expression<String> expression,
+  String prefix,
+) {
+  const escapeCharacter = r'\';
+  final escapedPrefix = prefix
+      .replaceAll(escapeCharacter, '$escapeCharacter$escapeCharacter')
+      .replaceAll('%', '$escapeCharacter%')
+      .replaceAll('_', '${escapeCharacter}_');
+  return expression.like('$escapedPrefix%', escapeChar: escapeCharacter);
+}
+
 @DriftDatabase(
   tables: [
     Accounts,
@@ -136,7 +151,10 @@ class AppDatabase extends _$AppDatabase {
   );
 
   Stream<List<Track>> watchTracks() =>
-      (select(tracks)..orderBy([(row) => OrderingTerm.asc(row.title)])).watch();
+      (select(tracks)
+            ..where((row) => row.sourceType.equals('online').not())
+            ..orderBy([(row) => OrderingTerm.asc(row.title)]))
+          .watch();
 
   Future<List<Track>> allTracks() =>
       (select(tracks)..orderBy([(row) => OrderingTerm.asc(row.title)])).get();
@@ -162,14 +180,7 @@ class AppDatabase extends _$AppDatabase {
     final incoming = values.toList(growable: false);
     final incomingUris = incoming.map((value) => value.uri.value).toSet();
     await transaction(() async {
-      final sourceTracks = source.uri == 'media-store://external'
-          ? tracks.sourceType.equals('android_media_store')
-          : (tracks.sourceType.equals('windows_file') |
-                tracks.sourceType.equals('linux_file')) &
-              tracks.sourceId.like('${source.uri}%') |
-            tracks.sourceType.equals('android_document_tree') &
-                (tracks.sourceId.like('${source.uri}%') |
-                    tracks.uri.like('${source.uri}%'));
+      final sourceTracks = _tracksFromScanSource(source);
       final staleTracks = incomingUris.isEmpty
           ? sourceTracks
           : sourceTracks & tracks.uri.isNotIn(incomingUris);
@@ -184,16 +195,39 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> deleteScanSource(ScanSource source) async {
     await transaction(() async {
-      final predicate = source.uri == 'media-store://external'
-          ? tracks.sourceType.equals('android_media_store')
-          : (tracks.sourceType.equals('windows_file') |
-                tracks.sourceType.equals('linux_file')) &
-              tracks.sourceId.like('${source.uri}%') |
-            tracks.sourceType.equals('android_document_tree') &
-                tracks.sourceId.like('${source.uri}%');
+      final predicate = _tracksFromScanSource(source);
       await (delete(tracks)..where((row) => predicate)).go();
-      await (delete(scanSources)..where((row) => row.id.equals(source.id))).go();
+      await (delete(
+        scanSources,
+      )..where((row) => row.id.equals(source.id))).go();
     });
+  }
+
+  Expression<bool> _tracksFromScanSource(ScanSource source) {
+    if (source.uri == 'media-store://external') {
+      return tracks.sourceType.equals('android_media_store');
+    }
+
+    // Match descendants on a path-segment boundary. A raw `LIKE '$uri%'`
+    // also matches sibling directories (for example Music and Music-old) and
+    // treats % and _ in user-selected paths as pattern syntax.
+    final windowsPrefix = _withTrailingSeparator(source.uri, r'\');
+    final documentPrefix = _withTrailingSeparator(source.uri, '/');
+    final windowsTracks =
+        tracks.sourceType.equals('windows_file') &
+        (tracks.sourceId.equals(source.uri) |
+            _startsWithLiteral(tracks.sourceId, windowsPrefix));
+    final linuxTracks =
+        tracks.sourceType.equals('linux_file') &
+        (tracks.sourceId.equals(source.uri) |
+            _startsWithLiteral(tracks.sourceId, documentPrefix));
+    final documentTracks =
+        tracks.sourceType.equals('android_document_tree') &
+        (tracks.sourceId.equals(source.uri) |
+            _startsWithLiteral(tracks.sourceId, documentPrefix) |
+            tracks.uri.equals(source.uri) |
+            _startsWithLiteral(tracks.uri, documentPrefix));
+    return windowsTracks | linuxTracks | documentTracks;
   }
 
   Stream<Map<String, String>> watchSettings() => select(
@@ -230,6 +264,32 @@ class AppDatabase extends _$AppDatabase {
   Future<void> createPlaylist(PlaylistsCompanion value) =>
       into(playlists).insert(value);
 
+  Future<void> createPlaylistWithTracks(
+    PlaylistsCompanion playlist,
+    Iterable<TracksCompanion> trackValues,
+  ) async {
+    final values = trackValues.toList(growable: false);
+    await transaction(() async {
+      await into(playlists).insert(playlist);
+      for (final value in values) {
+        // A downloaded local copy wins over an online placeholder with the
+        // same stable id, so adding it to another playlist never makes it
+        // remote-only again.
+        await into(tracks).insert(value, mode: InsertMode.insertOrIgnore);
+      }
+      for (var index = 0; index < values.length; index++) {
+        await into(playlistEntries).insert(
+          PlaylistEntriesCompanion.insert(
+            playlistId: playlist.id.value,
+            trackId: values[index].id.value,
+            position: index,
+            addedAt: DateTime.now(),
+          ),
+        );
+      }
+    });
+  }
+
   Future<void> updatePlaylistSync({
     required String id,
     required String remoteId,
@@ -262,45 +322,81 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> addTrackToPlaylist(String playlistId, String trackId) async {
-    final existing = await (select(
-      playlistEntries,
-    )..where((row) => row.playlistId.equals(playlistId))).get();
-    final nextPosition = existing.isEmpty
-        ? 0
-        : existing
-                  .map((entry) => entry.position)
-                  .reduce((a, b) => a > b ? a : b) +
-              1;
-    await into(playlistEntries).insertOnConflictUpdate(
-      PlaylistEntriesCompanion.insert(
-        playlistId: playlistId,
-        trackId: trackId,
-        position: nextPosition,
-        addedAt: DateTime.now(),
-      ),
-    );
-    await (update(playlists)..where((row) => row.id.equals(playlistId))).write(
-      PlaylistsCompanion(
-        syncState: const Value('local'),
-        updatedAt: Value(DateTime.now()),
-      ),
-    );
+    await transaction(() async {
+      final maximumPosition = playlistEntries.position.max();
+      final positionQuery = selectOnly(playlistEntries)
+        ..addColumns([maximumPosition])
+        ..where(playlistEntries.playlistId.equals(playlistId));
+      final currentMaximum = await positionQuery
+          .map((row) => row.read(maximumPosition))
+          .getSingle();
+      await into(playlistEntries).insertOnConflictUpdate(
+        PlaylistEntriesCompanion.insert(
+          playlistId: playlistId,
+          trackId: trackId,
+          position: (currentMaximum ?? -1) + 1,
+          addedAt: DateTime.now(),
+        ),
+      );
+      await _markPlaylistLocal(playlistId);
+    });
   }
 
-  Future<void> removeTrackFromPlaylist(String playlistId, String trackId) async {
-    await (delete(playlistEntries)
-          ..where(
+  Future<void> addTracksToPlaylist(
+    String playlistId,
+    Iterable<TracksCompanion> trackValues,
+  ) async {
+    final values = trackValues.toList(growable: false);
+    if (values.isEmpty) return;
+    await transaction(() async {
+      for (final value in values) {
+        await into(tracks).insert(value, mode: InsertMode.insertOrIgnore);
+      }
+      final maximumPosition = playlistEntries.position.max();
+      final positionQuery = selectOnly(playlistEntries)
+        ..addColumns([maximumPosition])
+        ..where(playlistEntries.playlistId.equals(playlistId));
+      var position =
+          (await positionQuery
+                  .map((row) => row.read(maximumPosition))
+                  .getSingle() ??
+              -1) +
+          1;
+      for (final value in values) {
+        await into(playlistEntries).insertOnConflictUpdate(
+          PlaylistEntriesCompanion.insert(
+            playlistId: playlistId,
+            trackId: value.id.value,
+            position: position++,
+            addedAt: DateTime.now(),
+          ),
+        );
+      }
+      await _markPlaylistLocal(playlistId);
+    });
+  }
+
+  Future<void> removeTrackFromPlaylist(
+    String playlistId,
+    String trackId,
+  ) async {
+    await transaction(() async {
+      await (delete(playlistEntries)..where(
             (row) =>
                 row.playlistId.equals(playlistId) & row.trackId.equals(trackId),
           ))
-        .go();
-    await (update(playlists)..where((row) => row.id.equals(playlistId))).write(
-      PlaylistsCompanion(
-        syncState: const Value('local'),
-        updatedAt: Value(DateTime.now()),
-      ),
-    );
+          .go();
+      await _markPlaylistLocal(playlistId);
+    });
   }
+
+  Future<void> _markPlaylistLocal(String playlistId) =>
+      (update(playlists)..where((row) => row.id.equals(playlistId))).write(
+        PlaylistsCompanion(
+          syncState: const Value('local'),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
 
   Stream<List<Track>> watchLikedTracks() {
     final query = select(tracks).join([

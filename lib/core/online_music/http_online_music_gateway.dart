@@ -9,7 +9,8 @@ import 'online_music_error.dart';
 import 'online_music_gateway.dart';
 import 'online_track.dart';
 
-class HttpOnlineMusicGateway implements OnlineMusicGateway {
+class HttpOnlineMusicGateway
+    implements OnlineMusicGateway, OnlineMusicDownloadGateway {
   HttpOnlineMusicGateway({String? baseUrl, http.Client? client})
     : _baseUrl = (baseUrl ?? defaultBackendBaseUrl).replaceFirst(
         RegExp(r'/$'),
@@ -71,6 +72,22 @@ class HttpOnlineMusicGateway implements OnlineMusicGateway {
       url: Uri.parse('$_baseUrl/').resolve(playbackUrl),
       expiresAt: DateTime.parse(expiresAt).toUtc(),
       mimeType: json['mimeType'] as String?,
+      headers: {'Authorization': 'Bearer ${session.token}'},
+    );
+  }
+
+  @override
+  Future<OnlinePlaybackSource> requestDownload(
+    BackendSession session,
+    OnlineTrack track,
+  ) async {
+    final provider = Uri.encodeComponent(track.provider);
+    final trackId = Uri.encodeComponent(track.trackId);
+    return OnlinePlaybackSource(
+      url: Uri.parse(
+        '$_baseUrl/api/online-music/tracks/$provider/$trackId/download',
+      ),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
       headers: {'Authorization': 'Bearer ${session.token}'},
     );
   }

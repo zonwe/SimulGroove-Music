@@ -5,7 +5,7 @@ public sealed class OnlineMusicOptions
     public const string SectionName = "OnlineMusic";
 
     public bool Enabled { get; init; }
-    public string SidecarBaseUrl { get; init; } = "http://127.0.0.1:8080";
+    public string SidecarBaseUrl { get; init; } = "http://127.0.0.1:8081";
     public int RequestTimeoutSeconds { get; init; } = 12;
     public int HealthCheckTimeoutSeconds { get; init; } = 3;
     public int CircuitBreakerFailureThreshold { get; init; } = 5;

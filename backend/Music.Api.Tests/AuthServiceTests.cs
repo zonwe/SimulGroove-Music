@@ -59,8 +59,10 @@ public sealed class AuthServiceTests
 
         Assert.AreEqual("alice@example.com", jwt.Validate(issued.Token));
 
-        var replacement = issued.Token[^1] == 'A' ? 'B' : 'A';
-        var tampered = issued.Token[..^1] + replacement;
+        var parts = issued.Token.Split('.');
+        var replacement = parts[2][0] == 'A' ? 'B' : 'A';
+        parts[2] = replacement + parts[2][1..];
+        var tampered = string.Join('.', parts);
         Assert.IsNull(jwt.Validate(tampered));
         Assert.IsNull(jwt.Validate("not-a-jwt"));
     }

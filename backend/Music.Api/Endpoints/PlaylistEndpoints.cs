@@ -15,6 +15,8 @@ public static class PlaylistEndpoints
 				var account = auth.Authenticate(httpRequest.ReadBearerToken());
 				if (account is null) return Results.Unauthorized();
 
+				// string reqStr = System.Text.Json.JsonSerializer.Serialize(request);
+				// Console.WriteLine(reqStr);
 				var incoming = request.Playlists ?? [];
 				var likedTracks = request.LikedTracks ?? [];
 				if (incoming.Any(playlist => string.IsNullOrWhiteSpace(playlist.RemoteId) || string.IsNullOrWhiteSpace(playlist.Name)))

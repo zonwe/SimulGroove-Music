@@ -10,6 +10,7 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
     private const long MaxResponseBytes = 2 * 1024 * 1024;
 
     private readonly HttpClient _client;
+    private readonly TimeSpan _requestTimeout;
     private readonly int _maxLyricsBytes;
     private readonly int _maxArtworkBytes;
 
@@ -24,7 +25,8 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
 
         _client = client;
         _client.BaseAddress = new Uri($"{baseAddress.ToString().TrimEnd('/')}/");
-        _client.Timeout = TimeSpan.FromSeconds(Math.Clamp(settings.RequestTimeoutSeconds, 1, 60));
+        _client.Timeout = Timeout.InfiniteTimeSpan;
+        _requestTimeout = TimeSpan.FromSeconds(Math.Clamp(settings.RequestTimeoutSeconds, 1, 60));
         _maxLyricsBytes = Math.Clamp(settings.MaxLyricsBytes, 4 * 1024, 2 * 1024 * 1024);
         _maxArtworkBytes = Math.Clamp(settings.MaxArtworkBytes, 16 * 1024, 8 * 1024 * 1024);
     }
@@ -33,6 +35,8 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         OnlineMusicSearchQuery query,
         CancellationToken cancellationToken)
     {
+        using var timeout = RequestTimeout(cancellationToken, _requestTimeout);
+        var requestToken = timeout.Token;
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, "integration/v1/search")
@@ -42,7 +46,7 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
             using var response = await _client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+                requestToken);
             if (!response.IsSuccessStatusCode)
             {
                 throw new OnlineMusicGatewayException(
@@ -58,7 +62,7 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
             }
 
             var payload = await response.Content.ReadFromJsonAsync<SidecarSearchResponse>(
-                cancellationToken: cancellationToken);
+                cancellationToken: requestToken);
             if (payload is null)
             {
                 throw new OnlineMusicGatewayException(
@@ -136,10 +140,12 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         string trackId,
         CancellationToken cancellationToken)
     {
+        using var timeout = RequestTimeout(cancellationToken, _requestTimeout);
+        var requestToken = timeout.Token;
         try
         {
             var path = $"integration/v1/tracks/{Uri.EscapeDataString(source)}/{Uri.EscapeDataString(trackId)}/resolve";
-            using var response = await _client.PostAsync(path, null, cancellationToken);
+            using var response = await _client.PostAsync(path, null, requestToken);
             if (!response.IsSuccessStatusCode)
             {
                 throw new OnlineMusicGatewayException(
@@ -148,7 +154,7 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
             }
 
             var payload = await response.Content.ReadFromJsonAsync<SidecarResolveResponse>(
-                cancellationToken: cancellationToken);
+                cancellationToken: requestToken);
             if (payload is null || string.IsNullOrWhiteSpace(payload.StreamRef) || payload.ExpiresAt <= DateTimeOffset.UtcNow)
             {
                 throw new OnlineMusicGatewayException(
@@ -188,6 +194,8 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         string? range,
         CancellationToken cancellationToken)
     {
+        using var timeout = RequestTimeout(cancellationToken, _requestTimeout);
+        var requestToken = timeout.Token;
         HttpResponseMessage? response = null;
         try
         {
@@ -201,7 +209,7 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
             response = await _client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+                requestToken);
             if (response.StatusCode == System.Net.HttpStatusCode.RequestedRangeNotSatisfiable)
             {
                 response.Dispose();
@@ -220,7 +228,7 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
                     $"go-music-dl sidecar stream returned HTTP {(int)statusCode}.");
             }
 
-            var content = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var content = await response.Content.ReadAsStreamAsync(requestToken);
             return new OnlineMusicStreamResponse(response, content);
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
@@ -241,17 +249,82 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         }
     }
 
+    public async Task<OnlineMusicStreamResponse> OpenDownloadAsync(
+        string source,
+        string trackId,
+        CancellationToken cancellationToken)
+    {
+        using var timeout = RequestTimeout(cancellationToken, TimeSpan.FromMinutes(3));
+        var requestToken = timeout.Token;
+        HttpResponseMessage? response = null;
+        try
+        {
+            var path = AssetPath(source, trackId, "download");
+            response = await _client.SendAsync(
+                new HttpRequestMessage(HttpMethod.Get, path),
+                HttpCompletionOption.ResponseHeadersRead,
+                requestToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                response.Dispose();
+                response = null;
+                throw new OnlineMusicGatewayException(
+                    OnlineMusicGatewayFailure.NotFound,
+                    "go-music-dl sidecar track was not found.");
+            }
+            if (!response.IsSuccessStatusCode)
+            {
+                var statusCode = response.StatusCode;
+                response.Dispose();
+                response = null;
+                throw new OnlineMusicGatewayException(
+                    OnlineMusicGatewayFailure.Unavailable,
+                    $"go-music-dl sidecar download returned HTTP {(int)statusCode}.");
+            }
+            var contentType = response.Content.Headers.ContentType?.MediaType;
+            if (string.IsNullOrWhiteSpace(contentType) ||
+                !contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+            {
+                response.Dispose();
+                response = null;
+                throw new OnlineMusicGatewayException(
+                    OnlineMusicGatewayFailure.InvalidResponse,
+                    "go-music-dl sidecar returned an invalid download content type.");
+            }
+            var content = await response.Content.ReadAsStreamAsync(requestToken);
+            return new OnlineMusicStreamResponse(response, content);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            response?.Dispose();
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.Timeout,
+                "go-music-dl sidecar download timed out.",
+                exception);
+        }
+        catch (HttpRequestException exception)
+        {
+            response?.Dispose();
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.Unavailable,
+                "go-music-dl sidecar is unavailable.",
+                exception);
+        }
+    }
+
     public async Task<OnlineMusicLyricsAsset> GetLyricsAsync(
         string source,
         string trackId,
         CancellationToken cancellationToken)
     {
+        using var timeout = RequestTimeout(cancellationToken, _requestTimeout);
+        var requestToken = timeout.Token;
         try
         {
             var path = AssetPath(source, trackId, "lyrics");
-            using var response = await _client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var response = await _client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, requestToken);
             EnsureAssetStatus(response, "lyrics");
-            var bytes = await ReadLimitedBytesAsync(response.Content, _maxLyricsBytes, cancellationToken);
+            var bytes = await ReadLimitedBytesAsync(response.Content, _maxLyricsBytes, requestToken);
             var payload = JsonSerializer.Deserialize<SidecarLyricsResponse>(
                 bytes,
                 new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -293,10 +366,12 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         string trackId,
         CancellationToken cancellationToken)
     {
+        using var timeout = RequestTimeout(cancellationToken, _requestTimeout);
+        var requestToken = timeout.Token;
         try
         {
             var path = AssetPath(source, trackId, "cover");
-            using var response = await _client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var response = await _client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, requestToken);
             EnsureAssetStatus(response, "cover");
             var contentType = response.Content.Headers.ContentType?.MediaType?.Trim();
             if (string.IsNullOrWhiteSpace(contentType) ||
@@ -306,7 +381,7 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
                     OnlineMusicGatewayFailure.InvalidResponse,
                     "go-music-dl sidecar returned an invalid artwork content type.");
             }
-            var bytes = await ReadLimitedBytesAsync(response.Content, _maxArtworkBytes, cancellationToken);
+            var bytes = await ReadLimitedBytesAsync(response.Content, _maxArtworkBytes, requestToken);
             if (bytes.Length == 0)
             {
                 throw new OnlineMusicGatewayException(
@@ -338,6 +413,15 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         if (!string.IsNullOrWhiteSpace(item.ArtworkRef)) capabilities.Add("artwork");
         if (item.LyricsAvailable) capabilities.Add("lyrics");
         return capabilities;
+    }
+
+    private static CancellationTokenSource RequestTimeout(
+        CancellationToken cancellationToken,
+        TimeSpan duration)
+    {
+        var source = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        source.CancelAfter(duration);
+        return source;
     }
 
     private static string AssetPath(string source, string trackId, string asset) =>

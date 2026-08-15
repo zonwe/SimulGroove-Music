@@ -12,8 +12,24 @@ List<LyricLine> parseLrc(String? source) {
   for (final rawLine in source.split(RegExp(r'\r?\n'))) {
     final matches = timestamp.allMatches(rawLine).toList(growable: false);
     if (matches.isEmpty) continue;
-    final text = rawLine.replaceAll(timestamp, '').trim();
+
+    final leadingMatches = <RegExpMatch>[];
+    var contentStart = 0;
     for (final match in matches) {
+      if (rawLine.substring(contentStart, match.start).trim().isNotEmpty) {
+        break;
+      }
+      leadingMatches.add(match);
+      contentStart = match.end;
+    }
+    if (leadingMatches.isEmpty) continue;
+
+    final text = rawLine
+        .substring(contentStart)
+        .replaceAll(timestamp, '')
+        .trim();
+
+    for (final match in leadingMatches) {
       final minutes = int.parse(match.group(1)!);
       final seconds = int.parse(match.group(2)!);
       final fraction = match.group(3) ?? '0';

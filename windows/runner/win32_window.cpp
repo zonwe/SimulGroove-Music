@@ -213,6 +213,14 @@ Win32Window::MessageHandler(HWND hwnd,
       }
       return 0;
 
+    case WM_SYSCOMMAND:
+      // This app owns its keyboard shortcuts. Do not let Alt or Alt+Space
+      // enter the native window-menu mode and consume the following key.
+      if ((wparam & 0xFFF0) == SC_KEYMENU) {
+        return 0;
+      }
+      break;
+
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);
       return 0;

@@ -79,6 +79,7 @@ public sealed class OnlineMusicResilienceHandler(
         if (path.Contains("/streams/", StringComparison.Ordinal)) return "stream";
         if (path.EndsWith("/lyrics", StringComparison.Ordinal)) return "lyrics";
         if (path.EndsWith("/cover", StringComparison.Ordinal)) return "artwork";
+        if (path.EndsWith("/download", StringComparison.Ordinal)) return "download";
         return "other";
     }
 

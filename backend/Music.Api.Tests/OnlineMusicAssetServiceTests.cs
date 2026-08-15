@@ -40,6 +40,25 @@ public sealed class OnlineMusicAssetServiceTests
         Assert.AreEqual(0, gateway.LyricsCalls);
     }
 
+    [TestMethod]
+    public async Task ArtworkFailuresAreNegativeCached()
+    {
+        var gateway = new FakeGateway
+        {
+            ArtworkFailure = OnlineMusicGatewayFailure.TooLarge
+        };
+        using var service = CreateService(gateway);
+
+        var first = await Assert.ThrowsAsync<OnlineMusicAssetException>(() =>
+            service.GetArtworkAsync("source-a", "track-1", CancellationToken.None));
+        var second = await Assert.ThrowsAsync<OnlineMusicAssetException>(() =>
+            service.GetArtworkAsync("source-a", "track-1", CancellationToken.None));
+
+        Assert.AreEqual(OnlineMusicAssetFailure.TooLarge, first.Failure);
+        Assert.AreEqual(OnlineMusicAssetFailure.TooLarge, second.Failure);
+        Assert.AreEqual(1, gateway.ArtworkCalls);
+    }
+
     private static OnlineMusicAssetService CreateService(IOnlineMusicGateway gateway) => new(
         gateway,
         Options.Create(new OnlineMusicOptions
@@ -55,6 +74,7 @@ public sealed class OnlineMusicAssetServiceTests
     {
         public int LyricsCalls { get; private set; }
         public int ArtworkCalls { get; private set; }
+        public OnlineMusicGatewayFailure? ArtworkFailure { get; init; }
 
         public Task<OnlineMusicLyricsAsset> GetLyricsAsync(
             string source,
@@ -71,6 +91,10 @@ public sealed class OnlineMusicAssetServiceTests
             CancellationToken cancellationToken)
         {
             ArtworkCalls++;
+            if (ArtworkFailure is { } failure)
+            {
+                throw new OnlineMusicGatewayException(failure, "Artwork failed.");
+            }
             return Task.FromResult(new OnlineMusicArtworkAsset("image"u8.ToArray(), "image/jpeg"));
         }
 

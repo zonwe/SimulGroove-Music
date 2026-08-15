@@ -32,12 +32,20 @@ public sealed class OnlineMusicStreamResponse(
     public string? ContentRange { get; } = response.Content.Headers.ContentRange?.ToString();
     public string? AcceptRanges { get; } = response.Headers.AcceptRanges.FirstOrDefault();
     public string? ETag { get; } = response.Headers.ETag?.ToString();
+    public string? ContentDisposition { get; } = response.Content.Headers.ContentDisposition?.ToString();
+    public bool LyricsEmbedded { get; } = HeaderIsTrue(response, "X-Online-Lyrics-Embedded");
+    public bool ArtworkEmbedded { get; } = HeaderIsTrue(response, "X-Online-Artwork-Embedded");
 
     public async ValueTask DisposeAsync()
     {
         await Content.DisposeAsync();
         response.Dispose();
     }
+
+    private static bool HeaderIsTrue(HttpResponseMessage response, string name) =>
+        response.Headers.TryGetValues(name, out var values) &&
+        bool.TryParse(values.FirstOrDefault(), out var value) &&
+        value;
 }
 
 public enum OnlineMusicGatewayFailure
@@ -73,6 +81,12 @@ public interface IOnlineMusicGateway
         string streamRef,
         string? range,
         CancellationToken cancellationToken);
+
+    Task<OnlineMusicStreamResponse> OpenDownloadAsync(
+        string source,
+        string trackId,
+        CancellationToken cancellationToken) =>
+        throw new NotSupportedException("Online downloads are not implemented by this gateway.");
 
     Task<OnlineMusicLyricsAsset> GetLyricsAsync(
         string source,

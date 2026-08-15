@@ -1,14 +1,9 @@
-import 'dart:async';
-
-import 'package:drift/drift.dart' show Value;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
-import '../../core/library/scanned_track.dart';
 import '../../core/library/artist_names.dart';
 import '../../core/player/track_directory.dart';
 import 'artwork_view.dart';
@@ -27,11 +22,8 @@ class LibraryPage extends ConsumerStatefulWidget {
 class _LibraryPageState extends ConsumerState<LibraryPage> {
   final TextEditingController _search = TextEditingController();
   _LibraryView _view = _LibraryView.songs;
-  bool _scanning = false;
-  bool _rescanAllBusy = false;
   bool _selectionMode = false;
   final Set<String> _selectedTrackIds = <String>{};
-  String? _error;
 
   @override
   void dispose() {
@@ -41,9 +33,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
 
   @override
   Widget build(BuildContext context) {
-    final scanner = ref.watch(scannerProvider);
     final tracks = ref.watch(tracksProvider);
-    final sources = ref.watch(scanSourcesProvider);
     final visibleTracks = _filterTracks(tracks.asData?.value ?? const []);
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
@@ -64,63 +54,12 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                       ? null
                       : () => _addSelectedToPlaylist(visibleTracks),
                 )
-              : Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text(
-                      '音乐库',
-                      style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                    if (scanner.isSupported)
-                      FilledButton.icon(
-                        onPressed: _scanning ? null : () => unawaited(_scan()),
-                        icon: _scanning
-                            ? const SizedBox.square(
-                                dimension: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.library_add_outlined),
-                        label: Text(_scanning ? '后台扫描中…' : scanner.actionLabel),
-                      ),
-                    if (scanner.supportsFullDeviceScan)
-                      OutlinedButton.icon(
-                        onPressed: _scanning
-                            ? null
-                            : () => unawaited(_scan(fullDevice: true)),
-                        icon: const Icon(Icons.phone_android_outlined),
-                        label: const Text('扫描整台设备'),
-                      ),
-                    OutlinedButton.icon(
-                      onPressed: _rescanAllBusy
-                          ? null
-                          : () => unawaited(_rescanAll()),
-                      icon: _rescanAllBusy
-                          ? const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.refresh),
-                      label: Text(_rescanAllBusy ? '重新扫描中…' : '重新扫描'),
-                    ),
-                  ],
+              : Text(
+                  '音乐库',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-          if (scanner.isSupported) ...[
-            const SizedBox(height: 14),
-            sources.when(
-              loading: () => const LinearProgressIndicator(minHeight: 2),
-              error: (error, _) => Text('搜索位置读取失败：$error'),
-              data: (values) => _ScanSources(
-                values: values,
-                onAdd: () => unawaited(_scan()),
-                onDelete: _deleteSource,
-              ),
-            ),
-          ],
           const SizedBox(height: 16),
           TextField(
             controller: _search,
@@ -152,14 +91,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
             selected: {_view},
             onSelectionChanged: (value) => setState(() => _view = value.first),
           ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
           const SizedBox(height: 12),
           Expanded(
             child: tracks.when(
@@ -234,240 +165,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     await _showPlaylistPickerForTracks(context, ref, selected);
     if (mounted) _clearSelection();
   }
-
-  Future<void> _rescanAll() async {
-    if (_rescanAllBusy) return;
-    final sources = await ref.read(databaseProvider).watchScanSources().first;
-    if (sources.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('还没有添加搜索位置')));
-      }
-      return;
-    }
-    setState(() {
-      _rescanAllBusy = true;
-      _error = null;
-    });
-    var imported = 0;
-    try {
-      final scanner = ref.read(scannerProvider);
-      final database = ref.read(databaseProvider);
-      for (final source in sources) {
-        final result = await scanner.rescanSource(
-          sourceUri: source.uri,
-          platform: source.platform,
-          sourceLabel: source.label,
-        );
-        if (result == null) continue;
-        imported += result.tracks.length;
-        await database.replaceScanSourceTracks(
-          source,
-          result.tracks.map(_toCompanion),
-        );
-        await database.saveScanSource(
-          ScanSourcesCompanion.insert(
-            id: source.id,
-            platform: result.tracks.firstOrNull?.sourceType ?? source.platform,
-            uri: result.sourceUri,
-            label: result.sourceLabel,
-            lastScannedAt: Value(DateTime.now()),
-          ),
-        );
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('已重新扫描 ${sources.length} 个位置，更新 $imported 首歌曲'),
-          ),
-        );
-      }
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _rescanAllBusy = false);
-    }
-  }
-
-  Future<void> _deleteSource(ScanSource source) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除搜索位置？'),
-        content: Text('将移除“${source.label}”以及该位置导入的歌曲。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    await ref.read(databaseProvider).deleteScanSource(source);
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('已删除搜索位置“${source.label}”并更新音乐库')));
-    }
-  }
-
-  Future<void> _scan({bool fullDevice = false}) async {
-    setState(() {
-      _scanning = true;
-      _error = null;
-    });
-    try {
-      final scanner = ref.read(scannerProvider);
-      final result = fullDevice
-          ? await scanner.scanFullDevice()
-          : await scanner.scan();
-      if (result == null) return;
-      final database = ref.read(databaseProvider);
-      await database.upsertTracks(result.tracks.map(_toCompanion));
-      final now = DateTime.now();
-      await database.saveScanSource(
-        ScanSourcesCompanion.insert(
-          id: const Uuid().v5(Namespace.url.value, result.sourceUri),
-          platform: result.tracks.firstOrNull?.sourceType ?? 'unknown',
-          uri: result.sourceUri,
-          label: result.sourceLabel,
-          lastScannedAt: Value(now),
-        ),
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已导入 ${result.tracks.length} 首歌曲')),
-        );
-      }
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _scanning = false);
-    }
-  }
-
-  TracksCompanion _toCompanion(ScannedTrack track) => TracksCompanion.insert(
-    id: track.id,
-    sourceType: track.sourceType,
-    sourceId: track.sourceId,
-    uri: track.uri,
-    filePath: Value(track.filePath),
-    title: track.title,
-    artist: Value(track.artist),
-    album: Value(track.album),
-    durationMs: Value(track.durationMs),
-    artwork: Value(track.artwork),
-    lyrics: Value(track.lyrics),
-    fileSize: Value(track.fileSize),
-    modifiedAt: Value(track.modifiedAt),
-    updatedAt: DateTime.now(),
-  );
-}
-
-class _ScanSources extends StatelessWidget {
-  const _ScanSources({
-    required this.values,
-    required this.onAdd,
-    required this.onDelete,
-  });
-
-  final List<ScanSource> values;
-  final VoidCallback onAdd;
-  final Future<void> Function(ScanSource source) onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: colors.outlineVariant),
-      ),
-      child: InkWell(
-        onTap: () => _showSourceDetails(context),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              Icon(Icons.folder_open_outlined, size: 20, color: colors.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '搜索位置',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    Text(
-                      values.isEmpty ? '尚未指定位置' : '${values.length} 个位置',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _showSourceDetails(BuildContext context) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-          children: [
-            ListTile(
-              title: const Text(
-                '搜索位置',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              trailing: TextButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  onAdd();
-                },
-                icon: const Icon(Icons.add),
-                label: const Text('添加位置'),
-              ),
-            ),
-            if (values.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('还没有添加音乐文件夹。'),
-              )
-            else
-              for (final source in values)
-                ListTile(
-                  leading: const Icon(Icons.folder_outlined),
-                  title: Text(source.label),
-                  subtitle: Text(_sourceLocation(source)),
-                  trailing: IconButton(
-                    tooltip: '删除搜索位置',
-                    icon: const Icon(Icons.delete_outline),
-                    onPressed: () => onDelete(source),
-                  ),
-                ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class _SelectionToolbar extends StatelessWidget {
@@ -509,14 +206,6 @@ class _SelectionToolbar extends StatelessWidget {
       ),
     ],
   );
-}
-
-String _sourceLocation(ScanSource source) {
-  if (source.uri == 'media-store://external') {
-    return 'Android MediaStore · 整台设备';
-  }
-  if (source.uri.startsWith('content://')) return 'Android 已授权目录';
-  return source.uri;
 }
 
 class _SongList extends ConsumerWidget {
@@ -579,23 +268,22 @@ class _SongList extends ConsumerWidget {
                 offset: const Offset(-160, 4),
                 tooltip: '更多操作',
                 onSelected: (value) async {
-                  if (value == 'playlist') {
-                    _showPlaylistPicker(context, ref, track);
-                  }
-                  if (value == 'artist') {
-                    await openArtistCollectionPage(
-                      context,
-                      tracks,
-                      track.artist,
-                    );
-                  }
-                  if (value == 'album') {
-                    openCollectionPage(
-                      context,
-                      tracks,
-                      CollectionKind.album,
-                      track.album,
-                    );
+                  switch (value) {
+                    case 'playlist':
+                      await _showPlaylistPicker(context, ref, track);
+                    case 'artist':
+                      await openArtistCollectionPage(
+                        context,
+                        tracks,
+                        track.artist,
+                      );
+                    case 'album':
+                      openCollectionPage(
+                        context,
+                        tracks,
+                        CollectionKind.album,
+                        track.album,
+                      );
                   }
                 },
                 itemBuilder: (_) => [
@@ -729,7 +417,9 @@ class _EmptyLibrary extends StatelessWidget {
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 6),
-        Text(hasQuery ? '换个关键词试试' : '在 Android 扫描设备音乐，或在 Windows 添加音乐文件夹'),
+        Text(
+          hasQuery ? '换个关键词试试' : '在 Android 扫描设备音乐，或在 Windows/Linux 添加音乐文件夹',
+        ),
       ],
     ),
   );
@@ -784,7 +474,8 @@ Future<void> _showTrackContextMenu(
         ),
       ),
       if (!kIsWeb &&
-          defaultTargetPlatform == TargetPlatform.windows &&
+          (defaultTargetPlatform == TargetPlatform.windows ||
+              defaultTargetPlatform == TargetPlatform.linux) &&
           track.filePath != null)
         const PopupMenuItem(
           value: 'directory',

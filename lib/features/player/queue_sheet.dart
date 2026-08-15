@@ -14,14 +14,17 @@ Future<void> showPlaybackQueue(
   BuildContext context,
   MusicAudioHandler handler,
 ) async {
-  final isWindows = !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-  if (isWindows && DesktopWindowController.compactMode.value) {
+  final isDesktop =
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux);
+  if (isDesktop && DesktopWindowController.compactMode.value) {
     await DesktopWindowController.setCompactPanelExpanded(
       !DesktopWindowController.compactPanelExpanded.value,
     );
     return;
   }
-  if (isWindows && MediaQuery.sizeOf(context).width >= 900) {
+  if (isDesktop && MediaQuery.sizeOf(context).width >= 900) {
     playbackQueueDockOpen.value = !playbackQueueDockOpen.value;
     return;
   }
