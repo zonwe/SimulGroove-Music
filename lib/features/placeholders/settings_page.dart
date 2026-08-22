@@ -8,11 +8,13 @@ import 'package:hotkey_manager/hotkey_manager.dart';
 import '../../app/providers.dart';
 import '../../core/online_music/online_search_settings.dart';
 import '../../core/online_music/online_track_downloader.dart';
+import '../../core/player/equalizer_models.dart';
 import '../../core/player/now_playing_layout.dart';
 import '../../core/theme/app_appearance.dart';
 import '../../core/shortcuts/desktop_shortcut_service.dart';
 import '../../core/window/desktop_window_controller.dart';
 import '../../core/window/window_settings.dart';
+import '../equalizer/equalizer_view.dart';
 import '../library/library_scan_settings_section.dart';
 import 'desktop_shortcut_settings_section.dart';
 
@@ -489,70 +491,48 @@ IconData _shortcutIcon(DesktopShortcutAction action) => switch (action) {
 class _EqualizerSection extends ConsumerWidget {
   const _EqualizerSection();
 
-  static const _presets = <String, String>{
-    'flat': '均衡',
-    'bass': '低音增强',
-    'vocal': '人声',
-    'classical': '古典',
-  };
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final customPresets =
+        ref.watch(customEqualizerPresetsProvider).value ?? const [];
     return StreamBuilder<Map<String, String>>(
       stream: ref.watch(databaseProvider).watchSettings(),
       builder: (context, snapshot) {
         final settings = snapshot.data ?? const <String, String>{};
-        final mediaKitDesktop =
-            !kIsWeb &&
-            (defaultTargetPlatform == TargetPlatform.windows ||
-                defaultTargetPlatform == TargetPlatform.linux);
-        final selected =
-            _presets.containsKey(settings['audio.equalizer.preset'])
-            ? settings['audio.equalizer.preset']!
-            : 'flat';
+        final enabled = settings['audio.equalizer.enabled'] != 'false';
+        final presetId = settings['audio.equalizer.preset'] ?? 'flat';
+
+        String presetName = '平直';
+        final defaultPreset = findDefaultEqualizerPreset(presetId);
+        if (defaultPreset != null) {
+          presetName = defaultPreset.name;
+        } else {
+          for (final cp in customPresets) {
+            if (cp.id == presetId) {
+              presetName = '★ ${cp.name}';
+              break;
+            }
+          }
+        }
+
         return _SettingsSection(
           title: '播放音效',
           children: [
             ListTile(
-              leading: const Icon(Icons.equalizer_outlined),
-              title: const Text('均衡器'),
+              leading: Icon(
+                Icons.equalizer_rounded,
+                color: enabled ? Theme.of(context).colorScheme.primary : null,
+              ),
+              title: const Text('音频均衡器'),
               subtitle: Text(
-                mediaKitDesktop
-                    ? '桌面 media_kit 音频后端当前不提供 DSP 均衡器'
-                    : '选择当前播放使用的音效预设',
+                enabled ? '10 频段实时 DSP 调节 · 当前预设：$presetName' : '均衡器已禁用',
               ),
-              trailing: SizedBox(
-                width: 150,
-                child: DropdownButtonFormField<String>(
-                  initialValue: selected,
-                  items: [
-                    for (final entry in _presets.entries)
-                      DropdownMenuItem(
-                        value: entry.key,
-                        child: Text(entry.value),
-                      ),
-                  ],
-                  onChanged: mediaKitDesktop
-                      ? null
-                      : (value) async {
-                          if (value == null) return;
-                          await ref
-                              .read(databaseProvider)
-                              .setSetting('audio.equalizer.preset', value);
-                          await ref
-                              .read(audioHandlerProvider)
-                              .setEqualizerPreset(value);
-                        },
-                ),
+              trailing: FilledButton.tonalIcon(
+                onPressed: () => EqualizerView.show(context),
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                label: const Text('调节'),
               ),
-            ),
-            Padding(
-              padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
-              child: Text(
-                mediaKitDesktop
-                    ? '当前桌面后端不支持真正的频段 DSP；预设不会改变音色。'
-                    : '当前后端使用预设增益；后续可接入平台音频 DSP。',
-              ),
+              onTap: () => EqualizerView.show(context),
             ),
           ],
         );
