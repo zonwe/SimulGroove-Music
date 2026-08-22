@@ -53,8 +53,9 @@ class HttpBackendGateway implements BackendGateway {
   Future<BackendLibrary> syncLibrary(
     BackendSession session,
     List<BackendPlaylist> playlists,
-    List<BackendTrack> likedTracks,
-  ) async {
+    List<BackendTrack> likedTracks, [
+    List<BackendEqualizerPreset> equalizerPresets = const [],
+  ]) async {
     final response = await _send(
       'POST',
       '/api/playlists/sync',
@@ -66,10 +67,14 @@ class HttpBackendGateway implements BackendGateway {
         'likedTracks': likedTracks
             .map((track) => track.toJson())
             .toList(growable: false),
+        'equalizerPresets': equalizerPresets
+            .map((preset) => preset.toJson())
+            .toList(growable: false),
       },
     );
     _ensureSuccess(response);
     final json = _jsonObject(response);
+    final rawPresets = json['equalizerPresets'] as List<dynamic>? ?? [];
     return BackendLibrary(
       playlists: (json['playlists'] as List<dynamic>)
           .map(
@@ -82,6 +87,13 @@ class HttpBackendGateway implements BackendGateway {
           .map(
             (value) =>
                 BackendTrack.fromJson((value as Map).cast<String, dynamic>()),
+          )
+          .toList(growable: false),
+      equalizerPresets: rawPresets
+          .map(
+            (value) => BackendEqualizerPreset.fromJson(
+              (value as Map).cast<String, dynamic>(),
+            ),
           )
           .toList(growable: false),
     );

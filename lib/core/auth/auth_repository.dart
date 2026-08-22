@@ -11,12 +11,16 @@ class SyncResult {
     required this.downloaded,
     required this.uploadedLikes,
     required this.downloadedLikes,
+    this.uploadedPresets = 0,
+    this.downloadedPresets = 0,
   });
 
   final int uploaded;
   final int downloaded;
   final int uploadedLikes;
   final int downloadedLikes;
+  final int uploadedPresets;
+  final int downloadedPresets;
 }
 
 abstract interface class AuthRepository {
@@ -123,7 +127,12 @@ class BackendAuthRepository implements AuthRepository {
         .map(BackendTrack.fromLocal)
         .toList(growable: false);
 
-    final remote = await _syncWithRefresh(payload, likedTracks);
+    final localPresets = await _database.allEqualizerPresets();
+    final payloadPresets = localPresets
+        .map(BackendEqualizerPreset.fromLocal)
+        .toList(growable: false);
+
+    final remote = await _syncWithRefresh(payload, likedTracks, payloadPresets);
     final localByRemoteId = {
       for (final playlist in localPlaylists)
         (playlist.remoteId ?? 'playlist-${playlist.id}'): playlist,
@@ -170,27 +179,78 @@ class BackendAuthRepository implements AuthRepository {
       await _database.setTrackLiked(localTrack.id, true);
       downloadedLikes++;
     }
+
+    final localPresetByRemoteId = {
+      for (final p in localPresets) (p.remoteId ?? 'preset-${p.id}'): p,
+    };
+    var downloadedPresets = 0;
+    for (final remotePreset in remote.equalizerPresets) {
+      final local = localPresetByRemoteId[remotePreset.remoteId];
+      if (local == null) {
+        final localId = _uuid.v4();
+        await _database.saveEqualizerPreset(
+          EqualizerPresetsCompanion.insert(
+            id: localId,
+            remoteId: Value(remotePreset.remoteId),
+            accountId: Value(account.id),
+            name: remotePreset.name,
+            gainsJson: remotePreset.gainsJson,
+            preampDb: Value(remotePreset.preampDb),
+            createdAt: remotePreset.updatedAt,
+            updatedAt: remotePreset.updatedAt,
+          ),
+        );
+        downloadedPresets++;
+      } else if (remotePreset.updatedAt.isAfter(local.updatedAt)) {
+        await _database.saveEqualizerPreset(
+          EqualizerPresetsCompanion.insert(
+            id: local.id,
+            remoteId: Value(remotePreset.remoteId),
+            accountId: Value(account.id),
+            name: remotePreset.name,
+            gainsJson: remotePreset.gainsJson,
+            preampDb: Value(remotePreset.preampDb),
+            createdAt: local.createdAt,
+            updatedAt: remotePreset.updatedAt,
+          ),
+        );
+      }
+    }
+
     return SyncResult(
       uploaded: payload.length,
       downloaded: downloaded,
       uploadedLikes: likedTracks.length,
       downloadedLikes: downloadedLikes,
+      uploadedPresets: payloadPresets.length,
+      downloadedPresets: downloadedPresets,
     );
   }
 
   Future<BackendLibrary> _syncWithRefresh(
     List<BackendPlaylist> playlists,
     List<BackendTrack> likedTracks,
+    List<BackendEqualizerPreset> equalizerPresets,
   ) async {
     var session = await currentSession();
     if (session == null) throw StateError('请先登录账号。');
     try {
-      return await _gateway.syncLibrary(session, playlists, likedTracks);
+      return await _gateway.syncLibrary(
+        session,
+        playlists,
+        likedTracks,
+        equalizerPresets,
+      );
     } on BackendException catch (error) {
       if (!error.isUnauthorized) rethrow;
       session = await currentSession(forceRefresh: true);
       if (session == null) throw StateError('登录已过期，请重新登录。');
-      return _gateway.syncLibrary(session, playlists, likedTracks);
+      return _gateway.syncLibrary(
+        session,
+        playlists,
+        likedTracks,
+        equalizerPresets,
+      );
     }
   }
 

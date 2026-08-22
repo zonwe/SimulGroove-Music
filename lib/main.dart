@@ -10,6 +10,7 @@ import 'app/music_app.dart';
 import 'app/providers.dart';
 import 'core/database/app_database.dart';
 import 'core/player/audio_backend.dart';
+import 'core/player/equalizer_models.dart';
 import 'core/player/music_audio_handler.dart';
 import 'core/shortcuts/desktop_shortcut_service.dart';
 import 'core/startup/debug_artifact_cleanup.dart';
@@ -52,6 +53,7 @@ Future<void> main() async {
     database: database,
     handler: audioHandler,
   );
+  unawaited(_restoreEqualizerSettings(database, audioHandler));
 
   runApp(
     ProviderScope(
@@ -69,7 +71,38 @@ Future<void> main() async {
   }
 }
 
+Future<void> _restoreEqualizerSettings(
+  AppDatabase database,
+  MusicAudioHandler audioHandler,
+) async {
+  try {
+    final settings = await database.watchSettings().first;
+    final enabled = settings['audio.equalizer.enabled'] == 'true';
+    final presetId = settings['audio.equalizer.preset'] ?? 'flat';
+    final gainsJson = settings['audio.equalizer.gains'];
+    final preampStr = settings['audio.equalizer.preamp'];
+
+    var gains = EqualizerPreset.parseGains(gainsJson);
+    var preamp = preampStr != null ? (double.tryParse(preampStr) ?? 0.0) : 0.0;
+    if (gainsJson == null || gainsJson.isEmpty) {
+      final defaultPreset = findDefaultEqualizerPreset(presetId);
+      if (defaultPreset != null) {
+        gains = List<double>.from(defaultPreset.gains);
+        preamp = defaultPreset.preampDb;
+      }
+    }
+
+    await audioHandler.applyEqualizer(
+      enabled: enabled,
+      gains: gains,
+      preampDb: preamp,
+      presetId: presetId,
+    );
+  } catch (_) {}
+}
+
 Future<void> _configureAndroidAudioSession() async {
   final session = await AudioSession.instance;
   await session.configure(const AudioSessionConfiguration.music());
 }
+

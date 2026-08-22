@@ -18,8 +18,10 @@ import '../core/online_music/online_search_settings.dart';
 import '../core/online_music/online_track.dart';
 import '../core/online_music/online_track_downloader.dart';
 import '../core/online_music/online_track_playback.dart';
+import '../core/player/equalizer_models.dart';
 import '../core/player/music_audio_handler.dart';
 import '../core/player/now_playing_layout.dart';
+
 import '../core/theme/app_appearance.dart';
 import '../core/window/window_settings.dart';
 import '../features/online_search/online_search_controller.dart';
@@ -148,3 +150,26 @@ final trayMinimizeOnCloseProvider = StreamProvider<bool>(
       .watchSettings()
       .map((settings) => settings[trayMinimizeOnCloseSettingKey] != 'false'),
 );
+
+final customEqualizerPresetsProvider = StreamProvider<List<EqualizerPreset>>((
+  ref,
+) {
+  return ref
+      .watch(databaseProvider)
+      .watchEqualizerPresets()
+      .map(
+        (rows) => rows
+            .map(
+              (row) => EqualizerPreset(
+                id: row.id,
+                name: row.name,
+                gains: EqualizerPreset.parseGains(row.gainsJson),
+                preampDb: row.preampDb,
+                isCustom: true,
+                remoteId: row.remoteId,
+                updatedAt: row.updatedAt,
+              ),
+            )
+            .toList(),
+      );
+});

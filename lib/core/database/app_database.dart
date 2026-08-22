@@ -107,6 +107,21 @@ class LikedTracks extends Table {
   Set<Column<Object>> get primaryKey => {trackId};
 }
 
+@DataClassName('EqualizerPresetData')
+class EqualizerPresets extends Table {
+  TextColumn get id => text()();
+  TextColumn get remoteId => text().nullable()();
+  TextColumn get accountId => text().nullable()();
+  TextColumn get name => text()();
+  TextColumn get gainsJson => text()();
+  RealColumn get preampDb => real().withDefault(const Constant(0.0))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
 String _withTrailingSeparator(String value, String separator) =>
     value.endsWith(separator) ? value : '$value$separator';
 
@@ -132,6 +147,7 @@ Expression<bool> _startsWithLiteral(
     AppSettings,
     PlaybackSnapshots,
     LikedTracks,
+    EqualizerPresets,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -140,13 +156,14 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (Migrator m) => m.createAll(),
     onUpgrade: (Migrator m, int from, int to) async {
       if (from < 2) await m.createTable(likedTracks);
+      if (from < 3) await m.createTable(equalizerPresets);
     },
   );
 
@@ -422,4 +439,18 @@ class AppDatabase extends _$AppDatabase {
       )..where((row) => row.trackId.equals(trackId))).go();
     }
   }
+
+  Stream<List<EqualizerPresetData>> watchEqualizerPresets() => (select(
+    equalizerPresets,
+  )..orderBy([(row) => OrderingTerm.asc(row.name)])).watch();
+
+  Future<List<EqualizerPresetData>> allEqualizerPresets() => (select(
+    equalizerPresets,
+  )..orderBy([(row) => OrderingTerm.asc(row.name)])).get();
+
+  Future<void> saveEqualizerPreset(EqualizerPresetsCompanion value) =>
+      into(equalizerPresets).insertOnConflictUpdate(value);
+
+  Future<void> deleteEqualizerPreset(String id) =>
+      (delete(equalizerPresets)..where((row) => row.id.equals(id))).go();
 }
