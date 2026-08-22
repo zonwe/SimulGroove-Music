@@ -1,5 +1,3 @@
-library just_audio_media_kit;
-
 import 'dart:async';
 
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
@@ -22,6 +20,42 @@ class MediaKitPlayer extends AudioPlayerPlatform {
   final _externalFileOptionsCompleter = Completer<void>();
   bool _externalFileOptionsStarted = false;
 
+  String _currentAf = '';
+
+  /// Sets the 10-band equalizer and preamp filter via MPV audio filters
+  Future<void> setEqualizer({
+    required bool enabled,
+    required List<double> gains,
+    double preampDb = 0.0,
+  }) async {
+    if (!enabled || (gains.every((g) => g == 0.0) && preampDb == 0.0)) {
+      _currentAf = '';
+      try {
+        await setProperty(_player, 'af', '');
+      } catch (error) {
+        _logger.warning('Unable to reset MPV af: $error');
+      }
+      return;
+    }
+    const freqs = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+    final filters = <String>[];
+    if (preampDb != 0.0) {
+      filters.add('volume=${preampDb.toStringAsFixed(1)}dB');
+    }
+    for (var i = 0; i < freqs.length && i < gains.length; i++) {
+      final gain = gains[i];
+      if (gain != 0.0) {
+        filters.add('equalizer=f=${freqs[i]}:width_type=o:w=1:g=${gain.toStringAsFixed(1)}');
+      }
+    }
+    _currentAf = filters.isEmpty ? '' : 'lavfi=[${filters.join(',')}]';
+    try {
+      await setProperty(_player, 'af', _currentAf);
+    } catch (error) {
+      _logger.warning('Unable to set MPV af: $error');
+    }
+  }
+
   /// Completes when the player is ready
   Future<void> ready() async {
     await _readyCompleter.future;
@@ -38,6 +72,13 @@ class MediaKitPlayer extends AudioPlayerPlatform {
           // Keep playback available when a bundled MPV build does not expose
           // one of these optional properties.
           _logger.warning('Unable to disable MPV $option: $error');
+        }
+      }
+      if (_currentAf.isNotEmpty) {
+        try {
+          await setProperty(_player, 'af', _currentAf);
+        } catch (error) {
+          _logger.warning('Unable to apply initial MPV af: $error');
         }
       }
       _externalFileOptionsCompleter.complete();
