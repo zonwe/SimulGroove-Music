@@ -1,6 +1,8 @@
-@baseUrl = http://localhost:8081
-@username = rider-test@example.com
-@password = secret-123456
+@baseUrl = http://localhost:5080
+#@username = rider-test@example.com
+#@password = secret-123456
+@username = zonwe
+@password = zonwe
 # 这里填写后端进程能够访问的绝对路径，而不是手机上的路径。
 @scanPath = F:\\Music
 
@@ -66,6 +68,15 @@ Content-Type: application/json
           "durationMs": 180000
         }
       ]
+    }
+  ],
+  "equalizerPresets": [
+    {
+      "remoteId": "preset-custom-rock",
+      "name": "Custom Rock",
+      "gainsJson": "[4.5, 3.5, 2.0, 0.0, -1.5, -1.0, 1.5, 3.0, 4.0, 4.5]",
+      "preampDb": -2.0,
+      "updatedAt": "2026-08-22T08:00:00Z"
     }
   ]
 }

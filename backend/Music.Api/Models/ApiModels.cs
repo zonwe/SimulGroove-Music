@@ -14,7 +14,8 @@ public sealed record ProblemResponse(string Code, string Message);
 
 public sealed record SyncPlaylistsRequest(
     IReadOnlyList<PlaylistRequest>? Playlists,
-    IReadOnlyList<TrackRequest>? LikedTracks);
+    IReadOnlyList<TrackRequest>? LikedTracks,
+    IReadOnlyList<EqualizerPresetRequest>? EqualizerPresets);
 
 public sealed record PlaylistRequest(
     string? RemoteId,
@@ -29,6 +30,13 @@ public sealed record TrackRequest(
     string? Album,
     int? DurationMs);
 
+public sealed record EqualizerPresetRequest(
+    string? RemoteId,
+    string? Name,
+    string? GainsJson,
+    double? PreampDb,
+    DateTimeOffset? UpdatedAt);
+
 public sealed record PlaylistResponse(
     string RemoteId,
     string Name,
@@ -42,6 +50,15 @@ public sealed record TrackResponse(
     string Album,
     int? DurationMs);
 
+public sealed record EqualizerPresetResponse(
+    string RemoteId,
+    string Name,
+    string GainsJson,
+    double PreampDb,
+    DateTimeOffset UpdatedAt);
+
 public sealed record LibrarySyncResponse(
     IReadOnlyList<PlaylistResponse> Playlists,
-    IReadOnlyList<TrackResponse> LikedTracks);
+    IReadOnlyList<TrackResponse> LikedTracks,
+    IReadOnlyList<EqualizerPresetResponse> EqualizerPresets);
+

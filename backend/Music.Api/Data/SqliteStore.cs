@@ -71,6 +71,15 @@ public sealed class SqliteStore : IPlaylistStore
                 added_at TEXT NOT NULL,
                 PRIMARY KEY (username, uri)
             );
+            CREATE TABLE IF NOT EXISTS equalizer_presets (
+                username TEXT NOT NULL REFERENCES accounts(username) ON DELETE CASCADE,
+                remote_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                gains_json TEXT NOT NULL,
+                preamp_db REAL NOT NULL DEFAULT 0.0,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (username, remote_id)
+            );
             """;
         command.ExecuteNonQuery();
     }
@@ -93,7 +102,8 @@ public sealed class SqliteStore : IPlaylistStore
     public LibrarySyncResponse SyncLibrary(
         string username,
         IReadOnlyList<PlaylistRequest> incomingPlaylists,
-        IReadOnlyList<TrackRequest> incomingLikedTracks)
+        IReadOnlyList<TrackRequest> incomingLikedTracks,
+        IReadOnlyList<EqualizerPresetRequest> incomingEqualizerPresets)
     {
         lock (_gate)
         {
@@ -156,6 +166,28 @@ public sealed class SqliteStore : IPlaylistStore
                 likedCommand.Parameters.AddWithValue("$addedAt", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
                 likedCommand.ExecuteNonQuery();
             }
+            foreach (var preset in incomingEqualizerPresets)
+            {
+                if (string.IsNullOrWhiteSpace(preset.RemoteId) || string.IsNullOrWhiteSpace(preset.Name)) continue;
+                using var presetCommand = connection.CreateCommand();
+                presetCommand.Transaction = transaction;
+                presetCommand.CommandText = """
+                    INSERT INTO equalizer_presets(username, remote_id, name, gains_json, preamp_db, updated_at)
+                    VALUES ($username, $remoteId, $name, $gainsJson, $preampDb, $updatedAt)
+                    ON CONFLICT(username, remote_id) DO UPDATE SET
+                        name = excluded.name,
+                        gains_json = excluded.gains_json,
+                        preamp_db = excluded.preamp_db,
+                        updated_at = excluded.updated_at;
+                    """;
+                presetCommand.Parameters.AddWithValue("$username", username);
+                presetCommand.Parameters.AddWithValue("$remoteId", preset.RemoteId);
+                presetCommand.Parameters.AddWithValue("$name", preset.Name);
+                presetCommand.Parameters.AddWithValue("$gainsJson", preset.GainsJson ?? "[]");
+                presetCommand.Parameters.AddWithValue("$preampDb", preset.PreampDb ?? 0.0);
+                presetCommand.Parameters.AddWithValue("$updatedAt", (preset.UpdatedAt ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture));
+                presetCommand.ExecuteNonQuery();
+            }
             transaction.Commit();
 
             using var query = connection.CreateCommand();
@@ -182,7 +214,21 @@ public sealed class SqliteStore : IPlaylistStore
                     likedReader.GetString(3),
                     likedReader.IsDBNull(4) ? null : likedReader.GetInt32(4)));
             }
-            return new LibrarySyncResponse(playlists, likedTracks);
+            using var presetQuery = connection.CreateCommand();
+            presetQuery.CommandText = "SELECT remote_id, name, gains_json, preamp_db, updated_at FROM equalizer_presets WHERE username = $username ORDER BY remote_id";
+            presetQuery.Parameters.AddWithValue("$username", username);
+            using var presetReader = presetQuery.ExecuteReader();
+            var equalizerPresets = new List<EqualizerPresetResponse>();
+            while (presetReader.Read())
+            {
+                equalizerPresets.Add(new EqualizerPresetResponse(
+                    presetReader.GetString(0),
+                    presetReader.GetString(1),
+                    presetReader.GetString(2),
+                    presetReader.GetDouble(3),
+                    DateTimeOffset.Parse(presetReader.GetString(4), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)));
+            }
+            return new LibrarySyncResponse(playlists, likedTracks, equalizerPresets);
         }
     }
 
