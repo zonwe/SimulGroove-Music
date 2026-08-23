@@ -111,7 +111,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.sync),
-            label: Text(_syncing ? '同步中…' : '立即同步歌单'),
+            label: Text(_syncing ? '同步中…' : '立即同步音乐库'),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
@@ -152,7 +152,8 @@ class _AccountPageState extends ConsumerState<AccountPage> {
       if (mounted) {
         setState(
           () => _syncMessage =
-              '已登录并同步 ${result.uploaded} 个歌单、${result.uploadedLikes} 首喜欢歌曲',
+              '已登录并同步 ${result.uploaded} 个歌单、${result.uploadedLikes} 首喜欢歌曲、'
+              '${result.uploadedPresets} 个均衡器预设',
         );
       }
       _password.clear();
@@ -174,8 +175,9 @@ class _AccountPageState extends ConsumerState<AccountPage> {
       if (mounted) {
         setState(
           () => _syncMessage =
-              '同步完成：上传 ${result.uploaded} 个歌单和 ${result.uploadedLikes} 首喜欢歌曲；'
-              '新增 ${result.downloaded} 个歌单，匹配 ${result.downloadedLikes} 首喜欢歌曲',
+              '同步完成：上传 ${result.uploaded} 个歌单、${result.uploadedLikes} 首喜欢歌曲和'
+              '${result.uploadedPresets} 个均衡器预设；新增 ${result.downloaded} 个歌单、'
+              '${result.downloadedLikes} 首喜欢歌曲和 ${result.downloadedPresets} 个均衡器预设',
         );
       }
     } catch (error) {

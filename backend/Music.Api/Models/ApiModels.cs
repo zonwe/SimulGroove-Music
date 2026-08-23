@@ -15,7 +15,8 @@ public sealed record ProblemResponse(string Code, string Message);
 public sealed record SyncPlaylistsRequest(
     IReadOnlyList<PlaylistRequest>? Playlists,
     IReadOnlyList<TrackRequest>? LikedTracks,
-    IReadOnlyList<EqualizerPresetRequest>? EqualizerPresets);
+    IReadOnlyList<EqualizerPresetRequest>? EqualizerPresets,
+    IReadOnlyList<SyncDeletionRequest>? Deletions);
 
 public sealed record PlaylistRequest(
     string? RemoteId,
@@ -28,7 +29,24 @@ public sealed record TrackRequest(
     string? Title,
     string? Artist,
     string? Album,
-    int? DurationMs);
+    int? DurationMs,
+    DateTimeOffset? UpdatedAt = null);
+
+public sealed record SyncDeletionRequest(
+    string? EntityType,
+    string? RemoteKey,
+    DateTimeOffset? DeletedAt);
+
+public static class SyncEntityTypes
+{
+    public const string Playlist = "playlist";
+    public const string LikedTrack = "likedTrack";
+    public const string EqualizerPreset = "equalizerPreset";
+
+    public static bool IsSupported(string? value) =>
+        value is Playlist or LikedTrack or EqualizerPreset;
+}
+
 
 public sealed record EqualizerPresetRequest(
     string? RemoteId,
@@ -48,7 +66,13 @@ public sealed record TrackResponse(
     string Title,
     string Artist,
     string Album,
-    int? DurationMs);
+    int? DurationMs,
+    DateTimeOffset? UpdatedAt = null);
+
+public sealed record SyncDeletionResponse(
+    string EntityType,
+    string RemoteKey,
+    DateTimeOffset DeletedAt);
 
 public sealed record EqualizerPresetResponse(
     string RemoteId,
@@ -60,5 +84,6 @@ public sealed record EqualizerPresetResponse(
 public sealed record LibrarySyncResponse(
     IReadOnlyList<PlaylistResponse> Playlists,
     IReadOnlyList<TrackResponse> LikedTracks,
-    IReadOnlyList<EqualizerPresetResponse> EqualizerPresets);
+    IReadOnlyList<EqualizerPresetResponse> EqualizerPresets,
+    IReadOnlyList<SyncDeletionResponse> Deletions);
 

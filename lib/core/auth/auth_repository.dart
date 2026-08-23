@@ -111,10 +111,10 @@ class BackendAuthRepository implements AuthRepository {
     if (account == null) throw StateError('请先登录账号。');
 
     final localPlaylists = await _database.watchPlaylists().first;
-    final payload = <BackendPlaylist>[];
+    final playlists = <BackendPlaylist>[];
     for (final playlist in localPlaylists) {
       final tracks = await _database.watchPlaylistTracks(playlist.id).first;
-      payload.add(
+      playlists.add(
         BackendPlaylist(
           remoteId: playlist.remoteId ?? 'playlist-${playlist.id}',
           name: playlist.name,
@@ -123,106 +123,191 @@ class BackendAuthRepository implements AuthRepository {
         ),
       );
     }
-    final likedTracks = (await _database.watchLikedTracks().first)
-        .map(BackendTrack.fromLocal)
+    final localLikes = await _database.allLikedTracksForSync();
+    final likedTracks = localLikes
+        .map(
+          (item) =>
+              BackendTrack.fromLocal(item.track, updatedAt: item.updatedAt),
+        )
         .toList(growable: false);
-
     final localPresets = await _database.allEqualizerPresets();
-    final payloadPresets = localPresets
+    final presets = localPresets
         .map(BackendEqualizerPreset.fromLocal)
         .toList(growable: false);
+    final localTombstones = await _database.syncTombstonesForAccount(
+      account.id,
+    );
+    final deletions = localTombstones
+        .map(
+          (row) => BackendDeletion(
+            entityType: SyncEntityType.fromWireName(row.entityType),
+            remoteKey: row.remoteKey,
+            deletedAt: row.deletedAt,
+          ),
+        )
+        .toList(growable: false);
 
-    final remote = await _syncWithRefresh(payload, likedTracks, payloadPresets);
-    final localByRemoteId = {
-      for (final playlist in localPlaylists)
+    final remote = await _syncWithRefresh(
+      playlists,
+      likedTracks,
+      presets,
+      deletions,
+    );
+    String deletionKey(String entityType, String remoteKey) =>
+        '$entityType\u0000$remoteKey';
+
+    final currentPlaylists = await _database.watchPlaylists().first;
+    final playlistByRemoteId = {
+      for (final playlist in currentPlaylists)
         (playlist.remoteId ?? 'playlist-${playlist.id}'): playlist,
     };
+    final currentLikes = await _database.allLikedTracksForSync();
+    final likeByUri = {for (final item in currentLikes) item.track.uri: item};
+    final currentPresets = await _database.allEqualizerPresets();
+    final presetByRemoteId = {
+      for (final preset in currentPresets)
+        (preset.remoteId ?? 'preset-${preset.id}'): preset,
+    };
+
+    for (final deletion in remote.deletions) {
+      switch (deletion.entityType) {
+        case SyncEntityType.playlist:
+          final local = playlistByRemoteId[deletion.remoteKey];
+          if (local != null && !local.updatedAt.isAfter(deletion.deletedAt)) {
+            await _database.deletePlaylistFromSync(local.id);
+            playlistByRemoteId.remove(deletion.remoteKey);
+          }
+        case SyncEntityType.likedTrack:
+          final local = likeByUri[deletion.remoteKey];
+          if (local != null && !local.updatedAt.isAfter(deletion.deletedAt)) {
+            await _database.setTrackLikedFromSync(local.track.id, false);
+            likeByUri.remove(deletion.remoteKey);
+          }
+        case SyncEntityType.equalizerPreset:
+          final local = presetByRemoteId[deletion.remoteKey];
+          if (local != null && !local.updatedAt.isAfter(deletion.deletedAt)) {
+            await _database.deleteEqualizerPresetFromSync(local.id);
+            presetByRemoteId.remove(deletion.remoteKey);
+          }
+      }
+    }
+
     var downloaded = 0;
     for (final remotePlaylist in remote.playlists) {
-      var local = localByRemoteId[remotePlaylist.remoteId];
-      if (local == null) {
-        final now = DateTime.now();
-        final localId = _uuid.v4();
-        await _database.createPlaylist(
-          PlaylistsCompanion.insert(
-            id: localId,
-            remoteId: Value(remotePlaylist.remoteId),
-            accountId: Value(account.id),
-            name: remotePlaylist.name,
-            syncState: const Value('synced'),
-            createdAt: now,
-            updatedAt: remotePlaylist.updatedAt,
-          ),
-        );
-        local = (await _database.watchPlaylists().first).firstWhere(
-          (item) => item.id == localId,
-        );
-        downloaded++;
-        for (final track in remotePlaylist.tracks) {
-          final localTrack = await _database.findTrackByUri(track.uri);
-          if (localTrack != null) {
-            await _database.addTrackToPlaylist(local.id, localTrack.id);
-          }
-        }
+      final local = playlistByRemoteId[remotePlaylist.remoteId];
+      if (local != null && local.updatedAt.isAfter(remotePlaylist.updatedAt)) {
+        continue;
       }
-      await _database.updatePlaylistSync(
-        id: local.id,
+      final matchedTracks = await Future.wait(
+        remotePlaylist.tracks.map(
+          (track) => _database.findTrackByUri(track.uri),
+        ),
+      );
+      await _database.savePlaylistFromSync(
+        id:
+            local?.id ??
+            _uuid.v5(
+              Namespace.url.value,
+              'playlist:${remotePlaylist.remoteId}',
+            ),
         remoteId: remotePlaylist.remoteId,
         accountId: account.id,
+        name: remotePlaylist.name,
+        createdAt: local?.createdAt ?? remotePlaylist.updatedAt,
+        updatedAt: remotePlaylist.updatedAt,
+        trackIds: [
+          for (final track in matchedTracks)
+            if (track != null) track.id,
+        ],
       );
+      if (local == null) downloaded++;
     }
 
     var downloadedLikes = 0;
     for (final track in remote.likedTracks) {
       final localTrack = await _database.findTrackByUri(track.uri);
       if (localTrack == null) continue;
-      await _database.setTrackLiked(localTrack.id, true);
-      downloadedLikes++;
+      final updatedAt = track.updatedAt ?? DateTime.now();
+      final local = likeByUri[track.uri];
+      if (local != null && local.updatedAt.isAfter(updatedAt)) continue;
+      await _database.setTrackLikedFromSync(
+        localTrack.id,
+        true,
+        updatedAt: updatedAt,
+      );
+      if (local == null) downloadedLikes++;
     }
 
-    final localPresetByRemoteId = {
-      for (final p in localPresets) (p.remoteId ?? 'preset-${p.id}'): p,
-    };
     var downloadedPresets = 0;
     for (final remotePreset in remote.equalizerPresets) {
-      final local = localPresetByRemoteId[remotePreset.remoteId];
-      if (local == null) {
-        final localId = _uuid.v4();
-        await _database.saveEqualizerPreset(
-          EqualizerPresetsCompanion.insert(
-            id: localId,
-            remoteId: Value(remotePreset.remoteId),
-            accountId: Value(account.id),
-            name: remotePreset.name,
-            gainsJson: remotePreset.gainsJson,
-            preampDb: Value(remotePreset.preampDb),
-            createdAt: remotePreset.updatedAt,
-            updatedAt: remotePreset.updatedAt,
-          ),
-        );
-        downloadedPresets++;
-      } else if (remotePreset.updatedAt.isAfter(local.updatedAt)) {
-        await _database.saveEqualizerPreset(
-          EqualizerPresetsCompanion.insert(
-            id: local.id,
-            remoteId: Value(remotePreset.remoteId),
-            accountId: Value(account.id),
-            name: remotePreset.name,
-            gainsJson: remotePreset.gainsJson,
-            preampDb: Value(remotePreset.preampDb),
-            createdAt: local.createdAt,
-            updatedAt: remotePreset.updatedAt,
-          ),
-        );
+      final local = presetByRemoteId[remotePreset.remoteId];
+      if (local != null && local.updatedAt.isAfter(remotePreset.updatedAt)) {
+        continue;
       }
+      await _database.saveEqualizerPreset(
+        EqualizerPresetsCompanion.insert(
+          id:
+              local?.id ??
+              _uuid.v5(
+                Namespace.url.value,
+                'equalizer:${remotePreset.remoteId}',
+              ),
+          remoteId: Value(remotePreset.remoteId),
+          accountId: Value(account.id),
+          name: remotePreset.name,
+          gainsJson: remotePreset.gainsJson,
+          preampDb: Value(remotePreset.preampDb),
+          createdAt: local?.createdAt ?? remotePreset.updatedAt,
+          updatedAt: remotePreset.updatedAt,
+        ),
+      );
+      if (local == null) downloadedPresets++;
     }
 
+    final uploadedDeletionByKey = {
+      for (final deletion in deletions)
+        deletionKey(deletion.entityType.wireName, deletion.remoteKey): deletion,
+    };
+    final mergedDeletions = <String, BackendDeletion>{
+      for (final deletion in remote.deletions)
+        deletionKey(deletion.entityType.wireName, deletion.remoteKey): deletion,
+    };
+    final latestLocalTombstones = await _database.syncTombstonesForAccount(
+      account.id,
+    );
+    for (final row in latestLocalTombstones) {
+      final key = deletionKey(row.entityType, row.remoteKey);
+      final uploaded = uploadedDeletionByKey[key];
+      if (uploaded != null && !row.deletedAt.isAfter(uploaded.deletedAt)) {
+        continue;
+      }
+      final pending = BackendDeletion(
+        entityType: SyncEntityType.fromWireName(row.entityType),
+        remoteKey: row.remoteKey,
+        deletedAt: row.deletedAt,
+      );
+      final existing = mergedDeletions[key];
+      if (existing == null || pending.deletedAt.isAfter(existing.deletedAt)) {
+        mergedDeletions[key] = pending;
+      }
+    }
+    await _database.replaceSyncTombstonesForAccount(
+      account.id,
+      mergedDeletions.values.map(
+        (deletion) => SyncTombstonesCompanion.insert(
+          accountId: account.id,
+          entityType: deletion.entityType.wireName,
+          remoteKey: deletion.remoteKey,
+          deletedAt: deletion.deletedAt,
+        ),
+      ),
+    );
     return SyncResult(
-      uploaded: payload.length,
+      uploaded: playlists.length,
       downloaded: downloaded,
       uploadedLikes: likedTracks.length,
       downloadedLikes: downloadedLikes,
-      uploadedPresets: payloadPresets.length,
+      uploadedPresets: presets.length,
       downloadedPresets: downloadedPresets,
     );
   }
@@ -231,6 +316,7 @@ class BackendAuthRepository implements AuthRepository {
     List<BackendPlaylist> playlists,
     List<BackendTrack> likedTracks,
     List<BackendEqualizerPreset> equalizerPresets,
+    List<BackendDeletion> deletions,
   ) async {
     var session = await currentSession();
     if (session == null) throw StateError('请先登录账号。');
@@ -240,6 +326,7 @@ class BackendAuthRepository implements AuthRepository {
         playlists,
         likedTracks,
         equalizerPresets,
+        deletions,
       );
     } on BackendException catch (error) {
       if (!error.isUnauthorized) rethrow;
@@ -250,6 +337,7 @@ class BackendAuthRepository implements AuthRepository {
         playlists,
         likedTracks,
         equalizerPresets,
+        deletions,
       );
     }
   }

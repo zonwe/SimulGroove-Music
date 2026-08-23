@@ -94,6 +94,7 @@ class BackendTrack {
     required this.artist,
     required this.album,
     this.durationMs,
+    this.updatedAt,
   });
 
   final String uri;
@@ -101,14 +102,17 @@ class BackendTrack {
   final String artist;
   final String album;
   final int? durationMs;
+  final DateTime? updatedAt;
 
-  factory BackendTrack.fromLocal(Track track) => BackendTrack(
-    uri: track.uri,
-    title: track.title,
-    artist: track.artist,
-    album: track.album,
-    durationMs: track.durationMs,
-  );
+  factory BackendTrack.fromLocal(Track track, {DateTime? updatedAt}) =>
+      BackendTrack(
+        uri: track.uri,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        durationMs: track.durationMs,
+        updatedAt: updatedAt,
+      );
 
   factory BackendTrack.fromJson(Map<String, dynamic> json) => BackendTrack(
     uri: json['uri'] as String,
@@ -116,6 +120,9 @@ class BackendTrack {
     artist: json['artist'] as String,
     album: json['album'] as String,
     durationMs: json['durationMs'] as int?,
+    updatedAt: json['updatedAt'] is String
+        ? DateTime.parse(json['updatedAt'] as String).toLocal()
+        : null,
   );
 
   Map<String, dynamic> toJson() => {
@@ -124,6 +131,8 @@ class BackendTrack {
     'artist': artist,
     'album': album,
     'durationMs': durationMs,
+    if (updatedAt case final value?)
+      'updatedAt': value.toUtc().toIso8601String(),
   };
 }
 
@@ -169,16 +178,58 @@ class BackendEqualizerPreset {
   };
 }
 
+enum SyncEntityType {
+  playlist('playlist'),
+  likedTrack('likedTrack'),
+  equalizerPreset('equalizerPreset');
+
+  const SyncEntityType(this.wireName);
+
+  final String wireName;
+
+  static SyncEntityType fromWireName(String value) => values.firstWhere(
+    (type) => type.wireName == value,
+    orElse: () => throw FormatException('未知同步删除类型：$value'),
+  );
+}
+
+class BackendDeletion {
+  const BackendDeletion({
+    required this.entityType,
+    required this.remoteKey,
+    required this.deletedAt,
+  });
+
+  final SyncEntityType entityType;
+  final String remoteKey;
+  final DateTime deletedAt;
+
+  factory BackendDeletion.fromJson(Map<String, dynamic> json) =>
+      BackendDeletion(
+        entityType: SyncEntityType.fromWireName(json['entityType'] as String),
+        remoteKey: json['remoteKey'] as String,
+        deletedAt: DateTime.parse(json['deletedAt'] as String).toLocal(),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'entityType': entityType.wireName,
+    'remoteKey': remoteKey,
+    'deletedAt': deletedAt.toUtc().toIso8601String(),
+  };
+}
+
 class BackendLibrary {
   const BackendLibrary({
     required this.playlists,
     required this.likedTracks,
     this.equalizerPresets = const [],
+    this.deletions = const [],
   });
 
   final List<BackendPlaylist> playlists;
   final List<BackendTrack> likedTracks;
   final List<BackendEqualizerPreset> equalizerPresets;
+  final List<BackendDeletion> deletions;
 }
 
 class BackendException implements Exception {
@@ -209,5 +260,6 @@ abstract interface class BackendGateway {
     List<BackendPlaylist> playlists,
     List<BackendTrack> likedTracks, [
     List<BackendEqualizerPreset> equalizerPresets = const [],
+    List<BackendDeletion> deletions = const [],
   ]);
 }

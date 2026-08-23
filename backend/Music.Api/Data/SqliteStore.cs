@@ -80,6 +80,13 @@ public sealed class SqliteStore : IPlaylistStore
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (username, remote_id)
             );
+            CREATE TABLE IF NOT EXISTS sync_tombstones (
+                username TEXT NOT NULL REFERENCES accounts(username) ON DELETE CASCADE,
+                entity_type TEXT NOT NULL,
+                remote_key TEXT NOT NULL,
+                deleted_at TEXT NOT NULL,
+                PRIMARY KEY (username, entity_type, remote_key)
+            );
             """;
         command.ExecuteNonQuery();
     }
@@ -103,22 +110,37 @@ public sealed class SqliteStore : IPlaylistStore
         string username,
         IReadOnlyList<PlaylistRequest> incomingPlaylists,
         IReadOnlyList<TrackRequest> incomingLikedTracks,
-        IReadOnlyList<EqualizerPresetRequest> incomingEqualizerPresets)
+        IReadOnlyList<EqualizerPresetRequest> incomingEqualizerPresets,
+        IReadOnlyList<SyncDeletionRequest>? incomingDeletions = null)
     {
         lock (_gate)
         {
             using var connection = OpenConnection();
             using var transaction = connection.BeginTransaction();
             EnsureAccount(connection, transaction, username);
+            foreach (var deletion in incomingDeletions ?? [])
+            {
+                if (!SyncEntityTypes.IsSupported(deletion.EntityType) ||
+                    string.IsNullOrWhiteSpace(deletion.RemoteKey) || deletion.DeletedAt is null) continue;
+                UpsertTombstone(connection, transaction, username, deletion.EntityType!,
+                    deletion.RemoteKey, deletion.DeletedAt.Value);
+            }
+
             foreach (var playlist in incomingPlaylists)
             {
                 using var playlistCommand = connection.CreateCommand();
+                var remoteId = playlist.RemoteId!;
+                var updatedAt = playlist.UpdatedAt ?? DateTimeOffset.UtcNow;
+                if (!ShouldAcceptChange(connection, transaction, username,
+                        SyncEntityTypes.Playlist, remoteId, updatedAt,
+                        "playlists", "remote_id", "updated_at")) continue;
+
                 playlistCommand.Transaction = transaction;
                 playlistCommand.CommandText = "INSERT INTO playlists(username, remote_id, name, updated_at) VALUES ($username, $remoteId, $name, $updatedAt) ON CONFLICT(username, remote_id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at";
                 playlistCommand.Parameters.AddWithValue("$username", username);
                 playlistCommand.Parameters.AddWithValue("$remoteId", playlist.RemoteId!);
                 playlistCommand.Parameters.AddWithValue("$name", playlist.Name!);
-                playlistCommand.Parameters.AddWithValue("$updatedAt", (playlist.UpdatedAt ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture));
+                playlistCommand.Parameters.AddWithValue("$updatedAt", FormatTimestamp(updatedAt));
                 playlistCommand.ExecuteNonQuery();
 
                 using var deleteTracks = connection.CreateCommand();
@@ -148,6 +170,11 @@ public sealed class SqliteStore : IPlaylistStore
                 if (string.IsNullOrWhiteSpace(track.Uri)) continue;
                 using var likedCommand = connection.CreateCommand();
                 likedCommand.Transaction = transaction;
+                var updatedAt = track.UpdatedAt ?? DateTimeOffset.UtcNow;
+                if (!ShouldAcceptChange(connection, transaction, username,
+                        SyncEntityTypes.LikedTrack, track.Uri, updatedAt,
+                        "liked_tracks", "uri", "added_at")) continue;
+
                 likedCommand.CommandText = """
                     INSERT INTO liked_tracks(username, uri, title, artist, album, duration_ms, added_at)
                     VALUES ($username, $uri, $title, $artist, $album, $durationMs, $addedAt)
@@ -155,7 +182,8 @@ public sealed class SqliteStore : IPlaylistStore
                         title = excluded.title,
                         artist = excluded.artist,
                         album = excluded.album,
-                        duration_ms = excluded.duration_ms;
+                        duration_ms = excluded.duration_ms,
+                        added_at = excluded.added_at;
                     """;
                 likedCommand.Parameters.AddWithValue("$username", username);
                 likedCommand.Parameters.AddWithValue("$uri", track.Uri);
@@ -163,7 +191,7 @@ public sealed class SqliteStore : IPlaylistStore
                 likedCommand.Parameters.AddWithValue("$artist", track.Artist ?? string.Empty);
                 likedCommand.Parameters.AddWithValue("$album", track.Album ?? string.Empty);
                 likedCommand.Parameters.AddWithValue("$durationMs", (object?)track.DurationMs ?? DBNull.Value);
-                likedCommand.Parameters.AddWithValue("$addedAt", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+                likedCommand.Parameters.AddWithValue("$addedAt", FormatTimestamp(updatedAt));
                 likedCommand.ExecuteNonQuery();
             }
             foreach (var preset in incomingEqualizerPresets)
@@ -171,6 +199,11 @@ public sealed class SqliteStore : IPlaylistStore
                 if (string.IsNullOrWhiteSpace(preset.RemoteId) || string.IsNullOrWhiteSpace(preset.Name)) continue;
                 using var presetCommand = connection.CreateCommand();
                 presetCommand.Transaction = transaction;
+                var updatedAt = preset.UpdatedAt ?? DateTimeOffset.UtcNow;
+                if (!ShouldAcceptChange(connection, transaction, username,
+                        SyncEntityTypes.EqualizerPreset, preset.RemoteId!, updatedAt,
+                        "equalizer_presets", "remote_id", "updated_at")) continue;
+
                 presetCommand.CommandText = """
                     INSERT INTO equalizer_presets(username, remote_id, name, gains_json, preamp_db, updated_at)
                     VALUES ($username, $remoteId, $name, $gainsJson, $preampDb, $updatedAt)
@@ -185,9 +218,10 @@ public sealed class SqliteStore : IPlaylistStore
                 presetCommand.Parameters.AddWithValue("$name", preset.Name);
                 presetCommand.Parameters.AddWithValue("$gainsJson", preset.GainsJson ?? "[]");
                 presetCommand.Parameters.AddWithValue("$preampDb", preset.PreampDb ?? 0.0);
-                presetCommand.Parameters.AddWithValue("$updatedAt", (preset.UpdatedAt ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture));
+                presetCommand.Parameters.AddWithValue("$updatedAt", FormatTimestamp(updatedAt));
                 presetCommand.ExecuteNonQuery();
             }
+            ApplyTombstones(connection, transaction, username);
             transaction.Commit();
 
             using var query = connection.CreateCommand();
@@ -201,7 +235,7 @@ public sealed class SqliteStore : IPlaylistStore
                 playlists.Add(new PlaylistResponse(remoteId, reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), ReadTracks(connection, username, remoteId)));
             }
             using var likedQuery = connection.CreateCommand();
-            likedQuery.CommandText = "SELECT uri, title, artist, album, duration_ms FROM liked_tracks WHERE username = $username ORDER BY added_at DESC";
+            likedQuery.CommandText = "SELECT uri, title, artist, album, duration_ms, added_at FROM liked_tracks WHERE username = $username ORDER BY added_at DESC";
             likedQuery.Parameters.AddWithValue("$username", username);
             using var likedReader = likedQuery.ExecuteReader();
             var likedTracks = new List<TrackResponse>();
@@ -212,7 +246,8 @@ public sealed class SqliteStore : IPlaylistStore
                     likedReader.GetString(1),
                     likedReader.GetString(2),
                     likedReader.GetString(3),
-                    likedReader.IsDBNull(4) ? null : likedReader.GetInt32(4)));
+                    likedReader.IsDBNull(4) ? null : likedReader.GetInt32(4),
+                    ParseTimestamp(likedReader.GetString(5))));
             }
             using var presetQuery = connection.CreateCommand();
             presetQuery.CommandText = "SELECT remote_id, name, gains_json, preamp_db, updated_at FROM equalizer_presets WHERE username = $username ORDER BY remote_id";
@@ -228,8 +263,166 @@ public sealed class SqliteStore : IPlaylistStore
                     presetReader.GetDouble(3),
                     DateTimeOffset.Parse(presetReader.GetString(4), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)));
             }
-            return new LibrarySyncResponse(playlists, likedTracks, equalizerPresets);
+            using var deletionQuery = connection.CreateCommand();
+            deletionQuery.CommandText = "SELECT entity_type, remote_key, deleted_at FROM sync_tombstones WHERE username = $username ORDER BY entity_type, remote_key";
+            deletionQuery.Parameters.AddWithValue("$username", username);
+            using var deletionReader = deletionQuery.ExecuteReader();
+            var deletions = new List<SyncDeletionResponse>();
+            while (deletionReader.Read())
+            {
+                deletions.Add(new SyncDeletionResponse(
+                    deletionReader.GetString(0),
+                    deletionReader.GetString(1),
+                    ParseTimestamp(deletionReader.GetString(2))));
+            }
+            return new LibrarySyncResponse(playlists, likedTracks, equalizerPresets, deletions);
         }
+    }
+
+    private static string FormatTimestamp(DateTimeOffset value) =>
+        value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    private static DateTimeOffset ParseTimestamp(string value) =>
+        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+    private static void UpsertTombstone(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string username,
+        string entityType,
+        string remoteKey,
+        DateTimeOffset deletedAt)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO sync_tombstones(username, entity_type, remote_key, deleted_at)
+            VALUES ($username, $entityType, $remoteKey, $deletedAt)
+            ON CONFLICT(username, entity_type, remote_key) DO UPDATE SET
+                deleted_at = excluded.deleted_at
+            WHERE excluded.deleted_at > sync_tombstones.deleted_at;
+            """;
+        command.Parameters.AddWithValue("$username", username);
+        command.Parameters.AddWithValue("$entityType", entityType);
+        command.Parameters.AddWithValue("$remoteKey", remoteKey);
+        command.Parameters.AddWithValue("$deletedAt", FormatTimestamp(deletedAt));
+        command.ExecuteNonQuery();
+    }
+
+    private static bool ShouldAcceptChange(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string username,
+        string entityType,
+        string remoteKey,
+        DateTimeOffset updatedAt,
+        string table,
+        string keyColumn,
+        string updatedColumn)
+    {
+        var deletion = ReadTimestamp(
+            connection,
+            transaction,
+            $"SELECT deleted_at FROM sync_tombstones WHERE username = $username AND entity_type = $entityType AND remote_key = $remoteKey",
+            username,
+            entityType,
+            remoteKey);
+        if (deletion is not null && deletion >= updatedAt) return false;
+
+        var current = ReadTimestamp(
+            connection,
+            transaction,
+            $"SELECT {updatedColumn} FROM {table} WHERE username = $username AND {keyColumn} = $remoteKey",
+            username,
+            entityType: null,
+            remoteKey);
+        if (current is not null && current > updatedAt) return false;
+
+        if (deletion is not null)
+        {
+            using var deleteTombstone = connection.CreateCommand();
+            deleteTombstone.Transaction = transaction;
+            deleteTombstone.CommandText = "DELETE FROM sync_tombstones WHERE username = $username AND entity_type = $entityType AND remote_key = $remoteKey";
+            deleteTombstone.Parameters.AddWithValue("$username", username);
+            deleteTombstone.Parameters.AddWithValue("$entityType", entityType);
+            deleteTombstone.Parameters.AddWithValue("$remoteKey", remoteKey);
+            deleteTombstone.ExecuteNonQuery();
+        }
+        return true;
+    }
+
+    private static DateTimeOffset? ReadTimestamp(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string sql,
+        string username,
+        string? entityType,
+        string remoteKey)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("$username", username);
+        if (entityType is not null) command.Parameters.AddWithValue("$entityType", entityType);
+        command.Parameters.AddWithValue("$remoteKey", remoteKey);
+        var value = command.ExecuteScalar() as string;
+        return value is null ? null : ParseTimestamp(value);
+    }
+
+    private static void ApplyTombstones(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string username)
+    {
+        ApplyTombstonesForEntity(connection, transaction, username,
+            SyncEntityTypes.Playlist, "playlists", "remote_id", "updated_at");
+        ApplyTombstonesForEntity(connection, transaction, username,
+            SyncEntityTypes.LikedTrack, "liked_tracks", "uri", "added_at");
+        ApplyTombstonesForEntity(connection, transaction, username,
+            SyncEntityTypes.EqualizerPreset, "equalizer_presets", "remote_id", "updated_at");
+    }
+
+    private static void ApplyTombstonesForEntity(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string username,
+        string entityType,
+        string table,
+        string keyColumn,
+        string updatedColumn)
+    {
+        using var discardStaleTombstones = connection.CreateCommand();
+        discardStaleTombstones.Transaction = transaction;
+        discardStaleTombstones.CommandText = $"""
+            DELETE FROM sync_tombstones
+            WHERE username = $username AND entity_type = $entityType
+              AND EXISTS (
+                SELECT 1 FROM {table}
+                WHERE {table}.username = sync_tombstones.username
+                  AND {table}.{keyColumn} = sync_tombstones.remote_key
+                  AND {table}.{updatedColumn} > sync_tombstones.deleted_at
+              );
+            """;
+        discardStaleTombstones.Parameters.AddWithValue("$username", username);
+        discardStaleTombstones.Parameters.AddWithValue("$entityType", entityType);
+        discardStaleTombstones.ExecuteNonQuery();
+
+        using var deleteEntities = connection.CreateCommand();
+        deleteEntities.Transaction = transaction;
+        deleteEntities.CommandText = $"""
+            DELETE FROM {table}
+            WHERE username = $username
+              AND EXISTS (
+                SELECT 1 FROM sync_tombstones
+                WHERE sync_tombstones.username = {table}.username
+                  AND sync_tombstones.entity_type = $entityType
+                  AND sync_tombstones.remote_key = {table}.{keyColumn}
+                  AND sync_tombstones.deleted_at >= {table}.{updatedColumn}
+              );
+            """;
+        deleteEntities.Parameters.AddWithValue("$username", username);
+        deleteEntities.Parameters.AddWithValue("$entityType", entityType);
+        deleteEntities.ExecuteNonQuery();
     }
 
     private static IReadOnlyList<TrackResponse> ReadTracks(SqliteConnection connection, string username, string remoteId)

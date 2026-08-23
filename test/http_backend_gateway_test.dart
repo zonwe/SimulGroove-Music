@@ -74,10 +74,12 @@ void main() {
       final body = (jsonDecode(request.body) as Map).cast<String, dynamic>();
       expect(body['playlists'], hasLength(1));
       expect(body['likedTracks'], hasLength(1));
+      expect(body['deletions'], hasLength(1));
       return http.Response(
         jsonEncode({
           'playlists': body['playlists'],
           'likedTracks': body['likedTracks'],
+          'deletions': body['deletions'],
         }),
         200,
       );
@@ -100,6 +102,11 @@ void main() {
       album: 'Album',
     );
 
+    final deletion = BackendDeletion(
+      entityType: SyncEntityType.playlist,
+      remoteKey: 'playlist-deleted',
+      deletedAt: DateTime.utc(2026, 8, 1),
+    );
     final result = await gateway.syncLibrary(
       session,
       [
@@ -111,9 +118,12 @@ void main() {
         ),
       ],
       const [track],
+      const [],
+      [deletion],
     );
 
     expect(result.playlists.single.remoteId, 'playlist-1');
     expect(result.likedTracks.single.uri, track.uri);
+    expect(result.deletions.single.remoteKey, deletion.remoteKey);
   });
 }

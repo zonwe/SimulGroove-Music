@@ -70,6 +70,16 @@ Content-Type: application/json
       ]
     }
   ],
+  "likedTracks": [
+    {
+      "uri": "file:///music/demo.mp3",
+      "title": "Demo Song",
+      "artist": "Demo Artist",
+      "album": "Demo Album",
+      "durationMs": 180000,
+      "updatedAt": "2026-08-22T08:00:00Z"
+    }
+  ],
   "equalizerPresets": [
     {
       "remoteId": "preset-custom-rock",
@@ -77,6 +87,13 @@ Content-Type: application/json
       "gainsJson": "[4.5, 3.5, 2.0, 0.0, -1.5, -1.0, 1.5, 3.0, 4.0, 4.5]",
       "preampDb": -2.0,
       "updatedAt": "2026-08-22T08:00:00Z"
+    }
+  ],
+  "deletions": [
+    {
+      "entityType": "playlist",
+      "remoteKey": "obsolete-playlist",
+      "deletedAt": "2026-08-22T09:00:00Z"
     }
   ]
 }

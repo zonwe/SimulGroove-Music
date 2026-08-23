@@ -42,6 +42,11 @@ void main() {
     expect(find.text('Test Song'), findsOneWidget);
     expect(find.textContaining('source-b 暂时不可用'), findsOneWidget);
     expect(find.byTooltip('播放 Test Song'), findsNothing);
+    final resultsViewport = tester.getRect(find.byType(SingleChildScrollView));
+    final resultCard = tester.getRect(
+      find.ancestor(of: find.text('Test Song'), matching: find.byType(Card)),
+    );
+    expect(resultsViewport.right - resultCard.right, 16);
     await tester.tap(find.text('Test Song'));
     await tester.pumpAndSettle();
     expect(playback.played.single.title, 'Test Song');

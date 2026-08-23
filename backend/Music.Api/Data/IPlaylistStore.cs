@@ -8,6 +8,7 @@ public interface IPlaylistStore
         string username,
         IReadOnlyList<PlaylistRequest> incomingPlaylists,
         IReadOnlyList<TrackRequest> incomingLikedTracks,
-        IReadOnlyList<EqualizerPresetRequest> incomingEqualizerPresets);
+        IReadOnlyList<EqualizerPresetRequest> incomingEqualizerPresets,
+        IReadOnlyList<SyncDeletionRequest>? incomingDeletions = null);
 }
 

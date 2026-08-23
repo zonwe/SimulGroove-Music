@@ -33,6 +33,7 @@ class _FakeGateway implements BackendGateway {
     List<BackendPlaylist> playlists,
     List<BackendTrack> likedTracks, [
     List<BackendEqualizerPreset> equalizerPresets = const [],
+    List<BackendDeletion> deletions = const [],
   ]) async {
     uploadedPresets = List.from(equalizerPresets);
 

@@ -740,7 +740,7 @@ class _ResultsList extends StatelessWidget {
       key: PageStorageKey<String>(
         'online-search-results-${state.query}-${state.page}',
       ),
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsetsDirectional.only(end: 16, bottom: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

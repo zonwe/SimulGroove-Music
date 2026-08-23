@@ -122,6 +122,28 @@ class EqualizerPresets extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+@DataClassName('SyncTombstoneData')
+class SyncTombstones extends Table {
+  TextColumn get accountId => text()();
+  TextColumn get entityType => text()();
+  TextColumn get remoteKey => text()();
+  DateTimeColumn get deletedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {accountId, entityType, remoteKey};
+}
+
+class LikedTrackSyncData {
+  const LikedTrackSyncData(this.track, this.updatedAt);
+
+  final Track track;
+  final DateTime updatedAt;
+}
+
+const syncEntityPlaylist = 'playlist';
+const syncEntityLikedTrack = 'likedTrack';
+const syncEntityEqualizerPreset = 'equalizerPreset';
+
 String _withTrailingSeparator(String value, String separator) =>
     value.endsWith(separator) ? value : '$value$separator';
 
@@ -148,6 +170,7 @@ Expression<bool> _startsWithLiteral(
     PlaybackSnapshots,
     LikedTracks,
     EqualizerPresets,
+    SyncTombstones,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -156,7 +179,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -164,6 +187,7 @@ class AppDatabase extends _$AppDatabase {
     onUpgrade: (Migrator m, int from, int to) async {
       if (from < 2) await m.createTable(likedTracks);
       if (from < 3) await m.createTable(equalizerPresets);
+      if (from < 4) await m.createTable(syncTombstones);
     },
   );
 
@@ -267,6 +291,60 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> clearAccounts() => delete(accounts).go();
 
+  Future<Account?> _currentAccountOnce() {
+    final query = select(accounts)
+      ..orderBy([(row) => OrderingTerm.desc(row.updatedAt)])
+      ..limit(1);
+    return query.getSingleOrNull();
+  }
+
+  Future<void> _recordSyncTombstone({
+    required String accountId,
+    required String entityType,
+    required String remoteKey,
+    DateTime? deletedAt,
+  }) => into(syncTombstones).insertOnConflictUpdate(
+    SyncTombstonesCompanion.insert(
+      accountId: accountId,
+      entityType: entityType,
+      remoteKey: remoteKey,
+      deletedAt: deletedAt ?? DateTime.now(),
+    ),
+  );
+
+  Future<void> _removeSyncTombstone({
+    required String accountId,
+    required String entityType,
+    required String remoteKey,
+  }) =>
+      (delete(syncTombstones)..where(
+            (row) =>
+                row.accountId.equals(accountId) &
+                row.entityType.equals(entityType) &
+                row.remoteKey.equals(remoteKey),
+          ))
+          .go();
+
+  Future<List<SyncTombstoneData>> syncTombstonesForAccount(String accountId) =>
+      (select(
+        syncTombstones,
+      )..where((row) => row.accountId.equals(accountId))).get();
+
+  Future<void> replaceSyncTombstonesForAccount(
+    String accountId,
+    Iterable<SyncTombstonesCompanion> values,
+  ) async {
+    final rows = values.toList(growable: false);
+    await transaction(() async {
+      await (delete(
+        syncTombstones,
+      )..where((row) => row.accountId.equals(accountId))).go();
+      if (rows.isNotEmpty) {
+        await batch((batch) => batch.insertAll(syncTombstones, rows));
+      }
+    });
+  }
+
   Future<String?> readSetting(String key) async {
     final row = await (select(
       appSettings,
@@ -320,8 +398,66 @@ class AppDatabase extends _$AppDatabase {
     ),
   );
 
-  Future<void> deletePlaylist(String id) =>
+  Future<void> deletePlaylist(String id) async {
+    await transaction(() async {
+      final playlist = await (select(
+        playlists,
+      )..where((row) => row.id.equals(id))).getSingleOrNull();
+      if (playlist != null) {
+        final accountId =
+            playlist.accountId ?? (await _currentAccountOnce())?.id;
+        if (accountId != null) {
+          await _recordSyncTombstone(
+            accountId: accountId,
+            entityType: syncEntityPlaylist,
+            remoteKey: playlist.remoteId ?? 'playlist-${playlist.id}',
+          );
+        }
+      }
+      await deletePlaylistFromSync(id);
+    });
+  }
+
+  Future<void> deletePlaylistFromSync(String id) =>
       (delete(playlists)..where((row) => row.id.equals(id))).go();
+
+  Future<void> savePlaylistFromSync({
+    required String id,
+    required String remoteId,
+    required String accountId,
+    required String name,
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    required Iterable<String> trackIds,
+  }) async {
+    final ids = trackIds.toList(growable: false);
+    await transaction(() async {
+      await into(playlists).insertOnConflictUpdate(
+        PlaylistsCompanion.insert(
+          id: id,
+          remoteId: Value(remoteId),
+          accountId: Value(accountId),
+          name: name,
+          syncState: const Value('synced'),
+          createdAt: createdAt,
+          updatedAt: updatedAt,
+        ),
+      );
+      await (delete(
+        playlistEntries,
+      )..where((row) => row.playlistId.equals(id))).go();
+      for (var index = 0; index < ids.length; index++) {
+        await into(playlistEntries).insert(
+          PlaylistEntriesCompanion.insert(
+            playlistId: id,
+            trackId: ids[index],
+            position: index,
+            addedAt: updatedAt,
+          ),
+        );
+      }
+    });
+  }
 
   Stream<List<Track>> watchPlaylistTracks(String playlistId) {
     final query =
@@ -424,20 +560,70 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  Future<List<LikedTrackSyncData>> allLikedTracksForSync() async {
+    final query = select(
+      tracks,
+    ).join([innerJoin(likedTracks, likedTracks.trackId.equalsExp(tracks.id))]);
+    final rows = await query.get();
+    return rows
+        .map(
+          (row) => LikedTrackSyncData(
+            row.readTable(tracks),
+            row.readTable(likedTracks).addedAt,
+          ),
+        )
+        .toList(growable: false);
+  }
+
   Stream<Set<String>> watchLikedTrackIds() => select(
     likedTracks,
   ).watch().map((rows) => rows.map((row) => row.trackId).toSet());
 
   Future<void> setTrackLiked(String trackId, bool liked) async {
+    await transaction(() async {
+      final track = await (select(
+        tracks,
+      )..where((row) => row.id.equals(trackId))).getSingleOrNull();
+      final account = await _currentAccountOnce();
+      if (liked) {
+        if (track != null && account != null) {
+          await _removeSyncTombstone(
+            accountId: account.id,
+            entityType: syncEntityLikedTrack,
+            remoteKey: track.uri,
+          );
+        }
+        await setTrackLikedFromSync(trackId, true, updatedAt: DateTime.now());
+      } else {
+        if (track != null && account != null) {
+          await _recordSyncTombstone(
+            accountId: account.id,
+            entityType: syncEntityLikedTrack,
+            remoteKey: track.uri,
+          );
+        }
+        await setTrackLikedFromSync(trackId, false);
+      }
+    });
+  }
+
+  Future<void> setTrackLikedFromSync(
+    String trackId,
+    bool liked, {
+    DateTime? updatedAt,
+  }) async {
     if (liked) {
       await into(likedTracks).insertOnConflictUpdate(
-        LikedTracksCompanion.insert(trackId: trackId, addedAt: DateTime.now()),
+        LikedTracksCompanion.insert(
+          trackId: trackId,
+          addedAt: updatedAt ?? DateTime.now(),
+        ),
       );
-    } else {
-      await (delete(
-        likedTracks,
-      )..where((row) => row.trackId.equals(trackId))).go();
+      return;
     }
+    await (delete(
+      likedTracks,
+    )..where((row) => row.trackId.equals(trackId))).go();
   }
 
   Stream<List<EqualizerPresetData>> watchEqualizerPresets() => (select(
@@ -451,6 +637,25 @@ class AppDatabase extends _$AppDatabase {
   Future<void> saveEqualizerPreset(EqualizerPresetsCompanion value) =>
       into(equalizerPresets).insertOnConflictUpdate(value);
 
-  Future<void> deleteEqualizerPreset(String id) =>
+  Future<void> deleteEqualizerPreset(String id) async {
+    await transaction(() async {
+      final preset = await (select(
+        equalizerPresets,
+      )..where((row) => row.id.equals(id))).getSingleOrNull();
+      if (preset != null) {
+        final accountId = preset.accountId ?? (await _currentAccountOnce())?.id;
+        if (accountId != null) {
+          await _recordSyncTombstone(
+            accountId: accountId,
+            entityType: syncEntityEqualizerPreset,
+            remoteKey: preset.remoteId ?? 'preset-${preset.id}',
+          );
+        }
+      }
+      await deleteEqualizerPresetFromSync(id);
+    });
+  }
+
+  Future<void> deleteEqualizerPresetFromSync(String id) =>
       (delete(equalizerPresets)..where((row) => row.id.equals(id))).go();
 }

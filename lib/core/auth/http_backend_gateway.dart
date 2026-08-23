@@ -55,6 +55,7 @@ class HttpBackendGateway implements BackendGateway {
     List<BackendPlaylist> playlists,
     List<BackendTrack> likedTracks, [
     List<BackendEqualizerPreset> equalizerPresets = const [],
+    List<BackendDeletion> deletions = const [],
   ]) async {
     final response = await _send(
       'POST',
@@ -70,11 +71,15 @@ class HttpBackendGateway implements BackendGateway {
         'equalizerPresets': equalizerPresets
             .map((preset) => preset.toJson())
             .toList(growable: false),
+        'deletions': deletions
+            .map((deletion) => deletion.toJson())
+            .toList(growable: false),
       },
     );
     _ensureSuccess(response);
     final json = _jsonObject(response);
     final rawPresets = json['equalizerPresets'] as List<dynamic>? ?? [];
+    final rawDeletions = json['deletions'] as List<dynamic>? ?? [];
     return BackendLibrary(
       playlists: (json['playlists'] as List<dynamic>)
           .map(
@@ -92,6 +97,13 @@ class HttpBackendGateway implements BackendGateway {
       equalizerPresets: rawPresets
           .map(
             (value) => BackendEqualizerPreset.fromJson(
+              (value as Map).cast<String, dynamic>(),
+            ),
+          )
+          .toList(growable: false),
+      deletions: rawDeletions
+          .map(
+            (value) => BackendDeletion.fromJson(
               (value as Map).cast<String, dynamic>(),
             ),
           )
