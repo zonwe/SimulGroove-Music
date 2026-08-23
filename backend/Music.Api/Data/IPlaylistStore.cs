@@ -7,5 +7,7 @@ public interface IPlaylistStore
     LibrarySyncResponse SyncLibrary(
         string username,
         IReadOnlyList<PlaylistRequest> incomingPlaylists,
-        IReadOnlyList<TrackRequest> incomingLikedTracks);
+        IReadOnlyList<TrackRequest> incomingLikedTracks,
+        IReadOnlyList<EqualizerPresetRequest> incomingEqualizerPresets);
 }
+

@@ -127,11 +127,58 @@ class BackendTrack {
   };
 }
 
+class BackendEqualizerPreset {
+  const BackendEqualizerPreset({
+    required this.remoteId,
+    required this.name,
+    required this.gainsJson,
+    required this.preampDb,
+    required this.updatedAt,
+  });
+
+  final String remoteId;
+  final String name;
+  final String gainsJson;
+  final double preampDb;
+  final DateTime updatedAt;
+
+  factory BackendEqualizerPreset.fromLocal(EqualizerPresetData preset) =>
+      BackendEqualizerPreset(
+        remoteId: preset.remoteId ?? 'preset-${preset.id}',
+        name: preset.name,
+        gainsJson: preset.gainsJson,
+        preampDb: preset.preampDb,
+        updatedAt: preset.updatedAt,
+      );
+
+  factory BackendEqualizerPreset.fromJson(Map<String, dynamic> json) =>
+      BackendEqualizerPreset(
+        remoteId: json['remoteId'] as String,
+        name: json['name'] as String,
+        gainsJson: json['gainsJson'] as String,
+        preampDb: (json['preampDb'] as num?)?.toDouble() ?? 0.0,
+        updatedAt: DateTime.parse(json['updatedAt'] as String).toLocal(),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'remoteId': remoteId,
+    'name': name,
+    'gainsJson': gainsJson,
+    'preampDb': preampDb,
+    'updatedAt': updatedAt.toUtc().toIso8601String(),
+  };
+}
+
 class BackendLibrary {
-  const BackendLibrary({required this.playlists, required this.likedTracks});
+  const BackendLibrary({
+    required this.playlists,
+    required this.likedTracks,
+    this.equalizerPresets = const [],
+  });
 
   final List<BackendPlaylist> playlists;
   final List<BackendTrack> likedTracks;
+  final List<BackendEqualizerPreset> equalizerPresets;
 }
 
 class BackendException implements Exception {
@@ -160,6 +207,7 @@ abstract interface class BackendGateway {
   Future<BackendLibrary> syncLibrary(
     BackendSession session,
     List<BackendPlaylist> playlists,
-    List<BackendTrack> likedTracks,
-  );
+    List<BackendTrack> likedTracks, [
+    List<BackendEqualizerPreset> equalizerPresets = const [],
+  ]);
 }

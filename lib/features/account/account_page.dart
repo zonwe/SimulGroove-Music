@@ -102,10 +102,6 @@ class _AccountPageState extends ConsumerState<AccountPage> {
           const SizedBox(height: 4),
           Text(username),
           const SizedBox(height: 12),
-          const Chip(
-            avatar: Icon(Icons.cloud_done_outlined, size: 18),
-            label: Text('已连接真实后端'),
-          ),
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: _syncing ? null : _sync,

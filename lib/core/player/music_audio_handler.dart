@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:audio_service/audio_service.dart';
+
+import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart' as ja;
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
 import '../database/app_database.dart';
 import 'artwork_cache.dart';
+import 'equalizer_models.dart';
 import 'local_audio_source.dart';
 
 enum PlaybackMode { listLoop, singleLoop, listShuffle }
@@ -20,7 +23,16 @@ class MusicAudioHandler extends BaseAudioHandler
     _subscriptions.add(_player.currentIndexStream.listen(_updateCurrentItem));
   }
 
-  final ja.AudioPlayer _player = ja.AudioPlayer();
+  static final ja.AndroidEqualizer? _sharedAndroidEqualizer =
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+      ? ja.AndroidEqualizer()
+      : null;
+
+  final ja.AudioPlayer _player = ja.AudioPlayer(
+    audioPipeline: _sharedAndroidEqualizer != null
+        ? ja.AudioPipeline(androidAudioEffects: [_sharedAndroidEqualizer!])
+        : null,
+  );
   final List<StreamSubscription<Object?>> _subscriptions = [];
   final Random _random = Random();
   List<Track> _tracks = const [];
@@ -33,6 +45,16 @@ class MusicAudioHandler extends BaseAudioHandler
   bool _restartingListLoop = false;
   double _volumeBeforeMute = 1;
   bool _muted = false;
+
+  bool _equalizerEnabled = false;
+  List<double> _equalizerGains = List<double>.filled(10, 0.0);
+  double _equalizerPreampDb = 0.0;
+  String _equalizerPresetId = 'flat';
+
+  bool get equalizerEnabled => _equalizerEnabled;
+  List<double> get equalizerGains => List.unmodifiable(_equalizerGains);
+  double get equalizerPreampDb => _equalizerPreampDb;
+  String get equalizerPresetId => _equalizerPresetId;
 
   Stream<Duration> get positionStream => _player.positionStream;
   Stream<Duration?> get durationStream => _player.durationStream;
@@ -390,17 +412,75 @@ class MusicAudioHandler extends BaseAudioHandler
     await _player.setVolume(0);
   }
 
-  Future<void> setEqualizerPreset(String preset) async {
-    // The shared just_audio backend does not expose band-level DSP on every
-    // target. Presets currently apply a safe preamp while keeping the setting
-    // ready for platform-specific band effects later.
-    final gain = switch (preset) {
-      'bass' => 1.0,
-      'vocal' => 0.96,
-      'classical' => 0.98,
-      _ => 1.0,
-    };
-    await _player.setVolume(gain);
+  Future<void> applyEqualizer({
+    required bool enabled,
+    required List<double> gains,
+    double preampDb = 0.0,
+    String? presetId,
+  }) async {
+    _equalizerEnabled = enabled;
+    _equalizerGains = List<double>.from(gains);
+    if (_equalizerGains.length < 10) {
+      _equalizerGains.addAll(
+        List<double>.filled(10 - _equalizerGains.length, 0.0),
+      );
+    }
+    _equalizerPreampDb = preampDb;
+    if (presetId != null) {
+      _equalizerPresetId = presetId;
+    }
+
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux)) {
+      await JustAudioMediaKit.setEqualizerForAll(
+        enabled: enabled,
+        gains: _equalizerGains,
+        preampDb: preampDb,
+      );
+    } else if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        _sharedAndroidEqualizer != null) {
+      try {
+        await _sharedAndroidEqualizer!.setEnabled(enabled);
+        if (enabled) {
+          final params = await _sharedAndroidEqualizer!.parameters;
+          final minDecibels = params.minDecibels;
+          final maxDecibels = params.maxDecibels;
+          final bands = params.bands;
+
+          if (bands.isNotEmpty) {
+            for (var i = 0; i < bands.length; i++) {
+              final normalizedIndex = bands.length == 1
+                  ? 0
+                  : (i / (bands.length - 1) * (_equalizerGains.length - 1))
+                        .round()
+                        .clamp(0, _equalizerGains.length - 1);
+              final targetGain = _equalizerGains[normalizedIndex] + preampDb;
+              final clampedGain = targetGain
+                  .clamp(minDecibels, maxDecibels)
+                  .toDouble();
+              await bands[i].setGain(clampedGain);
+            }
+          }
+        }
+      } catch (_) {
+        // Device audio effect unavailable or permission restricted
+      }
+    }
+  }
+
+  Future<void> setEqualizerPreset(String presetId) async {
+    _equalizerPresetId = presetId;
+    final defaultPreset = findDefaultEqualizerPreset(presetId);
+    if (defaultPreset != null) {
+      await applyEqualizer(
+        enabled: _equalizerEnabled,
+        gains: defaultPreset.gains,
+        preampDb: defaultPreset.preampDb,
+        presetId: presetId,
+      );
+    }
   }
 
   Future<void> disposePlayer() async {

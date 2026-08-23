@@ -15,16 +15,22 @@ public static class PlaylistEndpoints
 				var account = auth.Authenticate(httpRequest.ReadBearerToken());
 				if (account is null) return Results.Unauthorized();
 
-				// string reqStr = System.Text.Json.JsonSerializer.Serialize(request);
-				// Console.WriteLine(reqStr);
+				string reqStr = System.Text.Json.JsonSerializer.Serialize(request);
+				Console.WriteLine(reqStr);
 				var incoming = request.Playlists ?? [];
 				var likedTracks = request.LikedTracks ?? [];
+				var equalizerPresets = request.EqualizerPresets ?? [];
 				if (incoming.Any(playlist => string.IsNullOrWhiteSpace(playlist.RemoteId) || string.IsNullOrWhiteSpace(playlist.Name)))
 				{
 					return Results.BadRequest(new ProblemResponse("invalid_playlist", "Every playlist requires remoteId and name."));
 				}
-				return Results.Ok(playlists.SyncLibrary(account.Username, incoming, likedTracks));
+				if (equalizerPresets.Any(preset => string.IsNullOrWhiteSpace(preset.RemoteId) || string.IsNullOrWhiteSpace(preset.Name)))
+				{
+					return Results.BadRequest(new ProblemResponse("invalid_preset", "Every equalizer preset requires remoteId and name."));
+				}
+				return Results.Ok(playlists.SyncLibrary(account.Username, incoming, likedTracks, equalizerPresets));
 			});
+
 
 		return endpoints;
 	}

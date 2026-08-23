@@ -1,5 +1,6 @@
 /// `package:media_kit` bindings for `just_audio` to support Linux and Windows.
-library just_audio_media_kit;
+library;
+
 
 import 'dart:collection';
 
@@ -83,6 +84,45 @@ class JustAudioMediaKit extends JustAudioPlatform {
   static void registerWith() {
     JustAudioPlatform.instance = JustAudioMediaKit();
   }
+
+  /// Sets equalizer parameters for a specific player by its id
+  static Future<void> setEqualizerForPlayer({
+    required String playerId,
+    required bool enabled,
+    required List<double> gains,
+    double preampDb = 0.0,
+  }) async {
+    final instance = JustAudioPlatform.instance;
+    if (instance is JustAudioMediaKit) {
+      final player = instance._players[playerId];
+      if (player != null) {
+        await player.setEqualizer(
+          enabled: enabled,
+          gains: gains,
+          preampDb: preampDb,
+        );
+      }
+    }
+  }
+
+  /// Sets equalizer parameters for all active players
+  static Future<void> setEqualizerForAll({
+    required bool enabled,
+    required List<double> gains,
+    double preampDb = 0.0,
+  }) async {
+    final instance = JustAudioPlatform.instance;
+    if (instance is JustAudioMediaKit) {
+      for (final player in instance._players.values) {
+        await player.setEqualizer(
+          enabled: enabled,
+          gains: gains,
+          preampDb: preampDb,
+        );
+      }
+    }
+  }
+
 
   @override
   Future<AudioPlayerPlatform> init(InitRequest request) async {

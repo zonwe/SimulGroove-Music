@@ -3564,6 +3564,517 @@ class LikedTracksCompanion extends UpdateCompanion<LikedTrack> {
   }
 }
 
+class $EqualizerPresetsTable extends EqualizerPresets
+    with TableInfo<$EqualizerPresetsTable, EqualizerPresetData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $EqualizerPresetsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _remoteIdMeta = const VerificationMeta(
+    'remoteId',
+  );
+  @override
+  late final GeneratedColumn<String> remoteId = GeneratedColumn<String>(
+    'remote_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _accountIdMeta = const VerificationMeta(
+    'accountId',
+  );
+  @override
+  late final GeneratedColumn<String> accountId = GeneratedColumn<String>(
+    'account_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _gainsJsonMeta = const VerificationMeta(
+    'gainsJson',
+  );
+  @override
+  late final GeneratedColumn<String> gainsJson = GeneratedColumn<String>(
+    'gains_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _preampDbMeta = const VerificationMeta(
+    'preampDb',
+  );
+  @override
+  late final GeneratedColumn<double> preampDb = GeneratedColumn<double>(
+    'preamp_db',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0.0),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    remoteId,
+    accountId,
+    name,
+    gainsJson,
+    preampDb,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'equalizer_presets';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<EqualizerPresetData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('remote_id')) {
+      context.handle(
+        _remoteIdMeta,
+        remoteId.isAcceptableOrUnknown(data['remote_id']!, _remoteIdMeta),
+      );
+    }
+    if (data.containsKey('account_id')) {
+      context.handle(
+        _accountIdMeta,
+        accountId.isAcceptableOrUnknown(data['account_id']!, _accountIdMeta),
+      );
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('gains_json')) {
+      context.handle(
+        _gainsJsonMeta,
+        gainsJson.isAcceptableOrUnknown(data['gains_json']!, _gainsJsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_gainsJsonMeta);
+    }
+    if (data.containsKey('preamp_db')) {
+      context.handle(
+        _preampDbMeta,
+        preampDb.isAcceptableOrUnknown(data['preamp_db']!, _preampDbMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  EqualizerPresetData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return EqualizerPresetData(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      remoteId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}remote_id'],
+      ),
+      accountId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_id'],
+      ),
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      gainsJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}gains_json'],
+      )!,
+      preampDb: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}preamp_db'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $EqualizerPresetsTable createAlias(String alias) {
+    return $EqualizerPresetsTable(attachedDatabase, alias);
+  }
+}
+
+class EqualizerPresetData extends DataClass
+    implements Insertable<EqualizerPresetData> {
+  final String id;
+  final String? remoteId;
+  final String? accountId;
+  final String name;
+  final String gainsJson;
+  final double preampDb;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const EqualizerPresetData({
+    required this.id,
+    this.remoteId,
+    this.accountId,
+    required this.name,
+    required this.gainsJson,
+    required this.preampDb,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    if (!nullToAbsent || remoteId != null) {
+      map['remote_id'] = Variable<String>(remoteId);
+    }
+    if (!nullToAbsent || accountId != null) {
+      map['account_id'] = Variable<String>(accountId);
+    }
+    map['name'] = Variable<String>(name);
+    map['gains_json'] = Variable<String>(gainsJson);
+    map['preamp_db'] = Variable<double>(preampDb);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  EqualizerPresetsCompanion toCompanion(bool nullToAbsent) {
+    return EqualizerPresetsCompanion(
+      id: Value(id),
+      remoteId: remoteId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(remoteId),
+      accountId: accountId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(accountId),
+      name: Value(name),
+      gainsJson: Value(gainsJson),
+      preampDb: Value(preampDb),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory EqualizerPresetData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return EqualizerPresetData(
+      id: serializer.fromJson<String>(json['id']),
+      remoteId: serializer.fromJson<String?>(json['remoteId']),
+      accountId: serializer.fromJson<String?>(json['accountId']),
+      name: serializer.fromJson<String>(json['name']),
+      gainsJson: serializer.fromJson<String>(json['gainsJson']),
+      preampDb: serializer.fromJson<double>(json['preampDb']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'remoteId': serializer.toJson<String?>(remoteId),
+      'accountId': serializer.toJson<String?>(accountId),
+      'name': serializer.toJson<String>(name),
+      'gainsJson': serializer.toJson<String>(gainsJson),
+      'preampDb': serializer.toJson<double>(preampDb),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  EqualizerPresetData copyWith({
+    String? id,
+    Value<String?> remoteId = const Value.absent(),
+    Value<String?> accountId = const Value.absent(),
+    String? name,
+    String? gainsJson,
+    double? preampDb,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => EqualizerPresetData(
+    id: id ?? this.id,
+    remoteId: remoteId.present ? remoteId.value : this.remoteId,
+    accountId: accountId.present ? accountId.value : this.accountId,
+    name: name ?? this.name,
+    gainsJson: gainsJson ?? this.gainsJson,
+    preampDb: preampDb ?? this.preampDb,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  EqualizerPresetData copyWithCompanion(EqualizerPresetsCompanion data) {
+    return EqualizerPresetData(
+      id: data.id.present ? data.id.value : this.id,
+      remoteId: data.remoteId.present ? data.remoteId.value : this.remoteId,
+      accountId: data.accountId.present ? data.accountId.value : this.accountId,
+      name: data.name.present ? data.name.value : this.name,
+      gainsJson: data.gainsJson.present ? data.gainsJson.value : this.gainsJson,
+      preampDb: data.preampDb.present ? data.preampDb.value : this.preampDb,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EqualizerPresetData(')
+          ..write('id: $id, ')
+          ..write('remoteId: $remoteId, ')
+          ..write('accountId: $accountId, ')
+          ..write('name: $name, ')
+          ..write('gainsJson: $gainsJson, ')
+          ..write('preampDb: $preampDb, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    remoteId,
+    accountId,
+    name,
+    gainsJson,
+    preampDb,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is EqualizerPresetData &&
+          other.id == this.id &&
+          other.remoteId == this.remoteId &&
+          other.accountId == this.accountId &&
+          other.name == this.name &&
+          other.gainsJson == this.gainsJson &&
+          other.preampDb == this.preampDb &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class EqualizerPresetsCompanion extends UpdateCompanion<EqualizerPresetData> {
+  final Value<String> id;
+  final Value<String?> remoteId;
+  final Value<String?> accountId;
+  final Value<String> name;
+  final Value<String> gainsJson;
+  final Value<double> preampDb;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const EqualizerPresetsCompanion({
+    this.id = const Value.absent(),
+    this.remoteId = const Value.absent(),
+    this.accountId = const Value.absent(),
+    this.name = const Value.absent(),
+    this.gainsJson = const Value.absent(),
+    this.preampDb = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  EqualizerPresetsCompanion.insert({
+    required String id,
+    this.remoteId = const Value.absent(),
+    this.accountId = const Value.absent(),
+    required String name,
+    required String gainsJson,
+    this.preampDb = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name),
+       gainsJson = Value(gainsJson),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<EqualizerPresetData> custom({
+    Expression<String>? id,
+    Expression<String>? remoteId,
+    Expression<String>? accountId,
+    Expression<String>? name,
+    Expression<String>? gainsJson,
+    Expression<double>? preampDb,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (remoteId != null) 'remote_id': remoteId,
+      if (accountId != null) 'account_id': accountId,
+      if (name != null) 'name': name,
+      if (gainsJson != null) 'gains_json': gainsJson,
+      if (preampDb != null) 'preamp_db': preampDb,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  EqualizerPresetsCompanion copyWith({
+    Value<String>? id,
+    Value<String?>? remoteId,
+    Value<String?>? accountId,
+    Value<String>? name,
+    Value<String>? gainsJson,
+    Value<double>? preampDb,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return EqualizerPresetsCompanion(
+      id: id ?? this.id,
+      remoteId: remoteId ?? this.remoteId,
+      accountId: accountId ?? this.accountId,
+      name: name ?? this.name,
+      gainsJson: gainsJson ?? this.gainsJson,
+      preampDb: preampDb ?? this.preampDb,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (remoteId.present) {
+      map['remote_id'] = Variable<String>(remoteId.value);
+    }
+    if (accountId.present) {
+      map['account_id'] = Variable<String>(accountId.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (gainsJson.present) {
+      map['gains_json'] = Variable<String>(gainsJson.value);
+    }
+    if (preampDb.present) {
+      map['preamp_db'] = Variable<double>(preampDb.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EqualizerPresetsCompanion(')
+          ..write('id: $id, ')
+          ..write('remoteId: $remoteId, ')
+          ..write('accountId: $accountId, ')
+          ..write('name: $name, ')
+          ..write('gainsJson: $gainsJson, ')
+          ..write('preampDb: $preampDb, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3578,6 +4089,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $PlaybackSnapshotsTable playbackSnapshots =
       $PlaybackSnapshotsTable(this);
   late final $LikedTracksTable likedTracks = $LikedTracksTable(this);
+  late final $EqualizerPresetsTable equalizerPresets = $EqualizerPresetsTable(
+    this,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3591,6 +4105,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     appSettings,
     playbackSnapshots,
     likedTracks,
+    equalizerPresets,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -6119,6 +6634,273 @@ typedef $$LikedTracksTableProcessedTableManager =
       LikedTrack,
       PrefetchHooks Function({bool trackId})
     >;
+typedef $$EqualizerPresetsTableCreateCompanionBuilder =
+    EqualizerPresetsCompanion Function({
+      required String id,
+      Value<String?> remoteId,
+      Value<String?> accountId,
+      required String name,
+      required String gainsJson,
+      Value<double> preampDb,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$EqualizerPresetsTableUpdateCompanionBuilder =
+    EqualizerPresetsCompanion Function({
+      Value<String> id,
+      Value<String?> remoteId,
+      Value<String?> accountId,
+      Value<String> name,
+      Value<String> gainsJson,
+      Value<double> preampDb,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$EqualizerPresetsTableFilterComposer
+    extends Composer<_$AppDatabase, $EqualizerPresetsTable> {
+  $$EqualizerPresetsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get remoteId => $composableBuilder(
+    column: $table.remoteId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get accountId => $composableBuilder(
+    column: $table.accountId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get gainsJson => $composableBuilder(
+    column: $table.gainsJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get preampDb => $composableBuilder(
+    column: $table.preampDb,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$EqualizerPresetsTableOrderingComposer
+    extends Composer<_$AppDatabase, $EqualizerPresetsTable> {
+  $$EqualizerPresetsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get remoteId => $composableBuilder(
+    column: $table.remoteId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get accountId => $composableBuilder(
+    column: $table.accountId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get gainsJson => $composableBuilder(
+    column: $table.gainsJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get preampDb => $composableBuilder(
+    column: $table.preampDb,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$EqualizerPresetsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $EqualizerPresetsTable> {
+  $$EqualizerPresetsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get remoteId =>
+      $composableBuilder(column: $table.remoteId, builder: (column) => column);
+
+  GeneratedColumn<String> get accountId =>
+      $composableBuilder(column: $table.accountId, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get gainsJson =>
+      $composableBuilder(column: $table.gainsJson, builder: (column) => column);
+
+  GeneratedColumn<double> get preampDb =>
+      $composableBuilder(column: $table.preampDb, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$EqualizerPresetsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $EqualizerPresetsTable,
+          EqualizerPresetData,
+          $$EqualizerPresetsTableFilterComposer,
+          $$EqualizerPresetsTableOrderingComposer,
+          $$EqualizerPresetsTableAnnotationComposer,
+          $$EqualizerPresetsTableCreateCompanionBuilder,
+          $$EqualizerPresetsTableUpdateCompanionBuilder,
+          (
+            EqualizerPresetData,
+            BaseReferences<
+              _$AppDatabase,
+              $EqualizerPresetsTable,
+              EqualizerPresetData
+            >,
+          ),
+          EqualizerPresetData,
+          PrefetchHooks Function()
+        > {
+  $$EqualizerPresetsTableTableManager(
+    _$AppDatabase db,
+    $EqualizerPresetsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$EqualizerPresetsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$EqualizerPresetsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$EqualizerPresetsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String?> remoteId = const Value.absent(),
+                Value<String?> accountId = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> gainsJson = const Value.absent(),
+                Value<double> preampDb = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EqualizerPresetsCompanion(
+                id: id,
+                remoteId: remoteId,
+                accountId: accountId,
+                name: name,
+                gainsJson: gainsJson,
+                preampDb: preampDb,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                Value<String?> remoteId = const Value.absent(),
+                Value<String?> accountId = const Value.absent(),
+                required String name,
+                required String gainsJson,
+                Value<double> preampDb = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => EqualizerPresetsCompanion.insert(
+                id: id,
+                remoteId: remoteId,
+                accountId: accountId,
+                name: name,
+                gainsJson: gainsJson,
+                preampDb: preampDb,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$EqualizerPresetsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $EqualizerPresetsTable,
+      EqualizerPresetData,
+      $$EqualizerPresetsTableFilterComposer,
+      $$EqualizerPresetsTableOrderingComposer,
+      $$EqualizerPresetsTableAnnotationComposer,
+      $$EqualizerPresetsTableCreateCompanionBuilder,
+      $$EqualizerPresetsTableUpdateCompanionBuilder,
+      (
+        EqualizerPresetData,
+        BaseReferences<
+          _$AppDatabase,
+          $EqualizerPresetsTable,
+          EqualizerPresetData
+        >,
+      ),
+      EqualizerPresetData,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -6139,4 +6921,6 @@ class $AppDatabaseManager {
       $$PlaybackSnapshotsTableTableManager(_db, _db.playbackSnapshots);
   $$LikedTracksTableTableManager get likedTracks =>
       $$LikedTracksTableTableManager(_db, _db.likedTracks);
+  $$EqualizerPresetsTableTableManager get equalizerPresets =>
+      $$EqualizerPresetsTableTableManager(_db, _db.equalizerPresets);
 }
