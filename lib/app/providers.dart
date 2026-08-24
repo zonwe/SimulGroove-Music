@@ -9,6 +9,8 @@ import '../core/auth/http_backend_gateway.dart';
 import '../core/database/app_database.dart';
 import '../core/library/library_scanner.dart';
 import '../core/library/scanner_factory.dart';
+import '../core/notifications/scan_notification_service.dart';
+import '../core/notifications/scan_notification_service_factory.dart';
 import '../core/online_music/http_online_music_gateway.dart';
 import '../core/online_music/online_download_platform.dart';
 import '../core/online_music/online_download_platform_factory.dart';
@@ -34,6 +36,9 @@ final audioHandlerProvider = Provider<MusicAudioHandler>(
 );
 final scannerProvider = Provider<LibraryScanner>(
   (ref) => createLibraryScanner(),
+);
+final scanNotificationServiceProvider = Provider<ScanNotificationService>(
+  (ref) => createScanNotificationService(),
 );
 final backendGatewayProvider = Provider<BackendGateway>(
   (ref) => HttpBackendGateway(),
@@ -149,6 +154,16 @@ final trayMinimizeOnCloseProvider = StreamProvider<bool>(
       .watch(databaseProvider)
       .watchSettings()
       .map((settings) => settings[trayMinimizeOnCloseSettingKey] != 'false'),
+);
+const scanNotificationEnabledSettingKey = 'library.scan_notification_enabled';
+
+final scanNotificationEnabledProvider = StreamProvider<bool>(
+  (ref) => ref
+      .watch(databaseProvider)
+      .watchSettings()
+      .map(
+        (settings) => settings[scanNotificationEnabledSettingKey] != 'false',
+      ),
 );
 
 final customEqualizerPresetsProvider = StreamProvider<List<EqualizerPreset>>((

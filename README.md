@@ -66,7 +66,7 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 flutter run -d windows --dart-define=MUSIC_API_URL=http://localhost:5080
 ```
 
-Linux 需要 Flutter Linux 桌面工具链、GTK 3 开发包和系统 `mpv` 运行库；在 Linux 主机上运行：
+Linux 需要 Flutter Linux 桌面工具链、GTK 3 开发包、系统 `mpv` 运行库和 `libnotify` 开发包；Ubuntu/Debian 可安装 `libmpv-dev mpv libnotify-dev`。在 Linux 主机上运行：
 
 ```bash
 flutter run -d linux --dart-define=MUSIC_API_URL=http://localhost:5080

@@ -18,7 +18,7 @@ LibraryScanner createLibraryScanner() => IoLibraryScanner();
 class IoLibraryScanner implements LibraryScanner {
   final Uuid _uuid = const Uuid();
   static const MethodChannel _mediaStore = MethodChannel(
-    'top.comwe.simul_groove_player/media_store',
+    'top.zonwe.simul_groove_player/media_store',
   );
 
   @override
@@ -75,7 +75,6 @@ class IoLibraryScanner implements LibraryScanner {
   }
 
   Future<ScanResult?> _scanAndroidDirectoryUri(String uri, String label) async {
-    await Permission.notification.request();
     final rawSongs =
         await _mediaStore.invokeListMethod<Object?>('scanAudioTree', {
           'uri': uri,
@@ -100,8 +99,6 @@ class IoLibraryScanner implements LibraryScanner {
     if (!permission.isGranted) {
       throw const FileSystemException('未获得读取本地音乐的权限');
     }
-    await Permission.notification.request();
-
     final rawSongs =
         await _mediaStore.invokeListMethod<Object?>('scanAudio') ?? const [];
     return ScanResult(

@@ -27,6 +27,8 @@ class _LibraryScanSettingsSectionState
     final scanner = ref.watch(scannerProvider);
     if (!scanner.isSupported) return const SizedBox.shrink();
     final sources = ref.watch(scanSourcesProvider);
+    final notificationEnabled =
+        ref.watch(scanNotificationEnabledProvider).value ?? true;
     final colors = Theme.of(context).colorScheme;
     return Card(
       margin: EdgeInsets.zero,
@@ -44,7 +46,7 @@ class _LibraryScanSettingsSectionState
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -81,6 +83,22 @@ class _LibraryScanSettingsSectionState
                 ),
               ],
             ),
+          ),
+          const Divider(height: 1),
+          SwitchListTile(
+            dense: true,
+            value: notificationEnabled,
+            title: const Text('扫描通知'),
+            subtitle: const Text('音乐库扫描进行与完成时发送系统通知'),
+            secondary: const Icon(Icons.notifications_none_outlined),
+            onChanged: (value) async {
+              await ref
+                  .read(databaseProvider)
+                  .setSetting(
+                    scanNotificationEnabledSettingKey,
+                    value.toString(),
+                  );
+            },
           ),
           const Divider(height: 1),
           sources.when(
@@ -137,6 +155,18 @@ class _LibraryScanSettingsSectionState
       return;
     }
     setState(() => _rescanAllBusy = true);
+    final notificationService = ref.read(scanNotificationServiceProvider);
+    final notifyEnabled =
+        await ref
+            .read(databaseProvider)
+            .readSetting(scanNotificationEnabledSettingKey) !=
+        'false';
+    if (notifyEnabled) {
+      await notificationService.notifyScanStarted(
+        sourceLabel: '全部 ${sources.length} 个搜索位置',
+        isRescan: true,
+      );
+    }
     var imported = 0;
     try {
       final scanner = ref.read(scannerProvider);
@@ -163,10 +193,27 @@ class _LibraryScanSettingsSectionState
           ),
         );
       }
+      if (notifyEnabled) {
+        unawaited(
+          notificationService.notifyScanCompleted(
+            sourceLabel: '全部 ${sources.length} 个位置',
+            trackCount: imported,
+            isRescan: true,
+          ),
+        );
+      }
       if (mounted) {
         _showMessage('已重新扫描 ${sources.length} 个位置，更新 $imported 首歌曲');
       }
     } catch (error) {
+      if (notifyEnabled) {
+        unawaited(
+          notificationService.notifyScanFailed(
+            sourceLabel: '全部 ${sources.length} 个位置',
+            errorMessage: error.toString(),
+          ),
+        );
+      }
       if (mounted) _showMessage('重新扫描失败：$error');
     } finally {
       if (mounted) setState(() => _rescanAllBusy = false);
@@ -198,12 +245,27 @@ class _LibraryScanSettingsSectionState
 
   Future<void> _scan({bool fullDevice = false}) async {
     setState(() => _scanning = true);
+    final notificationService = ref.read(scanNotificationServiceProvider);
+    final notifyEnabled =
+        await ref
+            .read(databaseProvider)
+            .readSetting(scanNotificationEnabledSettingKey) !=
+        'false';
+    final initialLabel = fullDevice ? '整台设备' : '音乐文件夹';
+    if (notifyEnabled) {
+      await notificationService.notifyScanStarted(sourceLabel: initialLabel);
+    }
     try {
       final scanner = ref.read(scannerProvider);
       final result = fullDevice
           ? await scanner.scanFullDevice()
           : await scanner.scan();
-      if (result == null) return;
+      if (result == null) {
+        if (notifyEnabled) {
+          unawaited(notificationService.cancelScanNotification());
+        }
+        return;
+      }
       final database = ref.read(databaseProvider);
       await database.upsertTracks(result.tracks.map(_toCompanion));
       await database.saveScanSource(
@@ -215,8 +277,24 @@ class _LibraryScanSettingsSectionState
           lastScannedAt: Value(DateTime.now()),
         ),
       );
+      if (notifyEnabled) {
+        unawaited(
+          notificationService.notifyScanCompleted(
+            sourceLabel: result.sourceLabel,
+            trackCount: result.tracks.length,
+          ),
+        );
+      }
       if (mounted) _showMessage('已导入 ${result.tracks.length} 首歌曲');
     } catch (error) {
+      if (notifyEnabled) {
+        unawaited(
+          notificationService.notifyScanFailed(
+            sourceLabel: initialLabel,
+            errorMessage: error.toString(),
+          ),
+        );
+      }
       if (mounted) _showMessage('扫描失败：$error');
     } finally {
       if (mounted) setState(() => _scanning = false);

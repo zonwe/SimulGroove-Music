@@ -8,6 +8,7 @@ import 'package:flutter_music/core/online_music/online_music_repository.dart';
 import 'package:flutter_music/core/online_music/online_track.dart';
 import 'package:flutter_music/core/online_music/online_track_downloader.dart';
 import 'package:flutter_music/core/online_music/online_track_playback.dart';
+import 'package:flutter_music/core/player/music_audio_handler.dart';
 import 'package:flutter_music/features/online_search/online_collection_page.dart';
 import 'package:flutter_music/features/online_search/online_search_page.dart';
 import 'package:flutter_music/features/shell/windows_title_bar.dart';
@@ -129,9 +130,11 @@ void main() {
   });
 
   testWidgets('独立在线集合页提供不透明背景和 Windows 拖动标题栏', (tester) async {
+    final audioHandler = MusicAudioHandler();
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          audioHandlerProvider.overrideWithValue(audioHandler),
           onlineMusicRepositoryProvider.overrideWithValue(
             const _CollectionRepository(),
           ),

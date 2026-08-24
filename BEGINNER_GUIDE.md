@@ -74,7 +74,7 @@ git status --short
 | --- | --- | --- |
 | Web | Chrome/Edge | 最快看到 UI，但不能学习真实本地扫描和播放 |
 | Windows | Visual Studio 的 Desktop development with C++、Windows SDK | 最适合完整观察目录扫描、播放器、窗口和托盘 |
-| Linux | Flutter Linux 工具链、GTK 3 开发包、CMake/Ninja、系统 `mpv` 运行库 | 适合观察目录扫描、MPRIS、快捷键和桌面窗口 |
+| Linux | Flutter Linux 工具链、GTK 3 开发包、CMake/Ninja、系统 `mpv` 运行库、`libnotify` 开发包 | 适合观察目录扫描、MPRIS、快捷键和桌面窗口 |
 | Android | Android SDK、模拟器或开启调试的真机 | 最适合学习权限、MediaStore 和后台音频 |
 | 后端 | .NET 10 SDK | 在理解 Flutter 本地主链路后再学习 |
 
@@ -134,7 +134,7 @@ flutter run -d windows
 flutter run -d linux
 ```
 
-Linux 重点体验系统目录选择器、递归扫描、本地播放、MPRIS 媒体键、桌面快捷键、宽屏队列和紧凑窗口。Ubuntu/Debian 还需要安装 `libmpv-dev` 与 `mpv`；Wayland 和 X11 下的全局快捷键能力可能不同，应分别记录实际验证环境。
+Linux 重点体验系统目录选择器、递归扫描、本地播放、MPRIS 媒体键、桌面快捷键、宽屏队列和紧凑窗口。Ubuntu/Debian 还需要安装 `libmpv-dev`、`mpv` 与 `libnotify-dev`；Wayland 和 X11 下的全局快捷键能力可能不同，应分别记录实际验证环境。
 
 ### 4.4 Android：体验权限与后台播放
 

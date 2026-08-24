@@ -20,6 +20,14 @@ class MusicAudioHandler extends BaseAudioHandler
     _subscriptions.add(
       _player.playbackEventStream.listen(_handlePlaybackEvent),
     );
+    _subscriptions.add(
+      _player.playingStream.listen((_) {
+        // just_audio publishes `playing` independently from PlaybackEvent.
+        // Keep audio_service in sync so Android can activate its MediaSession
+        // and promote the playback service to the foreground immediately.
+        _broadcastState(_player.playbackEvent);
+      }),
+    );
     _subscriptions.add(_player.currentIndexStream.listen(_updateCurrentItem));
   }
 
@@ -87,6 +95,7 @@ class MusicAudioHandler extends BaseAudioHandler
     _shuffleEnabled = false;
     queue.add(items);
     _updateCurrentItem(initialIndex);
+    _broadcastState(_player.playbackEvent);
     await play();
   }
 
@@ -138,6 +147,7 @@ class MusicAudioHandler extends BaseAudioHandler
     _shuffleEnabled = false;
     queue.add([item]);
     _updateCurrentItem(0);
+    _broadcastState(_player.playbackEvent);
     await play();
   }
 
@@ -195,7 +205,7 @@ class MusicAudioHandler extends BaseAudioHandler
         updatePosition: _player.position,
         bufferedPosition: _player.bufferedPosition,
         speed: _player.speed,
-        queueIndex: event.currentIndex,
+        queueIndex: event.currentIndex ?? _player.currentIndex,
         repeatMode: switch (_player.loopMode) {
           ja.LoopMode.off => AudioServiceRepeatMode.none,
           ja.LoopMode.one => AudioServiceRepeatMode.one,
@@ -236,14 +246,25 @@ class MusicAudioHandler extends BaseAudioHandler
   }
 
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() {
+    final playFuture = _player.play();
+    // _player.play() flips `playing` synchronously. Broadcast here as a
+    // defensive fallback in addition to playingStream so audio_service never
+    // misses the false -> true transition that starts Android foreground mode.
+    _broadcastState(_player.playbackEvent);
+    return playFuture;
+  }
 
   @override
-  Future<void> pause() => _player.pause();
+  Future<void> pause() async {
+    await _player.pause();
+    _broadcastState(_player.playbackEvent);
+  }
 
   @override
   Future<void> stop() async {
     await _player.stop();
+    _broadcastState(_player.playbackEvent);
     await super.stop();
   }
 

@@ -1,20 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_music/app/providers.dart';
 import 'package:flutter_music/core/database/app_database.dart';
+import 'package:flutter_music/core/player/music_audio_handler.dart';
 import 'package:flutter_music/features/library/collection_page.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  late final MusicAudioHandler audioHandler;
+
+  setUpAll(() {
+    audioHandler = MusicAudioHandler();
+  });
+
   testWidgets('lets the user choose each listed artist', (tester) async {
     final track = _track('鸣潮先锋电台/Casey Lee Williams');
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: TextButton(
-              onPressed: () =>
-                  openArtistCollectionPage(context, [track], track.artist),
-              child: const Text('查看歌手'),
+      ProviderScope(
+        overrides: [audioHandlerProvider.overrideWithValue(audioHandler)],
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () =>
+                    openArtistCollectionPage(context, [track], track.artist),
+                child: const Text('查看歌手'),
+              ),
             ),
           ),
         ),
@@ -40,13 +52,16 @@ void main() {
     final track = _track('Casey Lee Williams');
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: TextButton(
-              onPressed: () =>
-                  openArtistCollectionPage(context, [track], track.artist),
-              child: const Text('查看歌手'),
+      ProviderScope(
+        overrides: [audioHandlerProvider.overrideWithValue(audioHandler)],
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () =>
+                    openArtistCollectionPage(context, [track], track.artist),
+                child: const Text('查看歌手'),
+              ),
             ),
           ),
         ),

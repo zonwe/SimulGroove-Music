@@ -34,7 +34,11 @@ void main() {
     expect(find.text('尚未设置；下载在线歌曲前需要先选择目录'), findsOneWidget);
     expect(find.text('显示搜索结果封面'), findsOneWidget);
     expect(
-      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      tester
+          .widget<SwitchListTile>(
+            find.widgetWithText(SwitchListTile, '显示搜索结果封面'),
+          )
+          .value,
       isTrue,
     );
     await tester.tap(find.text('显示搜索结果封面'));
