@@ -12,6 +12,7 @@ import '../../core/library/artist_names.dart';
 import '../../core/online_music/online_music_error.dart';
 import '../../core/online_music/online_track.dart';
 import '../../core/online_music/online_track_persistence.dart';
+import '../player/mini_player_bar.dart';
 import '../playlists/playlists_page.dart';
 import '../shell/windows_title_bar.dart';
 import 'online_artwork_view.dart';
@@ -434,6 +435,7 @@ class _OnlineCollectionPageState extends ConsumerState<OnlineCollectionPage> {
           Expanded(child: content),
         ],
       ),
+      bottomNavigationBar: const MiniPlayerBar(),
     );
   }
 }

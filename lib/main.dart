@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/music_app.dart';
 import 'app/providers.dart';
 import 'core/database/app_database.dart';
+import 'core/notifications/scan_notification_service_factory.dart';
 import 'core/player/audio_backend.dart';
 import 'core/player/equalizer_models.dart';
 import 'core/player/music_audio_handler.dart';
@@ -31,9 +32,11 @@ Future<void> main() async {
   } else {
     audioHandler = await AudioService.init<MusicAudioHandler>(
       builder: MusicAudioHandler.new,
-      config: const AudioServiceConfig(
-        androidNotificationChannelId: 'top.comwe.simul_groove_player.playback',
+      config: AudioServiceConfig(
+        androidNotificationChannelId: 'top.zonwe.simul_groove_player.playback',
         androidNotificationChannelName: '音乐播放',
+        androidNotificationChannelDescription: 'SimulGroove 音乐播放与媒体控制',
+        androidNotificationIcon: 'drawable/ic_stat_music',
         androidStopForegroundOnPause: false,
       ),
     );
@@ -53,6 +56,8 @@ Future<void> main() async {
     database: database,
     handler: audioHandler,
   );
+  final scanNotificationService = createScanNotificationService();
+  await scanNotificationService.initialize();
   unawaited(_restoreEqualizerSettings(database, audioHandler));
 
   runApp(
@@ -60,13 +65,16 @@ Future<void> main() async {
       overrides: [
         databaseProvider.overrideWithValue(database),
         audioHandlerProvider.overrideWithValue(audioHandler),
+        scanNotificationServiceProvider.overrideWithValue(
+          scanNotificationService,
+        ),
       ],
       child: const MusicApp(),
     ),
   );
 
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    unawaited(_configureAndroidAudioSession());
+    unawaited(_configureAndroidAudioSession(audioHandler));
     unawaited(cleanupObsoleteDebugArtifacts());
   }
 }
@@ -101,8 +109,12 @@ Future<void> _restoreEqualizerSettings(
   } catch (_) {}
 }
 
-Future<void> _configureAndroidAudioSession() async {
+Future<void> _configureAndroidAudioSession(
+  MusicAudioHandler audioHandler,
+) async {
   final session = await AudioSession.instance;
   await session.configure(const AudioSessionConfiguration.music());
+  session.becomingNoisyEventStream.listen((_) {
+    audioHandler.pause();
+  });
 }
-

@@ -1,6 +1,10 @@
-package top.comwe.simul_groove_player
+package top.zonwe.simul_groove_player
 
 import android.app.Activity
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
 import android.content.ContentUris
 import android.content.Intent
 import android.graphics.Bitmap
@@ -11,6 +15,7 @@ import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Size
+import androidx.core.app.NotificationCompat
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -22,7 +27,7 @@ import java.util.concurrent.Executors
 import kotlin.math.min
 
 class MainActivity : AudioServiceActivity() {
-    private val channelName = "top.comwe.simul_groove_player/media_store"
+    private val channelName = "top.zonwe.simul_groove_player/media_store"
     private val pickDirectoryRequest = 4812
     private val pickDownloadDirectoryRequest = 4813
     private val scanExecutor = Executors.newSingleThreadExecutor()
@@ -60,9 +65,98 @@ class MainActivity : AudioServiceActivity() {
                         }
                     }
                     "scanAudio" -> runScan(result) { scanMediaStore() }
+                    "showScanNotification" -> {
+                        val title = call.argument<String>("title") ?: "音乐库扫描"
+                        val message = call.argument<String>("message") ?: ""
+                        val isOngoing = call.argument<Boolean>("isOngoing") ?: false
+                        val indeterminate = call.argument<Boolean>("indeterminate") ?: false
+                        val notificationId = call.argument<Int>("notificationId") ?: 1001
+                        showScanNotification(
+                            title = title,
+                            message = message,
+                            isOngoing = isOngoing,
+                            indeterminate = indeterminate,
+                            notificationId = notificationId
+                        )
+                        result.success(null)
+                    }
+                    "cancelScanNotification" -> {
+                        val notificationId = call.argument<Int>("notificationId") ?: 1001
+                        cancelScanNotification(notificationId)
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private val scanNotificationChannelId = "top.zonwe.simul_groove_player.library_scan"
+
+    private fun ensureScanNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            val existing = notificationManager.getNotificationChannel(scanNotificationChannelId)
+            if (existing == null) {
+                val channel = NotificationChannel(
+                    scanNotificationChannelId,
+                    "音乐库扫描",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "音乐库扫描进度与完成通知"
+                    setShowBadge(false)
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+        }
+    }
+
+    private fun showScanNotification(
+        title: String,
+        message: String,
+        isOngoing: Boolean,
+        indeterminate: Boolean,
+        notificationId: Int
+    ) {
+        ensureScanNotificationChannel()
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+        val launchIntent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, launchIntent, flags)
+
+        val iconRes = resources.getIdentifier("ic_stat_music", "drawable", packageName).let {
+            if (it != 0) it else applicationInfo.icon
+        }
+
+        val builder = NotificationCompat.Builder(this, scanNotificationChannelId)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setSmallIcon(iconRes)
+            .setContentIntent(pendingIntent)
+            .setOngoing(isOngoing)
+            .setAutoCancel(!isOngoing)
+            .setOnlyAlertOnce(true)
+
+        if (isOngoing && indeterminate) {
+            builder.setProgress(0, 0, true)
+        } else {
+            builder.setProgress(0, 0, false)
+        }
+
+        notificationManager.notify(notificationId, builder.build())
+    }
+
+    private fun cancelScanNotification(notificationId: Int) {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        notificationManager.cancel(notificationId)
     }
 
     private fun runScan(

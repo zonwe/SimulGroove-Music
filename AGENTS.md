@@ -186,7 +186,7 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 - `library_scanner.dart` 定义接口。
 - `scanner_factory.dart` 使用条件导出，在 IO 平台选择真实实现，在 Web 选择 stub。
 - Windows 目录选择器在 UI isolate 调用，递归遍历和同步元数据解析放入 `Isolate.run`。
-- Android 通过 `top.comwe.simul_groove_player/media_store` MethodChannel 调用 Kotlin。
+- Android 通过 `top.zonwe.simul_groove_player/media_store` MethodChannel 调用 Kotlin。
 - `ScannedTrack` 是扫描层模型，页面再映射成 Drift `TracksCompanion`。
 
 必须保持的行为：

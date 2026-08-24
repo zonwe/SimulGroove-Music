@@ -3,6 +3,7 @@
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $isWindowsHost = $env:OS -eq 'Windows_NT'
 $isLinuxHost = -not $isWindowsHost -and (Test-Path '/proc/version')
+. (Join-Path $PSScriptRoot 'publish_artifacts.ps1')
 
 $buildSteps = @(
     [PSCustomObject]@{
@@ -11,7 +12,11 @@ $buildSteps = @(
         Arguments = @('build', 'apk', '--release', '--split-per-abi')
         Supported = $true
         SkipReason = ''
-        Artifacts = @('build\app\outputs\flutter-apk\*-release.apk')
+        Publisher = 'Android'
+        Artifacts = @(
+            'build\artifacts\android\*-release.apk'
+            'build\artifacts\android\SHA256SUMS.txt'
+        )
     }
     [PSCustomObject]@{
         Name = 'Music.Api'
@@ -19,6 +24,7 @@ $buildSteps = @(
         Arguments = @('build', 'backend/Music.Api/Music.Api.csproj', '-c', 'Release')
         Supported = $true
         SkipReason = ''
+        Publisher = ''
         Artifacts = @('backend\Music.Api\bin\Release\net10.0\Music.Api.dll')
     }
     [PSCustomObject]@{
@@ -27,6 +33,7 @@ $buildSteps = @(
         Arguments = @('build', 'linux', '--release')
         Supported = $isLinuxHost
         SkipReason = 'Linux 桌面包需要在 Linux 主机上构建'
+        Publisher = ''
         Artifacts = @('build\linux\x64\release\bundle\simul_groove_player')
     }
     [PSCustomObject]@{
@@ -35,6 +42,7 @@ $buildSteps = @(
         Arguments = @('build', 'web', '--release')
         Supported = $true
         SkipReason = ''
+        Publisher = ''
         Artifacts = @('build\web')
     }
     [PSCustomObject]@{
@@ -43,7 +51,11 @@ $buildSteps = @(
         Arguments = @('build', 'windows', '--release')
         Supported = $isWindowsHost
         SkipReason = 'Windows 桌面包需要在 Windows 主机上构建'
-        Artifacts = @('build\windows\x64\runner\Release\simul_groove_player.exe')
+        Publisher = 'Windows'
+        Artifacts = @(
+            'build\artifacts\windows\simul_groove_player.exe'
+            'build\artifacts\windows\SHA256SUMS.txt'
+        )
     }
 )
 
@@ -104,6 +116,22 @@ try {
 
             if ($exitCode -ne 0) {
                 throw "命令退出码: $exitCode"
+            }
+
+            $publishDirectory = switch ($step.Publisher) {
+                'Android' {
+                    Publish-AndroidArtifacts -RepositoryRoot $repoRoot
+                }
+                'Windows' {
+                    Publish-WindowsArtifacts -RepositoryRoot $repoRoot
+                }
+                default { $null }
+            }
+            if ($null -ne $publishDirectory) {
+                $relativePublishDirectory = Resolve-Path `
+                    -LiteralPath $publishDirectory `
+                    -Relative
+                Write-Host "已复制到: $relativePublishDirectory" -ForegroundColor DarkGreen
             }
 
             $artifactPaths = Get-ArtifactPaths -Patterns $step.Artifacts

@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "top.comwe.simul_groove_player"
+    namespace = "top.zonwe.simul_groove_player"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "top.comwe.simul_groove_player"
+        applicationId = "top.zonwe.simul_groove_player"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/database/app_database.dart';
 import '../../core/library/artist_names.dart';
 import 'artwork_view.dart';
+import '../player/mini_player_bar.dart';
 import '../player/playback_navigation.dart';
 
 enum CollectionKind { artist, album }
@@ -50,13 +51,20 @@ class CollectionPage extends ConsumerWidget {
           );
         },
       ),
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-        child: Text(
-          '$label · ${tracks.length} 首歌曲',
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const MiniPlayerBar(),
+          SafeArea(
+            top: false,
+            minimum: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+            child: Text(
+              '$label · ${tracks.length} 首歌曲',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
       ),
     );
   }

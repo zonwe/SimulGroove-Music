@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "top.comwe" "\0"
+            VALUE "CompanyName", "top.zonwe" "\0"
             VALUE "FileDescription", "SimulGroove Music" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "simul_groove_player" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 top.comwe. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 top.zonwe. All rights reserved." "\0"
             VALUE "OriginalFilename", "simul_groove_player.exe" "\0"
             VALUE "ProductName", "SimulGroove Music" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
