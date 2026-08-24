@@ -239,6 +239,7 @@ class _SongList extends ConsumerWidget {
           details.globalPosition,
         ),
         child: ListTile(
+          contentPadding: const EdgeInsetsDirectional.only(start: 16),
           minTileHeight: 64,
           leading: selectionMode
               ? Checkbox(

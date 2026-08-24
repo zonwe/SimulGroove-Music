@@ -219,11 +219,11 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                                         child: Text(
                                           item.title,
                                           textAlign: TextAlign.center,
-                                          maxLines: 1,
+                                          maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                           style: Theme.of(context)
                                               .textTheme
-                                              .headlineSmall
+                                              .titleLarge
                                               ?.copyWith(
                                                 fontWeight: FontWeight.w700,
                                               ),
