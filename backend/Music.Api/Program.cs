@@ -75,9 +75,11 @@ builder.Services.AddRazorPages();
 builder.Services.AddCors(options =>
 	options.AddDefaultPolicy(policy =>
 		policy
-			.AllowAnyOrigin()
+			.SetIsOriginAllowed(_ => true)
 			.AllowAnyHeader()
 			.AllowAnyMethod()
+			.AllowCredentials()
+			.WithExposedHeaders("*")
 	)
 );
 
@@ -94,7 +96,6 @@ _ = app.Services.GetRequiredService<IOnlineMusicSearchService>();
 _ = app.Services.GetRequiredService<IOnlineMusicPlaybackService>();
 _ = app.Services.GetRequiredService<IOnlineMusicAssetService>();
 app.UseMiddleware<CorrelationIdMiddleware>();
-app.UseCors();
 app.UseStaticFiles();
 app.Use(async (context, next) =>
 {
@@ -108,6 +109,7 @@ app.Use(async (context, next) =>
 	await next(context);
 });
 app.UseRouting();
+app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<AuditLogMiddleware>();

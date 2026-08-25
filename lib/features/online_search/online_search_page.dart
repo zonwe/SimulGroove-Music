@@ -392,13 +392,13 @@ class _OnlineSearchPageState extends ConsumerState<OnlineSearchPage> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '输入后点击搜索；右键或长按结果可查看歌手、专辑、封面，或选择和下载歌曲。',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
+                  // const SizedBox(height: 6),
+                  // Text(
+                  //   '输入后点击搜索；右键或长按结果可查看歌手、专辑、封面，或选择和下载歌曲。',
+                  //   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  //     color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  //   ),
+                  // ),
                   const SizedBox(height: 18),
                   AnimatedBuilder(
                     animation: _controller,

@@ -2,7 +2,7 @@ import '../database/app_database.dart';
 
 const defaultBackendBaseUrl = String.fromEnvironment(
   'MUSIC_API_URL',
-  defaultValue: 'http://localhost:5080',
+  defaultValue: 'http://192.168.0.95:5080',
 );
 
 class BackendAccount {

@@ -36,7 +36,7 @@ try {
 
     Write-Host "[2/2] 正在启动 ASP.NET Core Music.Api (5080)..." -ForegroundColor Green
     $dotnetProc = Start-Process -FilePath "dotnet" `
-        -ArgumentList "run", "--project", "backend/Music.Api/Music.Api.csproj", "--urls", "http://localhost:5080" `
+        -ArgumentList "run", "--project", "backend/Music.Api/Music.Api.csproj", "--urls", "http://0.0.0.0:5080" `
         -WorkingDirectory $rootPath `
         -NoNewWindow `
         -PassThru
