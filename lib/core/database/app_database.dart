@@ -429,8 +429,10 @@ class AppDatabase extends _$AppDatabase {
     required DateTime createdAt,
     required DateTime updatedAt,
     required Iterable<String> trackIds,
+    Iterable<TracksCompanion> missingTracks = const [],
   }) async {
     final ids = trackIds.toList(growable: false);
+    final tracksToInsert = missingTracks.toList(growable: false);
     await transaction(() async {
       await into(playlists).insertOnConflictUpdate(
         PlaylistsCompanion.insert(
@@ -443,6 +445,9 @@ class AppDatabase extends _$AppDatabase {
           updatedAt: updatedAt,
         ),
       );
+      for (final track in tracksToInsert) {
+        await into(tracks).insert(track, mode: InsertMode.insertOrIgnore);
+      }
       await (delete(
         playlistEntries,
       )..where((row) => row.playlistId.equals(id))).go();
@@ -457,6 +462,30 @@ class AppDatabase extends _$AppDatabase {
         );
       }
     });
+  }
+
+  Future<void> deleteUnreferencedSyncedTrackPlaceholders() async {
+    final playlistReferences = await (selectOnly(
+      playlistEntries,
+    )..addColumns([playlistEntries.trackId])).get();
+    final likedReferences = await (selectOnly(
+      likedTracks,
+    )..addColumns([likedTracks.trackId])).get();
+    final referencedIds = <String>{
+      ...playlistReferences
+          .map((row) => row.read(playlistEntries.trackId))
+          .whereType<String>(),
+      ...likedReferences
+          .map((row) => row.read(likedTracks.trackId))
+          .whereType<String>(),
+    };
+    await (delete(tracks)..where((row) {
+          final isSyncedPlaceholder = row.sourceType.equals('synced');
+          return referencedIds.isEmpty
+              ? isSyncedPlaceholder
+              : isSyncedPlaceholder & row.id.isNotIn(referencedIds);
+        }))
+        .go();
   }
 
   Stream<List<Track>> watchPlaylistTracks(String playlistId) {

@@ -153,6 +153,7 @@ class BackendAuthRepository implements AuthRepository {
       presets,
       deletions,
     );
+    final localTrackMatcher = _LocalTrackMatcher(await _database.allTracks());
     String deletionKey(String entityType, String remoteKey) =>
         '$entityType\u0000$remoteKey';
 
@@ -198,11 +199,38 @@ class BackendAuthRepository implements AuthRepository {
       if (local != null && local.updatedAt.isAfter(remotePlaylist.updatedAt)) {
         continue;
       }
-      final matchedTracks = await Future.wait(
-        remotePlaylist.tracks.map(
-          (track) => _database.findTrackByUri(track.uri),
-        ),
-      );
+      final remoteTracks = <BackendTrack>[];
+      final seenTrackUris = <String>{};
+      for (final track in remotePlaylist.tracks) {
+        if (track.uri.trim().isNotEmpty && seenTrackUris.add(track.uri)) {
+          remoteTracks.add(track);
+        }
+      }
+      final matchedTracks = remoteTracks
+          .map(localTrackMatcher.find)
+          .toList(growable: false);
+      final trackIds = <String>[];
+      final missingTracks = <TracksCompanion>[];
+      for (var index = 0; index < remoteTracks.length; index++) {
+        final matched = matchedTracks[index];
+        if (matched != null) {
+          trackIds.add(matched.id);
+          continue;
+        }
+        final track = remoteTracks[index];
+        final uri = Uri.tryParse(track.uri);
+        if (!_isOnlineTrackUri(uri)) continue;
+        final id = _onlineTrackId(uri!);
+        trackIds.add(id);
+        missingTracks.add(
+          _onlineTrackCompanion(
+            track,
+            id: id,
+            accountId: account.id,
+            playlistUpdatedAt: remotePlaylist.updatedAt,
+          ),
+        );
+      }
       await _database.savePlaylistFromSync(
         id:
             local?.id ??
@@ -215,13 +243,12 @@ class BackendAuthRepository implements AuthRepository {
         name: remotePlaylist.name,
         createdAt: local?.createdAt ?? remotePlaylist.updatedAt,
         updatedAt: remotePlaylist.updatedAt,
-        trackIds: [
-          for (final track in matchedTracks)
-            if (track != null) track.id,
-        ],
+        trackIds: trackIds,
+        missingTracks: missingTracks,
       );
       if (local == null) downloaded++;
     }
+    await _database.deleteUnreferencedSyncedTrackPlaceholders();
 
     var downloadedLikes = 0;
     for (final track in remote.likedTracks) {
@@ -396,4 +423,177 @@ class BackendAuthRepository implements AuthRepository {
     await _database.setSetting(_legacySessionKey, '');
     await _database.clearAccounts();
   }
+
+  TracksCompanion _onlineTrackCompanion(
+    BackendTrack track, {
+    required String id,
+    required String accountId,
+    required DateTime playlistUpdatedAt,
+  }) {
+    final uri = Uri.parse(track.uri);
+    return TracksCompanion.insert(
+      id: id,
+      accountId: Value(accountId),
+      sourceType: 'online',
+      sourceId: '${uri.pathSegments[0]}:${uri.pathSegments[1]}',
+      uri: track.uri,
+      title: track.title,
+      artist: Value(track.artist),
+      album: Value(track.album),
+      durationMs: Value(track.durationMs),
+      isAvailable: const Value(true),
+      syncState: const Value('synced'),
+      updatedAt: track.updatedAt ?? playlistUpdatedAt,
+    );
+  }
 }
+
+String _onlineTrackId(Uri uri) =>
+    'online:${uri.pathSegments[0]}:${uri.pathSegments[1]}';
+
+bool _isOnlineTrackUri(Uri? uri) =>
+    uri != null &&
+    uri.scheme == 'online-music' &&
+    uri.host == 'track' &&
+    uri.pathSegments.length == 2;
+
+const _indexedLocalSourceTypes = {
+  'windows_file',
+  'linux_file',
+  'android_media_store',
+  'android_document_tree',
+};
+
+class _LocalTrackMatcher {
+  _LocalTrackMatcher(Iterable<Track> tracks) {
+    for (final track in tracks) {
+      if (!track.isAvailable) continue;
+      _availableByUri[track.uri] = track;
+      _availableById[track.id] = track;
+      if (!_indexedLocalSourceTypes.contains(track.sourceType)) continue;
+      final title = _normalizeSyncValue(track.title);
+      if (title.isNotEmpty) {
+        _tracksByTitle.putIfAbsent(title, () => []).add(track);
+      }
+      final fileName = _localTrackFileName(track);
+      if (fileName.isNotEmpty) {
+        _tracksByFileName.putIfAbsent(fileName, () => []).add(track);
+      }
+    }
+  }
+
+  final Map<String, Track> _availableByUri = {};
+  final Map<String, Track> _availableById = {};
+  final Map<String, List<Track>> _tracksByTitle = {};
+  final Map<String, List<Track>> _tracksByFileName = {};
+
+  Track? find(BackendTrack remote) {
+    final exact = _availableByUri[remote.uri];
+    if (exact != null) return exact;
+
+    final uri = Uri.tryParse(remote.uri);
+    if (_isOnlineTrackUri(uri)) {
+      return _availableById[_onlineTrackId(uri!)];
+    }
+
+    final candidates = <String, Track>{};
+    void addCandidates(List<Track>? values) {
+      if (values == null) return;
+      for (final track in values) {
+        candidates[track.id] = track;
+      }
+    }
+
+    addCandidates(_tracksByTitle[_normalizeSyncValue(remote.title)]);
+    addCandidates(_tracksByFileName[_remoteTrackFileName(remote.uri)]);
+
+    Track? best;
+    var bestScore = -1;
+    var ambiguous = false;
+    for (final candidate in candidates.values) {
+      final score = _syncMatchScore(remote, candidate);
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+        ambiguous = false;
+      } else if (score >= 0 && score == bestScore) {
+        ambiguous = true;
+      }
+    }
+    return bestScore < 0 || ambiguous ? null : best;
+  }
+}
+
+int _syncMatchScore(BackendTrack remote, Track local) {
+  final remoteTitle = _normalizeSyncValue(remote.title);
+  final localTitle = _normalizeSyncValue(local.title);
+  final titleMatches =
+      remoteTitle.isNotEmpty &&
+      localTitle.isNotEmpty &&
+      remoteTitle == localTitle;
+
+  final fileName = _remoteTrackFileName(remote.uri);
+  final fileNameMatches =
+      fileName.isNotEmpty && fileName == _localTrackFileName(local);
+  if (!titleMatches && !fileNameMatches) return -1;
+
+  final artistMatches = _meaningfulMetadataMatches(remote.artist, local.artist);
+  final albumMatches = _meaningfulMetadataMatches(remote.album, local.album);
+  final remoteDuration = remote.durationMs;
+  final localDuration = local.durationMs;
+  if (remoteDuration != null &&
+      localDuration != null &&
+      (remoteDuration - localDuration).abs() > 3000) {
+    return -1;
+  }
+  if (!fileNameMatches && !(artistMatches && albumMatches)) return -1;
+
+  return (titleMatches ? 10 : 0) +
+      (fileNameMatches ? 8 : 0) +
+      (artistMatches ? 4 : 0) +
+      (albumMatches ? 2 : 0) +
+      (remoteDuration != null && localDuration != null ? 4 : 0);
+}
+
+bool _meaningfulMetadataMatches(String first, String second) {
+  final normalizedFirst = _normalizeSyncValue(first);
+  final normalizedSecond = _normalizeSyncValue(second);
+  const unknownValues = {
+    '',
+    '未知艺术家',
+    '未知专辑',
+    'unknown artist',
+    'unknown album',
+  };
+  return !unknownValues.contains(normalizedFirst) &&
+      !unknownValues.contains(normalizedSecond) &&
+      normalizedFirst == normalizedSecond;
+}
+
+String _localTrackFileName(Track track) {
+  final filePath = track.filePath;
+  if (filePath != null && filePath.isNotEmpty) {
+    return _pathFileName(filePath);
+  }
+  final uriFileName = _remoteTrackFileName(track.uri);
+  if (_hasFileExtension(uriFileName)) return uriFileName;
+  final sourceFileName = _pathFileName(track.sourceId);
+  return _hasFileExtension(sourceFileName) ? sourceFileName : uriFileName;
+}
+
+String _remoteTrackFileName(String rawUri) {
+  final uri = Uri.tryParse(rawUri);
+  if (uri == null || uri.pathSegments.isEmpty) return '';
+  return _pathFileName(uri.pathSegments.last);
+}
+
+String _pathFileName(String value) =>
+    _normalizeSyncValue(value.split(RegExp(r'[/\\]')).last);
+
+bool _hasFileExtension(String value) {
+  final dot = value.lastIndexOf('.');
+  return dot > 0 && dot < value.length - 1;
+}
+
+String _normalizeSyncValue(String value) =>
+    value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');

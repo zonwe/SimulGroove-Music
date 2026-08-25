@@ -133,7 +133,9 @@ public sealed class SqliteStore : IPlaylistStore
                 var updatedAt = playlist.UpdatedAt ?? DateTimeOffset.UtcNow;
                 if (!ShouldAcceptChange(connection, transaction, username,
                         SyncEntityTypes.Playlist, remoteId, updatedAt,
-                        "playlists", "remote_id", "updated_at")) continue;
+                        "playlists", "remote_id", "updated_at",
+                        acceptEqual: () => (playlist.Tracks?.Count ?? 0) >
+                            CountPlaylistTracks(connection, transaction, username, remoteId))) continue;
 
                 playlistCommand.Transaction = transaction;
                 playlistCommand.CommandText = "INSERT INTO playlists(username, remote_id, name, updated_at) VALUES ($username, $remoteId, $name, $updatedAt) ON CONFLICT(username, remote_id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at";
@@ -318,7 +320,8 @@ public sealed class SqliteStore : IPlaylistStore
         DateTimeOffset updatedAt,
         string table,
         string keyColumn,
-        string updatedColumn)
+        string updatedColumn,
+        Func<bool>? acceptEqual = null)
     {
         var deletion = ReadTimestamp(
             connection,
@@ -336,7 +339,8 @@ public sealed class SqliteStore : IPlaylistStore
             username,
             entityType: null,
             remoteKey);
-        if (current is not null && current > updatedAt) return false;
+        if (current is not null &&
+            (current > updatedAt || current == updatedAt && !(acceptEqual?.Invoke() ?? false))) return false;
 
         if (deletion is not null)
         {
@@ -349,6 +353,20 @@ public sealed class SqliteStore : IPlaylistStore
             deleteTombstone.ExecuteNonQuery();
         }
         return true;
+    }
+
+    private static int CountPlaylistTracks(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string username,
+        string remoteId)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT COUNT(*) FROM playlist_tracks WHERE username = $username AND remote_id = $remoteId";
+        command.Parameters.AddWithValue("$username", username);
+        command.Parameters.AddWithValue("$remoteId", remoteId);
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     private static DateTimeOffset? ReadTimestamp(

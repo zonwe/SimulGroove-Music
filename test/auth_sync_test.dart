@@ -11,6 +11,7 @@ class _FakeGateway implements BackendGateway {
     playlists: [],
     likedTracks: [],
   );
+  List<BackendPlaylist> uploadedPlaylists = const [];
   List<BackendDeletion> uploadedDeletions = const [];
   Future<void> Function()? beforeResponse;
 
@@ -35,6 +36,7 @@ class _FakeGateway implements BackendGateway {
     List<BackendEqualizerPreset> equalizerPresets = const [],
     List<BackendDeletion> deletions = const [],
   ]) async {
+    uploadedPlaylists = List.of(playlists);
     uploadedDeletions = List.of(deletions);
     if (beforeResponse case final callback?) await callback();
     return response;
@@ -125,6 +127,199 @@ void main() {
       (await database.watchPlaylistTracks(playlist.id).first).map((t) => t.id),
       ['two'],
     );
+  });
+
+  test(
+    'remote playlist matches songs from local scanned directories',
+    () async {
+      final updatedAt = DateTime(2026, 8, 24, 8);
+      const remoteFileUri = 'file:///D:/Music/missing.mp3';
+      const localFileUri = 'file:///E:/Library/missing.mp3';
+      const onlineUri =
+          'online-music://track/provider/track-2?capabilities=playback';
+      await database.upsertTracks([
+        TracksCompanion.insert(
+          id: 'local-file',
+          sourceType: 'windows_file',
+          sourceId: r'E:\Library\missing.mp3',
+          uri: localFileUri,
+          filePath: const Value(r'E:\Library\missing.mp3'),
+          title: 'Missing local song',
+          artist: const Value('Artist one'),
+          album: const Value('Album one'),
+          durationMs: const Value(180000),
+          updatedAt: updatedAt,
+        ),
+      ]);
+      gateway.response = BackendLibrary(
+        playlists: [
+          BackendPlaylist(
+            remoteId: 'remote-playlist',
+            name: 'Remote songs',
+            updatedAt: updatedAt,
+            tracks: const [
+              BackendTrack(
+                uri: remoteFileUri,
+                title: 'Missing local song',
+                artist: 'Artist one',
+                album: 'Album one',
+                durationMs: 180000,
+              ),
+              BackendTrack(
+                uri: onlineUri,
+                title: 'Online song',
+                artist: 'Artist two',
+                album: 'Album two',
+              ),
+            ],
+          ),
+        ],
+        likedTracks: const [],
+      );
+
+      await repository.syncNow();
+
+      final playlist = (await database.watchPlaylists().first).single;
+      final storedTracks = await database
+          .watchPlaylistTracks(playlist.id)
+          .first;
+      expect(storedTracks.map((track) => track.uri), const [
+        localFileUri,
+        onlineUri,
+      ]);
+      expect(storedTracks.map((track) => track.sourceType), const [
+        'windows_file',
+        'online',
+      ]);
+      expect(storedTracks.every((track) => track.isAvailable), isTrue);
+      expect(storedTracks.first.id, 'local-file');
+      expect(storedTracks.last.id, 'online:provider:track-2');
+
+      await repository.syncNow();
+
+      expect(
+        gateway.uploadedPlaylists.single.tracks.map((track) => track.uri),
+        const [localFileUri, onlineUri],
+      );
+    },
+  );
+
+  test(
+    'Windows playlist matches Android MediaStore and document tree songs',
+    () async {
+      final updatedAt = DateTime(2026, 8, 24, 8, 30);
+      const mediaStoreUri = 'content://media/external/audio/media/42';
+      const documentUri =
+          'content://com.android.externalstorage.documents/tree/'
+          'primary%3AMusic/document/primary%3AMusic%2Fdocument-song.mp3';
+      await database.upsertTracks([
+        TracksCompanion.insert(
+          id: 'android-media-store',
+          sourceType: 'android_media_store',
+          sourceId: '42',
+          uri: mediaStoreUri,
+          filePath: const Value('/storage/emulated/0/Music/untagged-song.mp3'),
+          title: 'untagged-song.mp3',
+          durationMs: const Value(180000),
+          updatedAt: updatedAt,
+        ),
+        TracksCompanion.insert(
+          id: 'android-document-tree',
+          sourceType: 'android_document_tree',
+          sourceId: 'primary:Music/document-song.mp3',
+          uri: documentUri,
+          title: 'document-song.mp3',
+          durationMs: const Value(90000),
+          updatedAt: updatedAt,
+        ),
+      ]);
+      gateway.response = BackendLibrary(
+        playlists: [
+          BackendPlaylist(
+            remoteId: 'windows-playlist',
+            name: 'Windows songs',
+            updatedAt: updatedAt,
+            tracks: const [
+              BackendTrack(
+                uri: 'file:///D:/Music/untagged-song.mp3',
+                title: 'untagged-song',
+                artist: '未知艺术家',
+                album: '未知专辑',
+                durationMs: 180000,
+              ),
+              BackendTrack(
+                uri: 'file:///D:/Music/document-song.mp3',
+                title: 'document-song',
+                artist: '未知艺术家',
+                album: '未知专辑',
+                durationMs: 90000,
+              ),
+            ],
+          ),
+        ],
+        likedTracks: const [],
+      );
+
+      await repository.syncNow();
+
+      final playlist = (await database.watchPlaylists().first).single;
+      expect(
+        (await database.watchPlaylistTracks(playlist.id).first).map(
+          (track) => track.id,
+        ),
+        const ['android-media-store', 'android-document-tree'],
+      );
+    },
+  );
+
+  test('unmatched cross-device path is not kept as unavailable song', () async {
+    final updatedAt = DateTime(2026, 8, 24, 9);
+    const remoteFileUri = 'file:///D:/Music/not-on-this-device.mp3';
+    await database.upsertTracks([
+      TracksCompanion.insert(
+        id: 'old-placeholder',
+        sourceType: 'synced',
+        sourceId: remoteFileUri,
+        uri: remoteFileUri,
+        title: 'Remote only',
+        artist: const Value('Artist'),
+        album: const Value('Album'),
+        isAvailable: const Value(false),
+        updatedAt: updatedAt,
+      ),
+    ]);
+    await database.savePlaylistFromSync(
+      id: 'local-playlist',
+      remoteId: 'remote-playlist',
+      accountId: 'account-1',
+      name: 'Remote only',
+      createdAt: updatedAt,
+      updatedAt: updatedAt,
+      trackIds: const ['old-placeholder'],
+    );
+    gateway.response = BackendLibrary(
+      playlists: [
+        BackendPlaylist(
+          remoteId: 'remote-playlist',
+          name: 'Remote only',
+          updatedAt: updatedAt,
+          tracks: const [
+            BackendTrack(
+              uri: remoteFileUri,
+              title: 'Remote only',
+              artist: 'Artist',
+              album: 'Album',
+            ),
+          ],
+        ),
+      ],
+      likedTracks: const [],
+    );
+
+    await repository.syncNow();
+
+    expect(await database.watchPlaylistTracks('local-playlist').first, isEmpty);
+    expect(await database.findTrackByUri(remoteFileUri), null);
   });
 
   test('local playlist deletion uploads and retains a tombstone', () async {

@@ -34,6 +34,57 @@ public sealed class LibrarySyncTests
     }
 
     [TestMethod]
+    public void SyncLibraryKeepsStoredTracksWhenTimestampIsUnchanged()
+    {
+        var store = CreateStore();
+        var updatedAt = DateTimeOffset.Parse("2026-08-24T08:00:00Z");
+        var track = new TrackRequest(
+            "file:///music/song.mp3",
+            "Song",
+            "Artist",
+            "Album",
+            120000,
+            updatedAt);
+        var original = new PlaylistRequest(
+            "playlist-1",
+            "Playlist",
+            updatedAt,
+            [track]);
+
+        store.SyncLibrary("user@example.com", [original], [], []);
+        var response = store.SyncLibrary(
+            "user@example.com", [Playlist("playlist-1", "Playlist", updatedAt)], [], []);
+
+        Assert.AreEqual(1, response.Playlists.Single().Tracks.Count);
+        Assert.AreEqual(track.Uri, response.Playlists.Single().Tracks.Single().Uri);
+    }
+
+    [TestMethod]
+    public void SyncLibraryRepairsEmptyPlaylistFromRicherEqualTimestampClient()
+    {
+        var store = CreateStore();
+        var updatedAt = DateTimeOffset.Parse("2026-08-24T08:30:00Z");
+        var track = new TrackRequest(
+            "file:///music/song.mp3",
+            "Song",
+            "Artist",
+            "Album",
+            120000,
+            updatedAt);
+
+        store.SyncLibrary(
+            "user@example.com", [Playlist("playlist-1", "Playlist", updatedAt)], [], []);
+        var response = store.SyncLibrary(
+            "user@example.com",
+            [new PlaylistRequest("playlist-1", "Playlist", updatedAt, [track])],
+            [],
+            []);
+
+        Assert.AreEqual(1, response.Playlists.Single().Tracks.Count);
+        Assert.AreEqual(track.Uri, response.Playlists.Single().Tracks.Single().Uri);
+    }
+
+    [TestMethod]
     public void TombstonesDeleteAllEntityTypesAndPreventStaleResurrection()
     {
         var store = CreateStore();
