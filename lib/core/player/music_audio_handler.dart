@@ -11,8 +11,9 @@ import '../database/app_database.dart';
 import 'artwork_cache.dart';
 import 'equalizer_models.dart';
 import 'local_audio_source.dart';
+import 'playback_queue_logic.dart';
 
-enum PlaybackMode { listLoop, singleLoop, listShuffle }
+export 'playback_queue_logic.dart' show PlaybackMode;
 
 class MusicAudioHandler extends BaseAudioHandler
     with QueueHandler, SeekHandler {
@@ -221,17 +222,16 @@ class MusicAudioHandler extends BaseAudioHandler
   void _handlePlaybackEvent(ja.PlaybackEvent event) {
     _broadcastState(event);
 
-    // Some platform backends report the final item as completed even when
-    // LoopMode.all is enabled. Explicitly seek to the first item so a list
-    // loop never leaves the player stopped at the end of the queue.
-    if (event.processingState != ja.ProcessingState.completed ||
-        _player.loopMode != ja.LoopMode.all ||
-        _rebuildingQueue ||
-        _restartingListLoop) {
+    if (!shouldRestartListLoop(
+      processingState: event.processingState,
+      loopMode: _player.loopMode,
+      rebuildingQueue: _rebuildingQueue,
+      restartingListLoop: _restartingListLoop,
+      queueLength: queue.value.length,
+      currentIndex: event.currentIndex,
+    )) {
       return;
     }
-    final length = queue.value.length;
-    if (length == 0 || event.currentIndex != length - 1) return;
     unawaited(_restartListLoopAtBeginning());
   }
 
@@ -273,19 +273,15 @@ class MusicAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> skipToNext() async {
-    final length = queue.value.length;
-    if (length == 0) return;
-    final current = _player.currentIndex ?? -1;
-    final index = (current + 1) % length;
+    final index = nextQueueIndex(_player.currentIndex, queue.value.length);
+    if (index == null) return;
     await _player.seek(Duration.zero, index: index);
   }
 
   @override
   Future<void> skipToPrevious() async {
-    final length = queue.value.length;
-    if (length == 0) return;
-    final current = _player.currentIndex ?? 0;
-    final index = (current - 1 + length) % length;
+    final index = previousQueueIndex(_player.currentIndex, queue.value.length);
+    if (index == null) return;
     await _player.seek(Duration.zero, index: index);
   }
 
@@ -294,12 +290,7 @@ class MusicAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> setRepeatMode(AudioServiceRepeatMode repeatMode) async {
-    await _player.setLoopMode(switch (repeatMode) {
-      AudioServiceRepeatMode.one => ja.LoopMode.one,
-      AudioServiceRepeatMode.all ||
-      AudioServiceRepeatMode.group => ja.LoopMode.all,
-      _ => ja.LoopMode.off,
-    });
+    await _player.setLoopMode(audioServiceRepeatToLoopMode(repeatMode));
     // Loop/shuffle changes update just_audio's sequence state, not its
     // playback event stream. Broadcast the new state so the UI updates
     // immediately after a tap.
@@ -323,17 +314,9 @@ class MusicAudioHandler extends BaseAudioHandler
     if (_changingPlaybackMode) return;
     _changingPlaybackMode = true;
     try {
-      switch (mode) {
-        case PlaybackMode.listLoop:
-          await _setShuffleEnabled(false);
-          await _player.setLoopMode(ja.LoopMode.all);
-        case PlaybackMode.singleLoop:
-          await _setShuffleEnabled(false);
-          await _player.setLoopMode(ja.LoopMode.one);
-        case PlaybackMode.listShuffle:
-          await _setShuffleEnabled(true);
-          await _player.setLoopMode(ja.LoopMode.all);
-      }
+      final settings = playbackModeToAudioSettings(mode);
+      await _setShuffleEnabled(settings.shuffleEnabled);
+      await _player.setLoopMode(settings.loopMode);
       _broadcastState(_player.playbackEvent);
     } finally {
       _changingPlaybackMode = false;
@@ -347,13 +330,7 @@ class MusicAudioHandler extends BaseAudioHandler
     }
     if (enabled) {
       final current = _currentBaseIndex();
-      final remaining = List<int>.of(_baseOrder)
-        ..removeWhere((index) => index == current)
-        ..shuffle(_random);
-      final order = <int>[];
-      if (current != null) order.add(current);
-      order.addAll(remaining);
-      await _rebuildQueue(order);
+      await _rebuildQueue(buildShuffleOrder(_baseOrder, current, _random));
     } else {
       await _rebuildQueue(_baseOrder);
     }
@@ -380,12 +357,7 @@ class MusicAudioHandler extends BaseAudioHandler
     final currentBaseIndex = _currentBaseIndex();
     final currentPosition = _player.position;
     final wasPlaying = _player.playing;
-    final requestedIndex = currentBaseIndex == null
-        ? 0
-        : order.indexOf(currentBaseIndex);
-    final initialIndex = requestedIndex < 0
-        ? 0
-        : requestedIndex.clamp(0, order.length - 1);
+    final initialIndex = rebuildInitialIndex(order, currentBaseIndex);
     final sources = await Future.wait(
       order.map((index) => createAudioSource(_tracks[index], _items[index])),
     );
@@ -440,12 +412,7 @@ class MusicAudioHandler extends BaseAudioHandler
     String? presetId,
   }) async {
     _equalizerEnabled = enabled;
-    _equalizerGains = List<double>.from(gains);
-    if (_equalizerGains.length < 10) {
-      _equalizerGains.addAll(
-        List<double>.filled(10 - _equalizerGains.length, 0.0),
-      );
-    }
+    _equalizerGains = normalizeEqualizerGains(gains);
     _equalizerPreampDb = preampDb;
     if (presetId != null) {
       _equalizerPresetId = presetId;
@@ -472,11 +439,11 @@ class MusicAudioHandler extends BaseAudioHandler
 
           if (bands.isNotEmpty) {
             for (var i = 0; i < bands.length; i++) {
-              final normalizedIndex = bands.length == 1
-                  ? 0
-                  : (i / (bands.length - 1) * (_equalizerGains.length - 1))
-                        .round()
-                        .clamp(0, _equalizerGains.length - 1);
+              final normalizedIndex = equalizerBandGainIndex(
+                bandIndex: i,
+                bandCount: bands.length,
+                gainCount: _equalizerGains.length,
+              );
               final targetGain = _equalizerGains[normalizedIndex] + preampDb;
               final clampedGain = targetGain
                   .clamp(minDecibels, maxDecibels)

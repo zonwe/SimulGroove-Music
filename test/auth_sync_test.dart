@@ -376,6 +376,208 @@ void main() {
     expect(tombstones, hasLength(1));
     expect(tombstones.single.remoteKey, 'remote-playlist');
   });
+
+  test('本地较新的歌单重命名不会被云端旧名称覆盖', () async {
+    final oldTime = DateTime(2026, 8, 23, 8);
+    await database.upsertTracks([_track('one')]);
+    await database.savePlaylistFromSync(
+      id: 'local-playlist',
+      remoteId: 'remote-playlist',
+      accountId: 'account-1',
+      name: '本地新名称',
+      createdAt: oldTime,
+      updatedAt: oldTime.add(const Duration(minutes: 2)),
+      trackIds: const ['one'],
+    );
+    gateway.response = BackendLibrary(
+      playlists: [
+        BackendPlaylist(
+          remoteId: 'remote-playlist',
+          name: '云端旧名称',
+          updatedAt: oldTime.add(const Duration(minutes: 1)),
+          tracks: const [],
+        ),
+      ],
+      likedTracks: const [],
+    );
+
+    await repository.syncNow();
+
+    final playlist = (await database.watchPlaylists().first).single;
+    expect(playlist.name, '本地新名称');
+    // 上传内容应携带本地较新的名称，云端最终会收敛到同一名称。
+    expect(gateway.uploadedPlaylists.single.name, '本地新名称');
+  });
+
+  test('同步同时上传本地新增歌单并下载云端新增歌单', () async {
+    await database.upsertTracks([_track('one')]);
+    await database.createPlaylist(
+      PlaylistsCompanion.insert(
+        id: 'local-only',
+        name: '本地新歌单',
+        createdAt: DateTime(2026, 8, 25),
+        updatedAt: DateTime(2026, 8, 25),
+      ),
+    );
+    await database.addTrackToPlaylist('local-only', 'one');
+    gateway.response = BackendLibrary(
+      playlists: [
+        BackendPlaylist(
+          remoteId: 'remote-new',
+          name: '云端新歌单',
+          updatedAt: DateTime(2026, 8, 25),
+          tracks: const [],
+        ),
+      ],
+      likedTracks: const [],
+    );
+
+    await repository.syncNow();
+
+    expect(gateway.uploadedPlaylists.single.name, '本地新歌单');
+    expect(
+      (await database.watchPlaylists().first).map((playlist) => playlist.name),
+      containsAll(['本地新歌单', '云端新歌单']),
+    );
+  });
+
+  test('同名同艺术家的两首本机歌曲与云端曲目有歧义时不误加入歌单', () async {
+    final updatedAt = DateTime(2026, 8, 24, 8);
+    await database.upsertTracks([
+      TracksCompanion.insert(
+        id: 'copy-a',
+        sourceType: 'windows_file',
+        sourceId: r'C:\Music\a1.mp3',
+        uri: 'file:///C:/Music/a1.mp3',
+        filePath: const Value(r'C:\Music\a1.mp3'),
+        title: 'Same Song',
+        artist: const Value('Artist'),
+        album: const Value('Album'),
+        durationMs: const Value(180000),
+        updatedAt: updatedAt,
+      ),
+      TracksCompanion.insert(
+        id: 'copy-b',
+        sourceType: 'windows_file',
+        sourceId: r'C:\Music\a2.mp3',
+        uri: 'file:///C:/Music/a2.mp3',
+        filePath: const Value(r'C:\Music\a2.mp3'),
+        title: 'Same Song',
+        artist: const Value('Artist'),
+        album: const Value('Album'),
+        durationMs: const Value(180000),
+        updatedAt: updatedAt,
+      ),
+    ]);
+    gateway.response = BackendLibrary(
+      playlists: [
+        BackendPlaylist(
+          remoteId: 'remote-playlist',
+          name: 'Ambiguous',
+          updatedAt: updatedAt,
+          tracks: const [
+            BackendTrack(
+              uri: 'file:///D:/Music/a.mp3',
+              title: 'Same Song',
+              artist: 'Artist',
+              album: 'Album',
+              durationMs: 180000,
+            ),
+          ],
+        ),
+      ],
+      likedTracks: const [],
+    );
+
+    await repository.syncNow();
+
+    final playlist = (await database.watchPlaylists().first).single;
+    expect(await database.watchPlaylistTracks(playlist.id).first, isEmpty);
+  });
+
+  test('时长相差超过 3 秒的同名歌曲不匹配', () async {
+    final updatedAt = DateTime(2026, 8, 24, 8);
+    await database.upsertTracks([
+      TracksCompanion.insert(
+        id: 'local-song',
+        sourceType: 'windows_file',
+        sourceId: r'C:\Music\song.mp3',
+        uri: 'file:///C:/Music/song.mp3',
+        filePath: const Value(r'C:\Music\song.mp3'),
+        title: 'Song',
+        artist: const Value('Artist'),
+        album: const Value('Album'),
+        durationMs: const Value(180000),
+        updatedAt: updatedAt,
+      ),
+    ]);
+    gateway.response = BackendLibrary(
+      playlists: [
+        BackendPlaylist(
+          remoteId: 'remote-playlist',
+          name: 'Duration mismatch',
+          updatedAt: updatedAt,
+          tracks: const [
+            BackendTrack(
+              uri: 'file:///D:/Music/song.mp3',
+              title: 'Song',
+              artist: 'Artist',
+              album: 'Album',
+              durationMs: 190000,
+            ),
+          ],
+        ),
+      ],
+      likedTracks: const [],
+    );
+
+    await repository.syncNow();
+
+    final playlist = (await database.watchPlaylists().first).single;
+    expect(await database.watchPlaylistTracks(playlist.id).first, isEmpty);
+  });
+
+  test('云端较新的取消喜欢会撤回本地喜欢状态', () async {
+    final likedAt = DateTime(2026, 8, 24, 8);
+    await database.upsertTracks([_track('liked-one')]);
+    await database.setTrackLikedFromSync('liked-one', true, updatedAt: likedAt);
+    gateway.response = BackendLibrary(
+      playlists: const [],
+      likedTracks: const [],
+      deletions: [
+        BackendDeletion(
+          entityType: SyncEntityType.likedTrack,
+          remoteKey: 'test://liked-one',
+          deletedAt: likedAt.add(const Duration(minutes: 1)),
+        ),
+      ],
+    );
+
+    await repository.syncNow();
+
+    expect(await database.watchLikedTrackIds().first, isEmpty);
+  });
+
+  test('本地较新的喜欢不会被云端旧删除撤回', () async {
+    final likedAt = DateTime(2026, 8, 24, 8);
+    await database.upsertTracks([_track('liked-one')]);
+    await database.setTrackLikedFromSync('liked-one', true, updatedAt: likedAt);
+    gateway.response = BackendLibrary(
+      playlists: const [],
+      likedTracks: const [],
+      deletions: [
+        BackendDeletion(
+          entityType: SyncEntityType.likedTrack,
+          remoteKey: 'test://liked-one',
+          deletedAt: likedAt.subtract(const Duration(minutes: 1)),
+        ),
+      ],
+    );
+
+    await repository.syncNow();
+
+    expect(await database.watchLikedTrackIds().first, contains('liked-one'));
+  });
 }
 
 TracksCompanion _track(String id) => TracksCompanion.insert(
