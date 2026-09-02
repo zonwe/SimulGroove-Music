@@ -67,7 +67,8 @@ public sealed class AuthServiceTests
         Assert.IsNull(jwt.Validate("not-a-jwt"));
     }
 
-    private AuthService CreateService() => new(CreateConfiguration(), CreateEnvironment());
+    private AuthService CreateService() =>
+        new(CreateConfiguration(), CreateEnvironment(), new SqliteRefreshTokenStore());
 
     private IConfiguration CreateConfiguration() => new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?>

@@ -24,19 +24,18 @@ public sealed class AuthService : IAuthService
     private readonly object _gate = new();
     private readonly string _connectionString;
     private readonly JwtTokenService _jwt;
+    private readonly IRefreshTokenStore _refreshTokens;
     private readonly TimeSpan _refreshLifetime;
 
-    public AuthService(IConfiguration configuration, IHostEnvironment environment)
+    public AuthService(
+        IConfiguration configuration,
+        IHostEnvironment environment,
+        IRefreshTokenStore refreshTokenStore)
     {
-        var configuredPath = configuration["Database:Path"] ?? "storage/music.db";
-        var databasePath = Path.IsPathRooted(configuredPath)
-            ? configuredPath
-            : Path.GetFullPath(Path.Combine(environment.ContentRootPath, configuredPath));
-        var directory = Path.GetDirectoryName(databasePath);
-        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-
-        _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
+        var databasePath = SqliteDatabasePath.Resolve(configuration, environment);
+        _connectionString = SqliteDatabasePath.ToConnectionString(databasePath);
         _jwt = new JwtTokenService(configuration);
+        _refreshTokens = refreshTokenStore;
         _refreshLifetime = TimeSpan.FromDays(configuration.GetValue("Auth:RefreshTokenDays", 30));
         Initialize();
     }
@@ -92,35 +91,25 @@ public sealed class AuthService : IAuthService
         {
             using var connection = OpenConnection();
             using var transaction = connection.BeginTransaction();
-            using var query = connection.CreateCommand();
-            query.Transaction = transaction;
-            query.CommandText = "SELECT username, expires_at, revoked_at FROM refresh_tokens WHERE token_hash = $hash";
-            query.Parameters.AddWithValue("$hash", tokenHash);
-            using var reader = query.ExecuteReader();
-            if (!reader.Read()) return null;
+            var stored = _refreshTokens.Find(connection, transaction, tokenHash);
+            if (stored is null) return null;
 
-            var username = reader.GetString(0);
-            var expiresAt = ParseDate(reader.GetString(1));
-            var revoked = !reader.IsDBNull(2);
-            reader.Close();
-
-            if (revoked || expiresAt <= DateTimeOffset.UtcNow)
+            if (stored.Revoked || stored.ExpiresAt <= DateTimeOffset.UtcNow)
             {
-                if (revoked) RevokeAll(connection, transaction, username);
+                if (stored.Revoked) RevokeAll(connection, transaction, stored.Username);
                 transaction.Commit();
                 return null;
             }
 
-            var account = ReadAccount(connection, transaction, username);
+            var account = ReadAccount(connection, transaction, stored.Username);
             if (account is null) return null;
             var response = IssueTokens(connection, transaction, account);
-            using var revoke = connection.CreateCommand();
-            revoke.Transaction = transaction;
-            revoke.CommandText = "UPDATE refresh_tokens SET revoked_at = $revokedAt, replaced_by_hash = $replacement WHERE token_hash = $hash";
-            revoke.Parameters.AddWithValue("$revokedAt", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-            revoke.Parameters.AddWithValue("$replacement", HashRefreshToken(response.RefreshToken));
-            revoke.Parameters.AddWithValue("$hash", tokenHash);
-            revoke.ExecuteNonQuery();
+            _refreshTokens.MarkReplaced(
+                connection,
+                transaction,
+                tokenHash,
+                HashRefreshToken(response.RefreshToken),
+                DateTimeOffset.UtcNow);
             transaction.Commit();
             return response;
         }
@@ -152,19 +141,22 @@ public sealed class AuthService : IAuthService
         }
     }
 
+    private void RevokeAll(SqliteConnection connection, SqliteTransaction transaction, string username) =>
+        _refreshTokens.RevokeAllForUser(connection, transaction, username, DateTimeOffset.UtcNow);
+
     private AuthTokenResponse IssueTokens(SqliteConnection connection, SqliteTransaction transaction, AccountResponse account)
     {
         var access = _jwt.Issue(account.Username);
         var refreshToken = Base64Url(RandomNumberGenerator.GetBytes(64));
-        var refreshExpiresAt = DateTimeOffset.UtcNow.Add(_refreshLifetime);
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "INSERT INTO refresh_tokens(token_hash, username, expires_at, created_at, revoked_at, replaced_by_hash) VALUES ($hash, $username, $expiresAt, $createdAt, NULL, NULL)";
-        command.Parameters.AddWithValue("$hash", HashRefreshToken(refreshToken));
-        command.Parameters.AddWithValue("$username", account.Username);
-        command.Parameters.AddWithValue("$expiresAt", refreshExpiresAt.ToString("O", CultureInfo.InvariantCulture));
-        command.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-        command.ExecuteNonQuery();
+        var now = DateTimeOffset.UtcNow;
+        _refreshTokens.Insert(
+            connection,
+            transaction,
+            new RefreshTokenRow(
+                HashRefreshToken(refreshToken),
+                account.Username,
+                now,
+                now.Add(_refreshLifetime)));
         return new AuthTokenResponse(access.Token, refreshToken, access.ExpiresAt, account);
     }
 
@@ -184,20 +176,12 @@ public sealed class AuthService : IAuthService
                 password_salt TEXT NULL,
                 password_iterations INTEGER NULL
             );
-            CREATE TABLE IF NOT EXISTS refresh_tokens (
-                token_hash TEXT PRIMARY KEY,
-                username TEXT NOT NULL REFERENCES accounts(username) ON DELETE CASCADE,
-                expires_at TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                revoked_at TEXT NULL,
-                replaced_by_hash TEXT NULL
-            );
-            CREATE INDEX IF NOT EXISTS ix_refresh_tokens_username ON refresh_tokens(username);
             """;
         command.ExecuteNonQuery();
         EnsureColumn(connection, "accounts", "password_hash", "TEXT NULL");
         EnsureColumn(connection, "accounts", "password_salt", "TEXT NULL");
         EnsureColumn(connection, "accounts", "password_iterations", "INTEGER NULL");
+        _refreshTokens.Initialize(connection);
     }
 
     private static void EnsureColumn(SqliteConnection connection, string table, string column, string definition)
@@ -269,19 +253,6 @@ public sealed class AuthService : IAuthService
         Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, PasswordHashBytes);
 
     private static string HashRefreshToken(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
-
-    private static void RevokeAll(SqliteConnection connection, SqliteTransaction transaction, string username)
-    {
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "UPDATE refresh_tokens SET revoked_at = $revokedAt WHERE username = $username AND revoked_at IS NULL";
-        command.Parameters.AddWithValue("$revokedAt", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-        command.Parameters.AddWithValue("$username", username);
-        command.ExecuteNonQuery();
-    }
-
-    private static DateTimeOffset ParseDate(string value) =>
-        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 
     private static string Base64Url(byte[] bytes) =>
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');

@@ -32,7 +32,7 @@ public sealed class SqliteScanSourceStoreTests
         Assert.AreEqual(@"D:\MusicDownload", sources[0].Path);
 
         // The placeholder account remains compatible with normal API sign-in.
-        var auth = new AuthService(configuration, environment);
+        var auth = new AuthService(configuration, environment, new SqliteRefreshTokenStore());
         Assert.IsNotNull(auth.SignIn("admin", "first-password"));
     }
 

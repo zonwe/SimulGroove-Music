@@ -26,7 +26,11 @@ builder.Services.Configure<OnlineMusicOptions>(
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
 
-builder.Services.AddSingleton<IAuthService, AuthService>();
+builder.Services.AddSingleton<IRefreshTokenStore, SqliteRefreshTokenStore>();
+builder.Services.AddSingleton<IAuthService>(sp => new AuthService(
+	sp.GetRequiredService<IConfiguration>(),
+	sp.GetRequiredService<IHostEnvironment>(),
+	sp.GetRequiredService<IRefreshTokenStore>()));
 builder.Services.AddSingleton<IAdminCredentialService, AdminCredentialService>();
 builder.Services.AddSingleton<IPlaylistStore, SqliteStore>();
 builder.Services.AddSingleton<IScanSourceStore, SqliteScanSourceStore>();
