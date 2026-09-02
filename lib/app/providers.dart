@@ -41,7 +41,11 @@ final scanNotificationServiceProvider = Provider<ScanNotificationService>(
   (ref) => createScanNotificationService(),
 );
 final backendGatewayProvider = Provider<BackendGateway>(
-  (ref) => HttpBackendGateway(),
+  // 每次请求从 AppSettings 解析服务器地址，账号页保存后立即生效。
+  (ref) => HttpBackendGateway(
+    readBaseUrl: () =>
+        ref.read(databaseProvider).readSetting(backendBaseUrlSettingKey),
+  ),
 );
 final authTokenStoreProvider = Provider<AuthTokenStore>(
   (ref) => SecureAuthTokenStore(),
@@ -54,7 +58,10 @@ final authRepositoryProvider = Provider<AuthRepository>(
   ),
 );
 final onlineMusicGatewayProvider = Provider<OnlineMusicGateway>(
-  (ref) => HttpOnlineMusicGateway(),
+  (ref) => HttpOnlineMusicGateway(
+    readBaseUrl: () =>
+        ref.read(databaseProvider).readSetting(backendBaseUrlSettingKey),
+  ),
 );
 final onlineMusicRepositoryProvider = Provider<OnlineMusicSearchRepository>(
   (ref) => AuthenticatedOnlineMusicRepository(
@@ -110,6 +117,19 @@ final tracksProvider = StreamProvider<List<Track>>(
 );
 final accountProvider = StreamProvider<Account?>(
   (ref) => ref.watch(databaseProvider).watchCurrentAccount(),
+);
+
+/// 当前生效的后端服务器地址（AppSettings 优先，编译期注入兜底），供账号页展示与编辑。
+final backendBaseUrlProvider = StreamProvider<String>(
+  (ref) => ref
+      .watch(databaseProvider)
+      .watchSettings()
+      .map(
+        (settings) => normalizeBackendBaseUrl(
+          settings[backendBaseUrlSettingKey] ?? defaultBackendBaseUrl,
+        ),
+      )
+      .distinct(),
 );
 final playlistsProvider = StreamProvider<List<Playlist>>(
   (ref) => ref.watch(databaseProvider).watchPlaylists(),

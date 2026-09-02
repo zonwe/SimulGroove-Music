@@ -1,9 +1,21 @@
 import '../database/app_database.dart';
 
+/// 编译期注入的后端地址兜底值。仓库内不再包含任何真实内网 IP，
+/// 运行时地址优先读取 AppSettings（backend.base_url，账号页可配置）。
 const defaultBackendBaseUrl = String.fromEnvironment(
   'MUSIC_API_URL',
-  defaultValue: 'http://192.168.0.95:5080',
+  defaultValue: '',
 );
+
+/// AppSettings 中保存后端服务器地址的键。
+const backendBaseUrlSettingKey = 'backend.base_url';
+
+/// 规范化用户输入或存储的服务器地址：去空白并去掉结尾多余的斜杠。
+String normalizeBackendBaseUrl(String value) =>
+    value.trim().replaceFirst(RegExp(r'/+$'), '');
+
+/// 每次请求前读取运行时配置的后端地址（AppSettings）。
+typedef BackendBaseUrlReader = Future<String?> Function();
 
 class BackendAccount {
   const BackendAccount({

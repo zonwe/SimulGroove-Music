@@ -56,7 +56,10 @@ void main() {
         401,
       ),
     );
-    final gateway = HttpBackendGateway(client: client);
+    final gateway = HttpBackendGateway(
+      baseUrl: 'http://localhost:5080',
+      client: client,
+    );
 
     await expectLater(
       gateway.signIn(username: 'user@example.com', password: 'wrong'),
@@ -84,7 +87,10 @@ void main() {
         200,
       );
     });
-    final gateway = HttpBackendGateway(client: client);
+    final gateway = HttpBackendGateway(
+      baseUrl: 'http://localhost:5080',
+      client: client,
+    );
     final session = BackendSession(
       token: 'access-token',
       refreshToken: 'refresh-token',
@@ -125,5 +131,53 @@ void main() {
     expect(result.playlists.single.remoteId, 'playlist-1');
     expect(result.likedTracks.single.uri, track.uri);
     expect(result.deletions.single.remoteKey, deletion.remoteKey);
+  });
+
+  test('未配置服务器地址时给出可操作的中文引导', () async {
+    final gateway = HttpBackendGateway(
+      client: MockClient((_) async => fail('未配置地址时不应发出任何请求')),
+    );
+
+    await expectLater(
+      gateway.signIn(username: 'user@example.com', password: 'secret'),
+      throwsA(
+        isA<BackendException>().having(
+          (error) => error.message,
+          'message',
+          '尚未配置服务器地址，请在账号页填写后端地址。',
+        ),
+      ),
+    );
+  });
+
+  test('运行时地址解析器会覆盖编译期默认值', () async {
+    final gateway = HttpBackendGateway(
+      readBaseUrl: () async => 'http://runtime-host:5080/',
+      client: MockClient((request) async {
+        expect(
+          request.url.toString(),
+          'http://runtime-host:5080/api/auth/login',
+        );
+        return http.Response(
+          jsonEncode({
+            'token': 'access-token',
+            'refreshToken': 'refresh-token',
+            'expiresAt': '2026-08-01T10:30:00Z',
+            'account': {
+              'remoteId': 'account-user',
+              'username': 'user',
+              'displayName': 'user',
+              'avatarUri': null,
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+
+    final session = await gateway.signIn(username: 'user', password: 'secret');
+
+    expect(session.token, 'access-token');
   });
 }

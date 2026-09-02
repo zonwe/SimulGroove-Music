@@ -61,7 +61,10 @@ void main() {
         headers: {'content-type': 'application/json; charset=utf-8'},
       );
     });
-    final gateway = HttpOnlineMusicGateway(client: client);
+    final gateway = HttpOnlineMusicGateway(
+      baseUrl: 'http://localhost:5080',
+      client: client,
+    );
 
     final result = await gateway.search(session, query: '夜曲');
 
@@ -72,6 +75,7 @@ void main() {
 
   test('稳定错误码会映射为中文提示', () async {
     final gateway = HttpOnlineMusicGateway(
+      baseUrl: 'http://localhost:5080',
       client: MockClient(
         (_) async => http.Response(
           jsonEncode({
@@ -173,5 +177,62 @@ void main() {
       '/api/online-music/tracks/source-a/track-1/lyrics',
       '/api/online-music/tracks/source-a/track-1/cover',
     ]);
+  });
+
+  test('未配置服务器地址时给出可操作的中文引导', () async {
+    final gateway = HttpOnlineMusicGateway(
+      client: MockClient((_) async => fail('未配置地址时不应发出任何请求')),
+    );
+
+    await expectLater(
+      gateway.search(session, query: 'Song'),
+      throwsA(
+        isA<OnlineMusicException>()
+            .having(
+              (error) => error.code,
+              'code',
+              'online_music_server_not_configured',
+            )
+            .having(
+              (error) => error.message,
+              'message',
+              '尚未配置服务器地址，请先在账号页登录后端。',
+            ),
+      ),
+    );
+  });
+
+  test('运行时地址解析器会在每次请求前读取', () async {
+    var reads = 0;
+    final urls = <Uri>[];
+    final gateway = HttpOnlineMusicGateway(
+      readBaseUrl: () async {
+        reads++;
+        return 'http://runtime-host:5080/';
+      },
+      client: MockClient((request) async {
+        urls.add(request.url);
+        return http.Response.bytes(
+          utf8.encode(
+            jsonEncode({
+              'items': <Object>[],
+              'partial': false,
+              'warnings': <Object>[],
+              'nextCursor': null,
+            }),
+          ),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+
+    await gateway.search(session, query: 'Song');
+
+    expect(reads, 1);
+    expect(
+      urls.single.toString(),
+      'http://runtime-host:5080/api/online-music/search',
+    );
   });
 }
