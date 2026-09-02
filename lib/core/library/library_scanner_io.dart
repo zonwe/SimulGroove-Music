@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
 
+import '../log/app_log.dart';
 import 'library_scanner.dart';
 import 'scanned_track.dart';
 
@@ -188,8 +189,9 @@ class IoLibraryScanner implements LibraryScanner {
     try {
       final lrc = File(p.setExtension(audioPath, '.lrc'));
       if (await lrc.exists()) return _cleanLyrics(await lrc.readAsString());
-    } catch (_) {
+    } catch (error) {
       // Scoped storage may allow audio but not a sidecar text file.
+      AppLog.debug('读取同名 LRC 歌词失败：$audioPath', error);
     }
     return null;
   }
@@ -224,7 +226,8 @@ class IoLibraryScanner implements LibraryScanner {
             )
           : decoded;
       return Uint8List.fromList(image.encodeJpg(thumbnail, quality: 70));
-    } catch (_) {
+    } catch (error) {
+      AppLog.debug('封面解码失败，按大小决定保留或丢弃', error);
       return bytes.length <= 512 * 1024 ? bytes : null;
     }
   }
@@ -236,8 +239,9 @@ Map<String, String?> _readEmbeddedLyricsByPath(List<String> paths) {
     try {
       final lyrics = readMetadata(File(path), getImage: false).lyrics?.trim();
       lyricsByPath[path] = lyrics == null || lyrics.isEmpty ? null : lyrics;
-    } catch (_) {
+    } catch (error) {
       // A malformed tag must not exclude an otherwise playable track.
+      AppLog.debug('内嵌歌词读取失败：$path', error);
       lyricsByPath[path] = null;
     }
   }
@@ -264,8 +268,9 @@ Future<ScanResult> scanDesktopDirectory(
     AudioMetadata? metadata;
     try {
       metadata = readMetadata(file, getImage: true);
-    } catch (_) {
+    } catch (error) {
       // A playable file may have malformed or missing tags; keep it in the library.
+      AppLog.debug('音频元数据读取失败，使用文件名兜底：${file.path}', error);
     }
     final canonicalPath = p.normalize(file.absolute.path);
     final stablePath = isWindows ? canonicalPath.toLowerCase() : canonicalPath;
@@ -326,8 +331,9 @@ Future<String?> _readDesktopSidecarLyrics(String audioPath) async {
     if (await lrc.exists()) {
       return _cleanDesktopLyrics(await lrc.readAsString());
     }
-  } catch (_) {
+  } catch (error) {
     // A sidecar file may be inaccessible even when the audio file is readable.
+    AppLog.debug('读取同名 LRC 歌词失败：$audioPath', error);
   }
   return null;
 }
@@ -362,7 +368,8 @@ Uint8List? _compactDesktopArtwork(Uint8List? bytes) {
           )
         : decoded;
     return Uint8List.fromList(image.encodeJpg(thumbnail, quality: 70));
-  } catch (_) {
+  } catch (error) {
+    AppLog.debug('封面解码失败，按大小决定保留或丢弃', error);
     return bytes.length <= 512 * 1024 ? bytes : null;
   }
 }
