@@ -122,6 +122,8 @@ class HttpOnlineMusicGateway
       token: session.token,
       method: 'GET',
     );
+    // 歌词是可选增强：上游没有歌词（404）时返回 null 属正常降级，
+    // 由 UI 展示"暂无歌词"，不视为错误。
     if (response.statusCode == 404) return null;
     _ensureSuccess(response);
     final lyrics = _jsonObject(response)['lyrics'] as String?;
@@ -149,6 +151,7 @@ class HttpOnlineMusicGateway
       token: session.token,
       method: 'GET',
     );
+    // 封面同样是可选增强：404 时返回 null 由 UI 显示占位图，不视为错误。
     if (response.statusCode == 404) return null;
     _ensureSuccess(response);
     final contentType = response.headers['content-type'] ?? '';

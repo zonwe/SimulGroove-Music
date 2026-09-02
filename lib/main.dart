@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/music_app.dart';
 import 'app/providers.dart';
 import 'core/database/app_database.dart';
+import 'core/log/app_log.dart';
 import 'core/notifications/scan_notification_service_factory.dart';
 import 'core/player/audio_backend.dart';
 import 'core/player/equalizer_models.dart';
@@ -106,7 +107,11 @@ Future<void> _restoreEqualizerSettings(
       preampDb: preamp,
       presetId: presetId,
     );
-  } catch (_) {}
+  } catch (error, stackTrace) {
+    // 恢复均衡器是可选增强：平台音频效果不可用或设置损坏时按默认状态启动，
+    // 不阻止应用启动，但需要留痕便于排查。
+    AppLog.error('启动时恢复均衡器配置失败', error, stackTrace);
+  }
 }
 
 Future<void> _configureAndroidAudioSession(

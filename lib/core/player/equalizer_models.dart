@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../log/app_log.dart';
+
 const List<int> equalizerFrequencies = [
   31,
   62,
@@ -60,7 +62,10 @@ class EqualizerPreset {
         }
         return list.take(10).toList();
       }
-    } catch (_) {}
+    } catch (error, stackTrace) {
+      // 损坏的增益数据降级为平直预设，不中断预设列表渲染，但要留痕。
+      AppLog.warning('均衡器增益 JSON 解析失败，使用平直增益兜底', error, stackTrace);
+    }
     return List<double>.filled(10, 0.0);
   }
 

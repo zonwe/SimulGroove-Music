@@ -1,10 +1,10 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:local_notifier/local_notifier.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../log/app_log.dart';
 import 'scan_notification_service.dart';
 
 ScanNotificationService createScanNotificationService() =>
@@ -30,7 +30,7 @@ class IoScanNotificationService implements ScanNotificationService {
       }
       _initialized = true;
     } catch (e) {
-      debugPrint('Failed to initialize local notifier: $e');
+      AppLog.warning('桌面通知服务初始化失败', e);
     }
   }
 
@@ -54,13 +54,13 @@ class IoScanNotificationService implements ScanNotificationService {
           'notificationId': 1001,
         });
       } catch (e) {
-        debugPrint('Android scan start notification error: $e');
+        AppLog.warning('Android 扫描开始通知发送失败', e);
       }
     } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       try {
         await _showDesktopNotification(title: title, message: message);
       } catch (e) {
-        debugPrint('Desktop scan start notification error: $e');
+        AppLog.warning('桌面扫描开始通知发送失败', e);
       }
     }
   }
@@ -86,13 +86,13 @@ class IoScanNotificationService implements ScanNotificationService {
           'notificationId': 1001,
         });
       } catch (e) {
-        debugPrint('Android scan completed notification error: $e');
+        AppLog.warning('Android 扫描完成通知发送失败', e);
       }
     } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       try {
         await _showDesktopNotification(title: title, message: message);
       } catch (e) {
-        debugPrint('Desktop scan completed notification error: $e');
+        AppLog.warning('桌面扫描完成通知发送失败', e);
       }
     }
   }
@@ -115,13 +115,13 @@ class IoScanNotificationService implements ScanNotificationService {
           'notificationId': 1001,
         });
       } catch (e) {
-        debugPrint('Android scan failed notification error: $e');
+        AppLog.warning('Android 扫描失败通知发送失败', e);
       }
     } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       try {
         await _showDesktopNotification(title: title, message: message);
       } catch (e) {
-        debugPrint('Desktop scan failed notification error: $e');
+        AppLog.warning('桌面扫描失败通知发送失败', e);
       }
     }
   }
@@ -134,14 +134,14 @@ class IoScanNotificationService implements ScanNotificationService {
           'notificationId': 1001,
         });
       } catch (e) {
-        debugPrint('Android cancel scan notification error: $e');
+        AppLog.warning('Android 清除扫描通知失败', e);
       }
     } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       try {
         await _desktopNotification?.destroy();
         _desktopNotification = null;
       } catch (e) {
-        debugPrint('Desktop cancel scan notification error: $e');
+        AppLog.warning('桌面清除扫描通知失败', e);
       }
     }
   }
