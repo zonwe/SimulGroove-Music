@@ -72,15 +72,9 @@ builder.Services.AddAuthorization(options =>
 		AdminAuthorization.PolicyName,
 		policy => policy.RequireRole(AdminAuthorization.RoleName)));
 builder.Services.AddRazorPages();
+var corsAllowedOrigins = CorsOriginPolicy.GetAllowedOrigins(builder.Configuration);
 builder.Services.AddCors(options =>
-	options.AddDefaultPolicy(policy =>
-		policy
-			.SetIsOriginAllowed(_ => true)
-			.AllowAnyHeader()
-			.AllowAnyMethod()
-			.AllowCredentials()
-			.WithExposedHeaders("*")
-	)
+	options.AddDefaultPolicy(policy => CorsOriginPolicy.Configure(policy, corsAllowedOrigins))
 );
 
 var app = builder.Build();
