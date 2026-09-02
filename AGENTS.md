@@ -50,7 +50,8 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 | `lib/features/player/` | 迷你播放器、正在播放页、队列、音量和歌曲信息 | UI 状态来自 `MusicAudioHandler` 的流和值流 |
 | `lib/features/playlists/` | 歌单列表和详情 | 写操作经 `AppDatabase`，不要在页面内维护另一份事实源 |
 | `lib/features/account/` | 真实登录和歌单/喜欢同步 UI | 页面不直接持有 Token 或 HTTP 客户端 |
-| `lib/features/placeholders/` | 设置与听歌识曲占位页 | `settings_page.dart` 已是实际设置页，目录名不代表全部都是占位功能 |
+| `lib/features/placeholders/` | 听歌识曲占位页 | 识曲功能仍未实现，不应主动调用麦克风 |
+| `lib/features/settings/` | 实际设置页：外观、播放界面、音效、扫描、在线音乐、托盘与快捷键区块 | 各区块独立成文件；新增设置优先加区块而不是往 `settings_page.dart` 堆叠 |
 | `lib/features/online_search/` | 在线音乐搜索状态、页面和结果项 | 只调用 `Music.Api`；不得直连 sidecar 或保存第三方 URL/Cookie |
 | `android/` | Android 宿主、权限和 MediaStore MethodChannel | 修改 Kotlin 后至少做 Android 编译或实机验证 |
 | `windows/` | Windows Runner、CMake、图标和生成的插件注册 | 生成的 registrant 不手改；CMake 有 MSVC 兼容设置 |

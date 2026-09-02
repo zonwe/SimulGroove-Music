@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_music/app/providers.dart';
 import 'package:flutter_music/core/database/app_database.dart';
 import 'package:flutter_music/core/player/now_playing_layout.dart';
-import 'package:flutter_music/features/placeholders/settings_page.dart';
+import 'package:flutter_music/features/settings/now_playing_layout_settings_section.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 

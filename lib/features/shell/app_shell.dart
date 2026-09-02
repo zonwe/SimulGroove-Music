@@ -8,7 +8,7 @@ import '../account/account_page.dart';
 import '../library/library_page.dart';
 import '../library/favorites_page.dart';
 import '../placeholders/recognition_page.dart';
-import '../placeholders/settings_page.dart';
+import '../settings/settings_page.dart';
 import '../online_search/online_collection_page.dart';
 import '../online_search/online_search_page.dart';
 import '../player/compact_player.dart';
