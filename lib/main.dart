@@ -12,7 +12,7 @@ import 'core/database/app_database.dart';
 import 'core/log/app_log.dart';
 import 'core/notifications/scan_notification_service_factory.dart';
 import 'core/player/audio_backend.dart';
-import 'core/player/equalizer_models.dart';
+import 'core/player/equalizer_controller.dart';
 import 'core/player/music_audio_handler.dart';
 import 'core/shortcuts/desktop_shortcut_service.dart';
 import 'core/startup/debug_artifact_cleanup.dart';
@@ -86,26 +86,12 @@ Future<void> _restoreEqualizerSettings(
 ) async {
   try {
     final settings = await database.watchSettings().first;
-    final enabled = settings['audio.equalizer.enabled'] == 'true';
-    final presetId = settings['audio.equalizer.preset'] ?? 'flat';
-    final gainsJson = settings['audio.equalizer.gains'];
-    final preampStr = settings['audio.equalizer.preamp'];
-
-    var gains = EqualizerPreset.parseGains(gainsJson);
-    var preamp = preampStr != null ? (double.tryParse(preampStr) ?? 0.0) : 0.0;
-    if (gainsJson == null || gainsJson.isEmpty) {
-      final defaultPreset = findDefaultEqualizerPreset(presetId);
-      if (defaultPreset != null) {
-        gains = List<double>.from(defaultPreset.gains);
-        preamp = defaultPreset.preampDb;
-      }
-    }
-
+    final config = parseEqualizerSettings(settings);
     await audioHandler.applyEqualizer(
-      enabled: enabled,
-      gains: gains,
-      preampDb: preamp,
-      presetId: presetId,
+      enabled: config.enabled,
+      gains: config.gains,
+      preampDb: config.preampDb,
+      presetId: config.presetId,
     );
   } catch (error, stackTrace) {
     // 恢复均衡器是可选增强：平台音频效果不可用或设置损坏时按默认状态启动，

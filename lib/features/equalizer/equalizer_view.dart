@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
+import '../../core/player/equalizer_controller.dart';
 import '../../core/player/equalizer_models.dart';
 import 'equalizer_band_slider.dart';
 import 'equalizer_curve_painter.dart';
@@ -74,30 +75,14 @@ class _EqualizerViewState extends ConsumerState<EqualizerView> {
   Future<void> _loadInitialState() async {
     final db = ref.read(databaseProvider);
     final settings = await db.watchSettings().first;
-
-    final enabled = settings['audio.equalizer.enabled'] != 'false';
-    final presetId = settings['audio.equalizer.preset'] ?? 'flat';
-    final gainsJson = settings['audio.equalizer.gains'];
-    final preampStr = settings['audio.equalizer.preamp'];
-
-    var gains = EqualizerPreset.parseGains(gainsJson);
-    var preamp = preampStr != null ? (double.tryParse(preampStr) ?? 0.0) : 0.0;
-
-    // If gains were empty and preset is a default preset, load default preset gains
-    if (gainsJson == null || gainsJson.isEmpty) {
-      final defaultPreset = findDefaultEqualizerPreset(presetId);
-      if (defaultPreset != null) {
-        gains = List<double>.from(defaultPreset.gains);
-        preamp = defaultPreset.preampDb;
-      }
-    }
+    final config = parseEqualizerSettings(settings);
 
     if (mounted) {
       setState(() {
-        _enabled = enabled;
-        _selectedPresetId = presetId;
-        _gains = List<double>.from(gains);
-        _preampDb = preamp;
+        _enabled = config.enabled;
+        _selectedPresetId = config.presetId;
+        _gains = List<double>.from(config.gains);
+        _preampDb = config.preampDb;
         _initialized = true;
       });
     }
@@ -106,10 +91,10 @@ class _EqualizerViewState extends ConsumerState<EqualizerView> {
     ref
         .read(audioHandlerProvider)
         .applyEqualizer(
-          enabled: enabled,
-          gains: _gains,
-          preampDb: _preampDb,
-          presetId: _selectedPresetId,
+          enabled: config.enabled,
+          gains: config.gains,
+          preampDb: config.preampDb,
+          presetId: config.presetId,
         );
   }
 
