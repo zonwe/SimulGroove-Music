@@ -79,6 +79,8 @@ flutter run -d linux --dart-define=MUSIC_API_URL=http://localhost:5080
 
 完整配置、Android/Web 地址差异、令牌策略和已知限制见 [`docs/flutter_backend_integration.md`](docs/flutter_backend_integration.md)。
 
+仓库配置了最小 CI（`.github/workflows/ci.yml`）：Flutter 侧执行格式检查、静态分析、单元测试和 Web 构建冒烟验证；后端侧执行 `dotnet build` 与 Release 测试。推送或提交 PR 时自动运行。
+
 后端回归测试：
 
 ```powershell

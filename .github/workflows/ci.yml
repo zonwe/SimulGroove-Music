@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flutter:
+    name: Flutter 分析与测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: 安装依赖
+        run: flutter pub get
+      - name: 检查格式
+        run: dart format --output=none --set-exit-if-changed lib test
+      - name: 静态分析
+        run: flutter analyze
+      - name: 单元测试
+        run: flutter test
+      # Web stub 可编译是项目硬要求（条件导出必须隔离 dart:io）。
+      - name: Web 构建冒烟验证
+        run: flutter build web
+
+  backend:
+    name: 后端构建与测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: 还原依赖
+        run: dotnet restore backend/Music.Api.Tests/Music.Api.Tests.csproj --configfile backend/NuGet.Config
+      - name: 构建 API
+        run: dotnet build backend/Music.Api/Music.Api.csproj --no-restore
+      - name: 运行测试
+        run: dotnet test backend/Music.Api.Tests/Music.Api.Tests.csproj --no-restore -c Release
