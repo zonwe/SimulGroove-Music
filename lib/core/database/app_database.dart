@@ -524,6 +524,46 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
+  /// 批量把已在库中的曲目加入歌单。
+  ///
+  /// 与逐条调用 [addTrackToPlaylist] 相比，整批共用一个事务和一次歌单
+  /// 时间戳更新，页面层多选加入歌单时避免 N+1 写入。
+  Future<void> addExistingTracksToPlaylist(
+    String playlistId,
+    Iterable<String> trackIds,
+  ) async {
+    final ids = trackIds.toSet().toList(growable: false);
+    if (ids.isEmpty) return;
+    await transaction(() async {
+      final maximumPosition = playlistEntries.position.max();
+      final positionQuery = selectOnly(playlistEntries)
+        ..addColumns([maximumPosition])
+        ..where(playlistEntries.playlistId.equals(playlistId));
+      var position =
+          (await positionQuery
+                  .map((row) => row.read(maximumPosition))
+                  .getSingle() ??
+              -1) +
+          1;
+      final addedAt = DateTime.now();
+      await batch((batch) {
+        // 注意：不能用 batch.replaceAll——它只 UPDATE 已存在的行，
+        // 不会插入不存在的歌单条目；insertAllOnConflictUpdate 与
+        // addTrackToPlaylist 的 upsert（存在则移到末尾）语义一致。
+        batch.insertAllOnConflictUpdate(playlistEntries, [
+          for (final id in ids)
+            PlaylistEntriesCompanion.insert(
+              playlistId: playlistId,
+              trackId: id,
+              position: position++,
+              addedAt: addedAt,
+            ),
+        ]);
+      });
+      await _markPlaylistLocal(playlistId);
+    });
+  }
+
   Future<void> addTracksToPlaylist(
     String playlistId,
     Iterable<TracksCompanion> trackValues,
