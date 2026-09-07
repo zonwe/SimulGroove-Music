@@ -134,6 +134,78 @@ jobs:
           done
           docker logs "$container_name"
           exit 1
+      - name: 端到端校验 OTLP 指标与敏感字段
+        run: |
+          image_name=simulgroove-music-api:ci
+          network_name=simulgroove-observability-smoke
+          collector_name=simulgroove-otel-collector-smoke
+          api_name=simulgroove-music-api-telemetry-smoke
+          cleanup() {
+            docker rm --force "$api_name" "$collector_name" >/dev/null 2>&1 || true
+            docker network rm "$network_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker network create "$network_name"
+          docker run --detach \
+            --name "$collector_name" \
+            --network "$network_name" \
+            --publish 127.0.0.1:19464:9464 \
+            --volume "$PWD/deploy/observability/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro" \
+            otel/opentelemetry-collector-contrib:0.160.0 \
+            --config=/etc/otelcol-contrib/config.yml
+          docker run --detach \
+            --name "$api_name" \
+            --network "$network_name" \
+            --publish 127.0.0.1:18081:8080 \
+            --env Auth__JwtKey="$MUSIC_API_JWT_KEY" \
+            --env Administration__Password="$MUSIC_API_ADMIN_PASSWORD" \
+            --env Observability__OtlpEndpoint="http://$collector_name:4317" \
+            --env OTEL_METRIC_EXPORT_INTERVAL=1000 \
+            --env OnlineMusic__Enabled=true \
+            --env OnlineMusic__AllowedSources__0=ci \
+            --env OnlineMusic__SidecarBaseUrl=http://missing-sidecar:8080 \
+            --env OnlineMusic__RequestTimeoutSeconds=1 \
+            --env OnlineMusic__CircuitBreakerFailureThreshold=2 \
+            --env OnlineMusic__CircuitBreakerBreakSeconds=300 \
+            "$image_name"
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18081/health >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              docker logs "$api_name"
+              exit 1
+            fi
+            sleep 2
+          done
+          login_response=$(curl --fail --silent \
+            --header 'Content-Type: application/json' \
+            --data '{"username":"ci-telemetry","password":"ci-telemetry-password"}' \
+            http://127.0.0.1:18081/api/auth/login)
+          access_token=$(jq --exit-status --raw-output '.token' <<<"$login_response")
+          for attempt in 1 2 3; do
+            status_code=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --header "Authorization: Bearer $access_token" \
+              --header 'Content-Type: application/json' \
+              --data '{"query":"metric-smoke-query","sources":["ci"],"limit":1}' \
+              http://127.0.0.1:18081/api/online-music/search)
+            test "$status_code" = 503
+          done
+          for attempt in {1..45}; do
+            metrics=$(curl --fail --silent http://127.0.0.1:19464/metrics || true)
+            if grep --quiet '^flutter_music_online_music_sidecar_requests_total' <<<"$metrics" && \
+              grep --quiet '^flutter_music_online_music_sidecar_failures_total' <<<"$metrics" && \
+              grep --quiet '^flutter_music_online_music_sidecar_circuit_rejections_total' <<<"$metrics"; then
+              ! grep --fixed-strings --quiet 'metric-smoke-query' <<<"$metrics"
+              ! grep --fixed-strings --quiet 'ci-telemetry' <<<"$metrics"
+              ! grep --fixed-strings --quiet "$access_token" <<<"$metrics"
+              exit 0
+            fi
+            sleep 2
+          done
+          grep '^flutter_music_online_music' <<<"$metrics" || true
+          docker logs "$collector_name"
+          exit 1
 
   linux:
     name: Linux Release 构建
