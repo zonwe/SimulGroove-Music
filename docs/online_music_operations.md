@@ -43,3 +43,62 @@
 - 通知路由到达值班渠道，链接能够打开本页对应处置段落。
 - 指标样本与通知中不存在任何高基数或敏感字段。
 - [`online_music_release_review.md`](online_music_release_review.md) 中的来源授权门禁已经逐来源批准。
+
+### 自动化验收入口
+
+`tool/production_acceptance.ps1` 将配置、外部 HTTPS 和通知路由检查串成同一份本地证据。脚本不会输出 JWT、管理员密码、Webhook 或 Cookie，结果只写入已被忽略的 `build/acceptance/production/`。
+
+上线前先让生产环境文件引用仓库外的真实 Alertmanager 配置。真实域名、ACME 邮箱、JWT 密钥和管理员密码不能保留示例值：
+
+```powershell
+pwsh ./tool/production_acceptance.ps1 `
+  -BaseUrl "https://music.example.org" `
+  -EnvironmentFile "C:/secure/simulgroove/production.env" `
+  -ConfigurationOnly
+```
+
+服务启动后执行运行时验收。它会确认全部私有服务正在运行、系统信任 HTTPS 证书、证书剩余有效期、Caddy 安全响应头、关联 ID 回显和存活/就绪检查：
+
+```powershell
+pwsh ./tool/production_acceptance.ps1 `
+  -BaseUrl "https://music.example.org" `
+  -EnvironmentFile "C:/secure/simulgroove/production.env"
+```
+
+通知送达必须对 `FailureWarning`、`FailureCritical` 和 `CircuitBreaker` 三个场景分别完成，以命中真实规则使用的告警名、严重级别和组件标签。每个场景的第一步都从 Compose 私有观测网络向 Alertmanager 发送不含用户或媒体数据的受控告警：
+
+```powershell
+pwsh ./tool/production_acceptance.ps1 `
+  -BaseUrl "https://music.example.org" `
+  -EnvironmentFile "C:/secure/simulgroove/production.env" `
+  -AlertAction Fire `
+  -AlertScenario FailureWarning `
+  -AlertTestId CHG-20260907-01 `
+  -RunbookUrl "https://ops.example.org/runbooks/simulgroove-online-music"
+```
+
+脚本会从 Alertmanager API 反查该告警确实处于活动状态。值班渠道确认收到通知后，使用完全相同的 `AlertScenario` 和 `AlertTestId` 发送恢复，并记录通知或工单编号：
+
+```powershell
+pwsh ./tool/production_acceptance.ps1 `
+  -BaseUrl "https://music.example.org" `
+  -EnvironmentFile "C:/secure/simulgroove/production.env" `
+  -AlertAction Resolve `
+  -AlertScenario FailureWarning `
+  -AlertTestId CHG-20260907-01 `
+  -RunbookUrl "https://ops.example.org/runbooks/simulgroove-online-music" `
+  -NotificationReceiptReference "INC-12345"
+```
+
+恢复步骤必须找到七天内相同场景、测试 ID 与域名的 Fire 证据，并从 Alertmanager API 确认告警不再活动，随后生成 `scenario_complete`。三个场景均完成后执行最终汇总：
+
+```powershell
+pwsh ./tool/production_acceptance.ps1 `
+  -BaseUrl "https://music.example.org" `
+  -EnvironmentFile "C:/secure/simulgroove/production.env" `
+  -AlertAction Finalize
+```
+
+最终汇总要求七天内三个场景的 `scenario_complete` 证据都与当前域名、在线音乐启用状态和来源白名单一致。只有汇总证据状态才是 `complete`。
+
+若 `ONLINE_MUSIC_ENABLED=true`，脚本还要求 `-ApprovedSourceId` 与生产白名单完全相同，并要求 `-SourceApprovalEvidencePath` 指向仓库外的结构化 JSON 记录；字段模板见 [`deploy/compliance/online_music_source_approval.example.json`](../deploy/compliance/online_music_source_approval.example.json)。脚本会校验批准状态、有效期、能力范围、政策链接、三方审批人、固定提交、镜像摘要、对应源码地址和敏感字段名。该检查不能替代业务、安全与法律/合规审批，只用于防止部署参数绕过已经定义的门禁。

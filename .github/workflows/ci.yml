@@ -78,6 +78,116 @@ jobs:
       ALERTMANAGER_CONFIG_PATH: ${{ github.workspace }}/deploy/observability/alertmanager.example.yml
     steps:
       - uses: actions/checkout@v7
+      - name: 校验生产与实机验收脚本
+        shell: pwsh
+        run: |
+          $hasParseErrors = $false
+          foreach ($path in @(
+            "tool/production_acceptance.ps1",
+            "tool/android_device_acceptance.ps1"
+          )) {
+            $parseErrors = $null
+            [Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path),
+              [ref]$null,
+              [ref]$parseErrors
+            ) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | Format-List
+              $hasParseErrors = $true
+            }
+          }
+          if ($hasParseErrors) {
+            throw "验收脚本存在 PowerShell 语法错误。"
+          }
+          ./tool/android_device_acceptance.ps1 -ListChecks | Out-Null
+          try {
+            $productionArguments = @{
+              BaseUrl = "https://music.example.com"
+              EnvironmentFile = ".env.example"
+              ConfigurationOnly = $true
+            }
+            ./tool/production_acceptance.ps1 @productionArguments
+            throw "生产验收脚本未拒绝示例配置。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "占位值") {
+              throw
+            }
+          }
+          $alertConfigPath = Join-Path $env:RUNNER_TEMP "alertmanager-ci.yml"
+          @(
+            "route:"
+            "  receiver: ci-smoke"
+            "receivers:"
+            "  - name: ci-smoke"
+            "    webhook_configs:"
+            "      - url: https://alerts.ci.internal/simulgroove"
+          ) | Set-Content -LiteralPath $alertConfigPath -Encoding utf8
+          $environmentPath = Join-Path $env:RUNNER_TEMP "production-ci.env"
+          $ciJwtKey = "$(New-Guid)$(New-Guid)"
+          $ciAdminPassword = "$(New-Guid)"
+          @(
+            "MUSIC_DOMAIN=music.ci.internal"
+            "ACME_EMAIL=ops@ci.internal"
+            "MUSIC_API_JWT_KEY=$ciJwtKey"
+            "MUSIC_API_ADMIN_PASSWORD=$ciAdminPassword"
+            "ONLINE_MUSIC_ENABLED=true"
+            "ONLINE_MUSIC_SOURCE_0=ci-source"
+            "ONLINE_MUSIC_SOURCE_1="
+            "ONLINE_MUSIC_SOURCE_2="
+            "ALERTMANAGER_CONFIG_PATH=$alertConfigPath"
+          ) | Set-Content -LiteralPath $environmentPath -Encoding utf8
+          $approvalPath = Join-Path $env:RUNNER_TEMP "source-approval-ci.json"
+          [ordered]@{
+            schema_version = 1
+            change_ticket = "CHG-CI-SOURCE-GATE"
+            sources = @(
+              [ordered]@{
+                source_id = "ci-source"
+                decision = "approved"
+                effective_at_utc = "2020-01-01T00:00:00Z"
+                expires_at_utc = "2099-01-01T00:00:00Z"
+                regions = @("CI")
+                allowed_capabilities = @(
+                  "search", "metadata", "cover", "lyrics",
+                  "playback", "range", "download"
+                )
+                policy_urls = @(
+                  "https://terms.ci.internal/service",
+                  "https://terms.ci.internal/copyright",
+                  "https://terms.ci.internal/privacy"
+                )
+                access_method = "synthetic_ci_contract"
+                business_approver = "ci-business-reviewer"
+                security_approver = "ci-security-reviewer"
+                compliance_approver = "ci-compliance-reviewer"
+                upstream_commit = "1111111111111111111111111111111111111111"
+                fork_commit = "2222222222222222222222222222222222222222"
+                image_digest = "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+                corresponding_source_url = "https://source.ci.internal/simulgroove"
+              }
+            )
+          } | ConvertTo-Json -Depth 6 |
+            Set-Content -LiteralPath $approvalPath -Encoding utf8
+          $evidenceDirectory = Join-Path $env:RUNNER_TEMP "production-acceptance"
+          $productionArguments = @{
+            BaseUrl = "https://music.ci.internal"
+            EnvironmentFile = $environmentPath
+            ConfigurationOnly = $true
+            EvidenceDirectory = $evidenceDirectory
+            ApprovedSourceId = @("ci-source")
+            SourceApprovalEvidencePath = $approvalPath
+          }
+          ./tool/production_acceptance.ps1 @productionArguments
+          $evidencePath = Get-ChildItem $evidenceDirectory -Filter "production-*.json" |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+          $evidence = Get-Content -LiteralPath $evidencePath.FullName -Raw |
+            ConvertFrom-Json
+          if ($evidence.status -ne "configuration_valid") {
+            throw "生产配置验收证据状态不正确。"
+          }
       - name: 校验 Compose 合并与变量
         run: docker compose -f compose.online-music.production.yml config --quiet
       - name: 校验 Caddy HTTPS 配置

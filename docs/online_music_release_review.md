@@ -53,7 +53,21 @@
 
 发生条款变化、来源接口变化、投诉、账号封禁、安全事件或批准到期时，应立即从生产白名单移除对应来源，再重新复核。
 
-## 复核记录模板
+## 机器可校验的复核记录
+
+生产验收使用仓库外的 JSON 记录，字段模板见 [`deploy/compliance/online_music_source_approval.example.json`](../deploy/compliance/online_music_source_approval.example.json)。模板中的占位值、保留示例域名、全零提交和镜像摘要会被 `tool/production_acceptance.ps1` 明确拒绝，不能直接用于上线。
+
+启用在线音乐时，JSON 中的来源集合必须与 `-ApprovedSourceId` 和生产白名单完全一致。每个来源还必须满足以下机器门禁：
+
+- `decision` 为 `approved`，已经生效且尚未过期。
+- `allowed_capabilities` 覆盖当前产品会暴露的搜索、元数据、封面、歌词、播放、Range 和下载。
+- 至少三条非示例 HTTPS 政策链接，并记录地区、访问方式和业务、安全、合规审批人。
+- 上游提交、内部 fork 提交、部署镜像 SHA-256 摘要和对应源码 HTTPS 地址均为非占位值。
+- JSON 属性名不得包含密码、Token、Cookie、私钥或其他秘密字段。
+
+该 JSON 是发布门禁的结构化索引，不应嵌入合同、Cookie、Token 或签名参数。合同和审批原件继续保存在受控证据库中，并由 `change_ticket` 和审批人身份关联。
+
+## 人工复核记录模板
 
 ```text
 来源 ID：
