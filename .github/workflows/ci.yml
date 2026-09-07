@@ -103,6 +103,15 @@ jobs:
           --entrypoint /bin/promtool
           prom/prometheus:v3.14.0
           check config /etc/prometheus/prometheus.yml
+      - name: 测试告警阈值、持续时间与恢复
+        run: >-
+          docker run --rm
+          --workdir /etc/prometheus/rules
+          --volume "$PWD/deploy/observability/online_music_alerts.yml:/etc/prometheus/rules/online_music_alerts.yml:ro"
+          --volume "$PWD/deploy/observability/online_music_alerts_test.yml:/etc/prometheus/rules/online_music_alerts_test.yml:ro"
+          --entrypoint /bin/promtool
+          prom/prometheus:v3.14.0
+          test rules online_music_alerts_test.yml
       - name: 校验 Alertmanager 配置结构
         run: >-
           docker run --rm
