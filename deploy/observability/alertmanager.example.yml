@@ -1,0 +1,14 @@
+# 复制到仓库外的受控路径，替换接收地址后再把该路径写入 ALERTMANAGER_CONFIG_PATH。
+# 不要把真实 webhook、邮箱密码或值班渠道地址提交到仓库。
+route:
+  receiver: replace-before-production
+  group_by: [alertname, severity, component]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: replace-before-production
+    webhook_configs:
+      - url: https://alerts.example.invalid/simulgroove
+        send_resolved: true

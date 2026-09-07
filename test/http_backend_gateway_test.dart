@@ -20,6 +20,7 @@ void main() {
           'token': 'access-token',
           'refreshToken': 'refresh-token',
           'expiresAt': '2026-08-01T10:30:00Z',
+          'trackMatchSalt': 'c2FsdA',
           'account': {
             'remoteId': 'account-user@example.com',
             'username': 'user@example.com',
@@ -44,6 +45,7 @@ void main() {
     expect(session.token, 'access-token');
     expect(session.refreshToken, 'refresh-token');
     expect(session.account.displayName, 'user');
+    expect(session.trackMatchSalt, 'c2FsdA');
   });
 
   test('无效密码映射为可展示的中文错误', () async {
@@ -106,6 +108,10 @@ void main() {
       title: 'Song',
       artist: 'Artist',
       album: 'Album',
+      matchToken:
+          'hmac-sha256:'
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     );
 
     final deletion = BackendDeletion(
@@ -130,6 +136,7 @@ void main() {
 
     expect(result.playlists.single.remoteId, 'playlist-1');
     expect(result.likedTracks.single.uri, track.uri);
+    expect(result.likedTracks.single.matchToken, track.matchToken);
     expect(result.deletions.single.remoteKey, deletion.remoteKey);
   });
 

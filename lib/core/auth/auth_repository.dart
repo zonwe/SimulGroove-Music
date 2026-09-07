@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../database/app_database.dart';
 import 'auth_token_store.dart';
 import 'backend_gateway.dart';
+import 'track_match_token.dart';
 
 class SyncResult {
   const SyncResult({
@@ -56,10 +57,16 @@ class BackendAuthRepository implements AuthRepository {
     if (normalized.isEmpty || password.isEmpty) {
       throw const FormatException('请输入账号和密码。');
     }
-    final session = await _gateway.signIn(
+    var session = await _gateway.signIn(
       username: normalized,
       password: password,
     );
+    final matchSalt = session.trackMatchSalt;
+    if (matchSalt != null && matchSalt.isNotEmpty) {
+      session = session.withTrackMatchKey(
+        await deriveTrackMatchKey(password: password, salt: matchSalt),
+      );
+    }
     await _saveSession(session);
     await _database.setSetting(_legacySessionKey, '');
   }
@@ -98,6 +105,7 @@ class BackendAuthRepository implements AuthRepository {
           displayName: account.displayName,
           avatarUri: account.avatarUri,
         ),
+        trackMatchKey: tokens.trackMatchKey,
       );
       if (!_session!.shouldRefresh) return _session;
     }
@@ -107,8 +115,14 @@ class BackendAuthRepository implements AuthRepository {
 
   @override
   Future<SyncResult> syncNow() async {
+    final session = await currentSession();
+    if (session == null) throw StateError('请先登录账号。');
     final account = await _database.watchCurrentAccount().first;
     if (account == null) throw StateError('请先登录账号。');
+    final localTrackMatcher = _LocalTrackMatcher(
+      await _database.allTracks(),
+      trackMatchKey: session.trackMatchKey,
+    );
 
     final localPlaylists = await _database.watchPlaylists().first;
     final playlists = <BackendPlaylist>[];
@@ -119,15 +133,25 @@ class BackendAuthRepository implements AuthRepository {
           remoteId: playlist.remoteId ?? 'playlist-${playlist.id}',
           name: playlist.name,
           updatedAt: playlist.updatedAt,
-          tracks: tracks.map(BackendTrack.fromLocal).toList(growable: false),
+          tracks: tracks
+              .map(
+                (track) => BackendTrack.fromLocal(
+                  track,
+                  trackMatchKey: session.trackMatchKey,
+                ),
+              )
+              .toList(growable: false),
         ),
       );
     }
     final localLikes = await _database.allLikedTracksForSync();
     final likedTracks = localLikes
         .map(
-          (item) =>
-              BackendTrack.fromLocal(item.track, updatedAt: item.updatedAt),
+          (item) => BackendTrack.fromLocal(
+            item.track,
+            updatedAt: item.updatedAt,
+            trackMatchKey: session.trackMatchKey,
+          ),
         )
         .toList(growable: false);
     final localPresets = await _database.allEqualizerPresets();
@@ -138,13 +162,7 @@ class BackendAuthRepository implements AuthRepository {
       account.id,
     );
     final deletions = localTombstones
-        .map(
-          (row) => BackendDeletion(
-            entityType: SyncEntityType.fromWireName(row.entityType),
-            remoteKey: row.remoteKey,
-            deletedAt: row.deletedAt,
-          ),
-        )
+        .map((row) => _backendDeletion(row, localTrackMatcher))
         .toList(growable: false);
 
     final remote = await _syncWithRefresh(
@@ -153,7 +171,6 @@ class BackendAuthRepository implements AuthRepository {
       presets,
       deletions,
     );
-    final localTrackMatcher = _LocalTrackMatcher(await _database.allTracks());
     String deletionKey(String entityType, String remoteKey) =>
         '$entityType\u0000$remoteKey';
 
@@ -179,10 +196,15 @@ class BackendAuthRepository implements AuthRepository {
             playlistByRemoteId.remove(deletion.remoteKey);
           }
         case SyncEntityType.likedTrack:
-          final local = likeByUri[deletion.remoteKey];
+          final matchedTrack = isTrackMatchToken(deletion.remoteKey)
+              ? localTrackMatcher.findByMatchToken(deletion.remoteKey)
+              : localTrackMatcher.findByUri(deletion.remoteKey);
+          final local = matchedTrack == null
+              ? null
+              : likeByUri[matchedTrack.uri];
           if (local != null && !local.updatedAt.isAfter(deletion.deletedAt)) {
             await _database.setTrackLikedFromSync(local.track.id, false);
-            likeByUri.remove(deletion.remoteKey);
+            likeByUri.remove(local.track.uri);
           }
         case SyncEntityType.equalizerPreset:
           final local = presetByRemoteId[deletion.remoteKey];
@@ -252,10 +274,10 @@ class BackendAuthRepository implements AuthRepository {
 
     var downloadedLikes = 0;
     for (final track in remote.likedTracks) {
-      final localTrack = await _database.findTrackByUri(track.uri);
+      final localTrack = localTrackMatcher.find(track);
       if (localTrack == null) continue;
       final updatedAt = track.updatedAt ?? DateTime.now();
-      final local = likeByUri[track.uri];
+      final local = likeByUri[localTrack.uri];
       if (local != null && local.updatedAt.isAfter(updatedAt)) continue;
       await _database.setTrackLikedFromSync(
         localTrack.id,
@@ -303,16 +325,12 @@ class BackendAuthRepository implements AuthRepository {
       account.id,
     );
     for (final row in latestLocalTombstones) {
-      final key = deletionKey(row.entityType, row.remoteKey);
+      final pending = _backendDeletion(row, localTrackMatcher);
+      final key = deletionKey(pending.entityType.wireName, pending.remoteKey);
       final uploaded = uploadedDeletionByKey[key];
       if (uploaded != null && !row.deletedAt.isAfter(uploaded.deletedAt)) {
         continue;
       }
-      final pending = BackendDeletion(
-        entityType: SyncEntityType.fromWireName(row.entityType),
-        remoteKey: row.remoteKey,
-        deletedAt: row.deletedAt,
-      );
       final existing = mergedDeletions[key];
       if (existing == null || pending.deletedAt.isAfter(existing.deletedAt)) {
         mergedDeletions[key] = pending;
@@ -383,8 +401,11 @@ class BackendAuthRepository implements AuthRepository {
     if (refreshToken == null || refreshToken.isEmpty) return null;
     try {
       final refreshed = await _gateway.refreshSession(refreshToken);
-      await _saveSession(refreshed);
-      return refreshed;
+      final effective = refreshed.withTrackMatchKey(
+        _session?.trackMatchKey ?? stored?.trackMatchKey,
+      );
+      await _saveSession(effective);
+      return effective;
     } on BackendException catch (error) {
       if (!error.isUnauthorized) rethrow;
       await _clearSession();
@@ -413,6 +434,7 @@ class BackendAuthRepository implements AuthRepository {
         token: session.token,
         refreshToken: session.refreshToken,
         expiresAt: session.expiresAt,
+        trackMatchKey: session.trackMatchKey,
       ),
     );
   }
@@ -448,6 +470,26 @@ class BackendAuthRepository implements AuthRepository {
   }
 }
 
+BackendDeletion _backendDeletion(
+  SyncTombstoneData row,
+  _LocalTrackMatcher matcher,
+) {
+  final entityType = SyncEntityType.fromWireName(row.entityType);
+  var remoteKey = row.remoteKey;
+  if (entityType == SyncEntityType.likedTrack &&
+      !isTrackMatchToken(remoteKey)) {
+    final track = matcher.findByUri(remoteKey);
+    remoteKey = track == null
+        ? remoteKey
+        : matcher.matchTokenFor(track) ?? remoteKey;
+  }
+  return BackendDeletion(
+    entityType: entityType,
+    remoteKey: remoteKey,
+    deletedAt: row.deletedAt,
+  );
+}
+
 String _onlineTrackId(Uri uri) =>
     'online:${uri.pathSegments[0]}:${uri.pathSegments[1]}';
 
@@ -465,11 +507,15 @@ const _indexedLocalSourceTypes = {
 };
 
 class _LocalTrackMatcher {
-  _LocalTrackMatcher(Iterable<Track> tracks) {
+  _LocalTrackMatcher(Iterable<Track> tracks, {required this.trackMatchKey}) {
     for (final track in tracks) {
       if (!track.isAvailable) continue;
       _availableByUri[track.uri] = track;
       _availableById[track.id] = track;
+      final matchToken = matchTokenFor(track);
+      if (matchToken != null) {
+        _tracksByMatchToken.putIfAbsent(matchToken, () => []).add(track);
+      }
       if (!_indexedLocalSourceTypes.contains(track.sourceType)) continue;
       final title = _normalizeSyncValue(track.title);
       if (title.isNotEmpty) {
@@ -486,6 +532,20 @@ class _LocalTrackMatcher {
   final Map<String, Track> _availableById = {};
   final Map<String, List<Track>> _tracksByTitle = {};
   final Map<String, List<Track>> _tracksByFileName = {};
+  final Map<String, List<Track>> _tracksByMatchToken = {};
+  final String? trackMatchKey;
+
+  Track? findByUri(String uri) => _availableByUri[uri];
+
+  Track? findByMatchToken(String token) {
+    final matches = _tracksByMatchToken[token];
+    return matches?.length == 1 ? matches!.single : null;
+  }
+
+  String? matchTokenFor(Track track) => createTrackMatchToken(
+    contentFingerprint: track.contentFingerprint,
+    trackMatchKey: trackMatchKey,
+  );
 
   Track? find(BackendTrack remote) {
     final exact = _availableByUri[remote.uri];
@@ -495,6 +555,11 @@ class _LocalTrackMatcher {
     if (_isOnlineTrackUri(uri)) {
       return _availableById[_onlineTrackId(uri!)];
     }
+
+    final tokenMatch = remote.matchToken == null
+        ? null
+        : findByMatchToken(remote.matchToken!);
+    if (tokenMatch != null) return tokenMatch;
 
     final candidates = <String, Track>{};
     void addCandidates(List<Track>? values) {

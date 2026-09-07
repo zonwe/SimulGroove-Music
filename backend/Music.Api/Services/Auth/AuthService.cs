@@ -11,7 +11,8 @@ public sealed record AuthTokenResponse(
     string Token,
     string RefreshToken,
     DateTimeOffset ExpiresAt,
-    AccountResponse Account);
+    AccountResponse Account,
+    string TrackMatchSalt);
 
 public sealed record RefreshTokenRequest(string? RefreshToken);
 
@@ -52,15 +53,17 @@ public sealed class AuthService : IAuthService
             {
                 var salt = RandomNumberGenerator.GetBytes(PasswordSaltBytes);
                 var hash = HashPassword(password, salt, PasswordIterations);
+                var trackMatchSalt = Base64Url(RandomNumberGenerator.GetBytes(PasswordSaltBytes));
                 using var insert = connection.CreateCommand();
                 insert.Transaction = transaction;
-                insert.CommandText = "INSERT INTO accounts(username, remote_id, display_name, avatar_uri, password_hash, password_salt, password_iterations) VALUES ($username, $remoteId, $displayName, NULL, $hash, $salt, $iterations)";
+                insert.CommandText = "INSERT INTO accounts(username, remote_id, display_name, avatar_uri, password_hash, password_salt, password_iterations, track_match_salt) VALUES ($username, $remoteId, $displayName, NULL, $hash, $salt, $iterations, $trackMatchSalt)";
                 insert.Parameters.AddWithValue("$username", normalized);
                 insert.Parameters.AddWithValue("$remoteId", $"account-{normalized}");
                 insert.Parameters.AddWithValue("$displayName", normalized.Split('@')[0]);
                 insert.Parameters.AddWithValue("$hash", Convert.ToBase64String(hash));
                 insert.Parameters.AddWithValue("$salt", Convert.ToBase64String(salt));
                 insert.Parameters.AddWithValue("$iterations", PasswordIterations);
+                insert.Parameters.AddWithValue("$trackMatchSalt", trackMatchSalt);
                 insert.ExecuteNonQuery();
             }
             else if (stored.Value.Hash is null || stored.Value.Salt is null)
@@ -157,7 +160,16 @@ public sealed class AuthService : IAuthService
                 account.Username,
                 now,
                 now.Add(_refreshLifetime)));
-        return new AuthTokenResponse(access.Token, refreshToken, access.ExpiresAt, account);
+        var trackMatchSalt = GetOrCreateTrackMatchSalt(
+            connection,
+            transaction,
+            account.Username);
+        return new AuthTokenResponse(
+            access.Token,
+            refreshToken,
+            access.ExpiresAt,
+            account,
+            trackMatchSalt);
     }
 
     private void Initialize()
@@ -174,14 +186,40 @@ public sealed class AuthService : IAuthService
                 avatar_uri TEXT NULL,
                 password_hash TEXT NULL,
                 password_salt TEXT NULL,
-                password_iterations INTEGER NULL
+                password_iterations INTEGER NULL,
+                track_match_salt TEXT NULL
             );
             """;
         command.ExecuteNonQuery();
         EnsureColumn(connection, "accounts", "password_hash", "TEXT NULL");
         EnsureColumn(connection, "accounts", "password_salt", "TEXT NULL");
         EnsureColumn(connection, "accounts", "password_iterations", "INTEGER NULL");
+        EnsureColumn(connection, "accounts", "track_match_salt", "TEXT NULL");
         _refreshTokens.Initialize(connection);
+    }
+
+    private static string GetOrCreateTrackMatchSalt(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string username)
+    {
+        using var read = connection.CreateCommand();
+        read.Transaction = transaction;
+        read.CommandText =
+            "SELECT track_match_salt FROM accounts WHERE username = $username";
+        read.Parameters.AddWithValue("$username", username);
+        var stored = read.ExecuteScalar() as string;
+        if (!string.IsNullOrWhiteSpace(stored)) return stored;
+
+        var created = Base64Url(RandomNumberGenerator.GetBytes(PasswordSaltBytes));
+        using var update = connection.CreateCommand();
+        update.Transaction = transaction;
+        update.CommandText =
+            "UPDATE accounts SET track_match_salt = $salt WHERE username = $username";
+        update.Parameters.AddWithValue("$salt", created);
+        update.Parameters.AddWithValue("$username", username);
+        update.ExecuteNonQuery();
+        return created;
     }
 
     private static void EnsureColumn(SqliteConnection connection, string table, string column, string definition)

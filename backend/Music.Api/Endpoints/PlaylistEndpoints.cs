@@ -22,6 +22,14 @@ public static class PlaylistEndpoints
 				{
 					return Results.BadRequest(new ProblemResponse("invalid_playlist", "Every playlist requires remoteId and name."));
 				}
+				if (incoming.SelectMany(playlist => playlist.Tracks ?? [])
+						.Concat(likedTracks)
+						.Any(track => !TrackMatchTokens.IsValidOrEmpty(track.MatchToken)))
+				{
+					return Results.BadRequest(new ProblemResponse(
+						"invalid_track_match_token",
+						"Track match tokens must use the hmac-sha256 format."));
+				}
 				if (equalizerPresets.Any(preset => string.IsNullOrWhiteSpace(preset.RemoteId) || string.IsNullOrWhiteSpace(preset.Name)))
 				{
 					return Results.BadRequest(new ProblemResponse("invalid_preset", "Every equalizer preset requires remoteId and name."));
@@ -30,6 +38,9 @@ public static class PlaylistEndpoints
 					string.IsNullOrWhiteSpace(deletion.EntityType) ||
 					!SyncEntityTypes.IsSupported(deletion.EntityType) ||
 					string.IsNullOrWhiteSpace(deletion.RemoteKey) ||
+					(deletion.EntityType == SyncEntityTypes.LikedTrack &&
+						deletion.RemoteKey.StartsWith(TrackMatchTokens.Prefix, StringComparison.Ordinal) &&
+						!TrackMatchTokens.IsValidOrEmpty(deletion.RemoteKey)) ||
 					deletion.DeletedAt is null))
 				{
 					return Results.BadRequest(new ProblemResponse("invalid_deletion", "Every deletion requires entityType, remoteKey and deletedAt."));

@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_music/core/database/app_database.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -91,6 +94,49 @@ void main() {
       'linux-sibling',
     ]);
   });
+
+  test(
+    'schema 4 upgrades tracks with a nullable content fingerprint',
+    () async {
+      final warnBefore = driftRuntimeOptions.dontWarnAboutMultipleDatabases;
+      driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+      addTearDown(() {
+        driftRuntimeOptions.dontWarnAboutMultipleDatabases = warnBefore;
+      });
+
+      final directory = await Directory.systemTemp.createTemp(
+        'flutter_music_schema_4_',
+      );
+      final file = File('${directory.path}/music.db');
+      addTearDown(() async {
+        if (await directory.exists()) await directory.delete(recursive: true);
+      });
+
+      var fileDatabase = AppDatabase.forTesting(NativeDatabase(file));
+      await fileDatabase.upsertTracks([
+        _track(id: 'existing', path: r'C:\Music\existing.mp3'),
+      ]);
+      await fileDatabase.customStatement(
+        'ALTER TABLE tracks DROP COLUMN content_fingerprint',
+      );
+      await fileDatabase.customStatement('PRAGMA user_version = 4');
+      await fileDatabase.close();
+
+      fileDatabase = AppDatabase.forTesting(NativeDatabase(file));
+      addTearDown(fileDatabase.close);
+
+      final tracks = await fileDatabase.allTracks();
+      expect(tracks.single.id, 'existing');
+      expect(tracks.single.contentFingerprint, isNull);
+      final columns = await fileDatabase
+          .customSelect('PRAGMA table_info(tracks)')
+          .get();
+      expect(
+        columns.map((row) => row.read<String>('name')),
+        contains('content_fingerprint'),
+      );
+    },
+  );
 }
 
 TracksCompanion _track({

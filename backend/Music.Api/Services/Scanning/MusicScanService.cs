@@ -5,9 +5,17 @@ namespace Music.Api.Services.Scanning;
 
 public sealed class MusicScanService : IMusicScanService
 {
-    private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly IReadOnlyDictionary<string, string> SupportedContentTypes =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        ".mp3", ".flac", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".wma"
+        [".mp3"] = "audio/mpeg",
+        [".flac"] = "audio/flac",
+        [".m4a"] = "audio/mp4",
+        [".aac"] = "audio/aac",
+        [".wav"] = "audio/wav",
+        [".ogg"] = "audio/ogg",
+        [".opus"] = "audio/ogg",
+        [".wma"] = "audio/x-ms-wma"
     };
 
     private readonly IScanSourceStore _store;
@@ -27,6 +35,34 @@ public sealed class MusicScanService : IMusicScanService
 
     public IReadOnlyList<ScannedTrackResponse> GetTracks(string username, string sourceId, int limit) =>
         _store.GetTracks(username, sourceId, limit);
+
+    public ScannedTrackFile? GetTrackFile(string username, string sourceId, string trackId)
+    {
+        var source = _store.Get(username, sourceId);
+        var track = _store.GetTrack(username, sourceId, trackId);
+        if (source is null || track is null) return null;
+
+        try
+        {
+            var sourceRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source.Path));
+            var filePath = Path.GetFullPath(track.FilePath);
+            if (!IsWithinRoot(filePath, sourceRoot) || HasNestedReparsePoint(filePath, sourceRoot)) return null;
+
+            var file = new FileInfo(filePath);
+            if (!file.Exists || file.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+                !SupportedContentTypes.TryGetValue(file.Extension, out var contentType)) return null;
+
+            return new ScannedTrackFile(
+                file.FullName,
+                contentType,
+                file.Length,
+                new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+    }
 
     public ScanSourceResponse CreateSource(string username, CreateScanSourceRequest request)
     {
@@ -102,7 +138,7 @@ public sealed class MusicScanService : IMusicScanService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var extension = Path.GetExtension(filePath);
-            if (!SupportedExtensions.Contains(extension)) continue;
+            if (!SupportedContentTypes.ContainsKey(extension)) continue;
             try
             {
                 var file = new FileInfo(filePath);
@@ -146,5 +182,24 @@ public sealed class MusicScanService : IMusicScanService
     {
         if (value is < 1 or > 10_080) throw new ArgumentException("intervalMinutes must be between 1 and 10080.");
         return value;
+    }
+
+    private static bool IsWithinRoot(string path, string root)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var rootPrefix = Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
+        return path.StartsWith(rootPrefix, comparison);
+    }
+
+    private static bool HasNestedReparsePoint(string filePath, string sourceRoot)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var directory = Directory.GetParent(filePath);
+        while (directory is not null && !directory.FullName.Equals(sourceRoot, comparison))
+        {
+            if (directory.Attributes.HasFlag(FileAttributes.ReparsePoint)) return true;
+            directory = directory.Parent;
+        }
+        return directory is null;
     }
 }

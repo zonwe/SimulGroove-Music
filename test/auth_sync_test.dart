@@ -3,6 +3,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_music/core/auth/auth_repository.dart';
 import 'package:flutter_music/core/auth/auth_token_store.dart';
 import 'package:flutter_music/core/auth/backend_gateway.dart';
+import 'package:flutter_music/core/auth/track_match_token.dart';
 import 'package:flutter_music/core/database/app_database.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -14,12 +15,13 @@ class _FakeGateway implements BackendGateway {
   List<BackendPlaylist> uploadedPlaylists = const [];
   List<BackendDeletion> uploadedDeletions = const [];
   Future<void> Function()? beforeResponse;
+  BackendSession? signInResponse;
 
   @override
   Future<BackendSession> signIn({
     required String username,
     required String password,
-  }) => throw UnimplementedError();
+  }) async => signInResponse ?? (throw UnimplementedError());
 
   @override
   Future<BackendSession> refreshSession(String refreshToken) =>
@@ -59,12 +61,13 @@ class _MemoryTokenStore implements AuthTokenStore {
 void main() {
   late AppDatabase database;
   late _FakeGateway gateway;
+  late _MemoryTokenStore tokenStore;
   late BackendAuthRepository repository;
 
   setUp(() async {
     database = AppDatabase.forTesting(NativeDatabase.memory());
     gateway = _FakeGateway();
-    final tokenStore = _MemoryTokenStore();
+    tokenStore = _MemoryTokenStore();
     final now = DateTime.now();
     await database.saveAccount(
       AccountsCompanion.insert(
@@ -81,11 +84,37 @@ void main() {
       token: 'token',
       refreshToken: 'refresh',
       expiresAt: now.add(const Duration(hours: 1)),
+      trackMatchKey: _trackMatchKey,
     );
     repository = BackendAuthRepository(database, gateway, tokenStore);
   });
 
   tearDown(() => database.close());
+
+  test('交互式登录派生并安全保存本地曲目匹配密钥', () async {
+    await database.clearAccounts();
+    tokenStore.tokens = null;
+    gateway.signInResponse = BackendSession(
+      token: 'new-token',
+      refreshToken: 'new-refresh',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      trackMatchSalt: 'c2FsdA',
+      account: const BackendAccount(
+        remoteId: 'signed-in-account',
+        username: 'signed-in@example.com',
+        displayName: 'Signed in',
+      ),
+    );
+
+    await repository.signIn(
+      username: 'signed-in@example.com',
+      password: 'password',
+    );
+
+    expect(tokenStore.tokens?.trackMatchKey, isNot(null));
+    expect(tokenStore.tokens?.trackMatchKey, hasLength(43));
+    expect((await repository.currentSession())?.trackMatchKey, isNot(null));
+  });
 
   test('newer remote playlist replaces local name and track order', () async {
     final oldTime = DateTime(2026, 8, 23, 8);
@@ -203,6 +232,58 @@ void main() {
       );
     },
   );
+
+  test('盲匹配令牌可跨设备关联歌单和喜欢歌曲', () async {
+    final updatedAt = DateTime(2026, 8, 24, 8, 15);
+    const fingerprint =
+        'sha256:11111111111111111111111111111111'
+        '11111111111111111111111111111111';
+    final matchToken = createTrackMatchToken(
+      contentFingerprint: fingerprint,
+      trackMatchKey: _trackMatchKey,
+    );
+    await database.upsertTracks([
+      TracksCompanion.insert(
+        id: 'android-copy',
+        sourceType: 'android_media_store',
+        sourceId: '42',
+        uri: 'content://media/external/audio/media/42',
+        title: '本机标签已修改',
+        artist: const Value('本机艺术家'),
+        album: const Value('本机专辑'),
+        contentFingerprint: const Value(fingerprint),
+        updatedAt: updatedAt,
+      ),
+    ]);
+    final remoteTrack = BackendTrack(
+      uri: 'file:///D:/Music/original.mp3',
+      title: '远端旧标题',
+      artist: '远端旧艺术家',
+      album: '远端旧专辑',
+      updatedAt: updatedAt,
+      matchToken: matchToken,
+    );
+    gateway.response = BackendLibrary(
+      playlists: [
+        BackendPlaylist(
+          remoteId: 'fingerprint-playlist',
+          name: '跨设备',
+          updatedAt: updatedAt,
+          tracks: [remoteTrack],
+        ),
+      ],
+      likedTracks: [remoteTrack],
+    );
+
+    await repository.syncNow();
+
+    final playlist = (await database.watchPlaylists().first).single;
+    expect(
+      (await database.watchPlaylistTracks(playlist.id).first).single.id,
+      'android-copy',
+    );
+    expect(await database.watchLikedTrackIds().first, contains('android-copy'));
+  });
 
   test(
     'Windows playlist matches Android MediaStore and document tree songs',
@@ -495,6 +576,53 @@ void main() {
     expect(await database.watchPlaylistTracks(playlist.id).first, isEmpty);
   });
 
+  test('相同内容存在两份本机副本时不靠令牌任意选中', () async {
+    final updatedAt = DateTime(2026, 8, 24, 8);
+    const fingerprint =
+        'sha256:22222222222222222222222222222222'
+        '22222222222222222222222222222222';
+    final matchToken = createTrackMatchToken(
+      contentFingerprint: fingerprint,
+      trackMatchKey: _trackMatchKey,
+    );
+    await database.upsertTracks([
+      for (final id in ['copy-a', 'copy-b'])
+        TracksCompanion.insert(
+          id: id,
+          sourceType: 'windows_file',
+          sourceId: 'C:/Music/$id.mp3',
+          uri: 'file:///C:/Music/$id.mp3',
+          title: id,
+          contentFingerprint: const Value(fingerprint),
+          updatedAt: updatedAt,
+        ),
+    ]);
+    gateway.response = BackendLibrary(
+      playlists: [
+        BackendPlaylist(
+          remoteId: 'ambiguous-fingerprint',
+          name: 'Ambiguous fingerprint',
+          updatedAt: updatedAt,
+          tracks: [
+            BackendTrack(
+              uri: 'file:///D:/Music/remote.mp3',
+              title: 'Remote',
+              artist: 'Artist',
+              album: 'Album',
+              matchToken: matchToken,
+            ),
+          ],
+        ),
+      ],
+      likedTracks: const [],
+    );
+
+    await repository.syncNow();
+
+    final playlist = (await database.watchPlaylists().first).single;
+    expect(await database.watchPlaylistTracks(playlist.id).first, isEmpty);
+  });
+
   test('时长相差超过 3 秒的同名歌曲不匹配', () async {
     final updatedAt = DateTime(2026, 8, 24, 8);
     await database.upsertTracks([
@@ -558,6 +686,91 @@ void main() {
     expect(await database.watchLikedTrackIds().first, isEmpty);
   });
 
+  test('云端盲匹配令牌墓碑会撤回不同 URI 的本地喜欢', () async {
+    final likedAt = DateTime(2026, 8, 24, 8);
+    const fingerprint =
+        'sha256:33333333333333333333333333333333'
+        '33333333333333333333333333333333';
+    final matchToken = createTrackMatchToken(
+      contentFingerprint: fingerprint,
+      trackMatchKey: _trackMatchKey,
+    )!;
+    await database.upsertTracks([
+      TracksCompanion.insert(
+        id: 'liked-fingerprint',
+        sourceType: 'android_media_store',
+        sourceId: '43',
+        uri: 'content://media/external/audio/media/43',
+        title: 'Song',
+        contentFingerprint: const Value(fingerprint),
+        updatedAt: likedAt,
+      ),
+    ]);
+    await database.setTrackLikedFromSync(
+      'liked-fingerprint',
+      true,
+      updatedAt: likedAt,
+    );
+    gateway.response = BackendLibrary(
+      playlists: const [],
+      likedTracks: const [],
+      deletions: [
+        BackendDeletion(
+          entityType: SyncEntityType.likedTrack,
+          remoteKey: matchToken,
+          deletedAt: likedAt.add(const Duration(minutes: 1)),
+        ),
+      ],
+    );
+
+    await repository.syncNow();
+
+    expect(await database.watchLikedTrackIds().first, isEmpty);
+  });
+
+  test('本地取消喜欢会把 URI 墓碑转换为盲匹配令牌上传', () async {
+    final likedAt = DateTime(2026, 8, 24, 8);
+    const fingerprint =
+        'sha256:44444444444444444444444444444444'
+        '44444444444444444444444444444444';
+    await database.upsertTracks([
+      TracksCompanion.insert(
+        id: 'unliked-fingerprint',
+        sourceType: 'windows_file',
+        sourceId: r'C:\Music\song.mp3',
+        uri: 'file:///C:/Music/song.mp3',
+        title: 'Song',
+        contentFingerprint: const Value(fingerprint),
+        updatedAt: likedAt,
+      ),
+    ]);
+    await database.setTrackLikedFromSync(
+      'unliked-fingerprint',
+      true,
+      updatedAt: likedAt,
+    );
+    await database.setTrackLiked('unliked-fingerprint', false);
+    gateway.beforeResponse = () async {
+      gateway.response = BackendLibrary(
+        playlists: const [],
+        likedTracks: const [],
+        deletions: gateway.uploadedDeletions,
+      );
+    };
+
+    await repository.syncNow();
+
+    final expected = createTrackMatchToken(
+      contentFingerprint: fingerprint,
+      trackMatchKey: _trackMatchKey,
+    );
+    expect(gateway.uploadedDeletions.single.remoteKey, expected);
+    expect(
+      (await database.syncTombstonesForAccount('account-1')).single.remoteKey,
+      expected,
+    );
+  });
+
   test('本地较新的喜欢不会被云端旧删除撤回', () async {
     final likedAt = DateTime(2026, 8, 24, 8);
     await database.upsertTracks([_track('liked-one')]);
@@ -579,6 +792,8 @@ void main() {
     expect(await database.watchLikedTrackIds().first, contains('liked-one'));
   });
 }
+
+const _trackMatchKey = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 TracksCompanion _track(String id) => TracksCompanion.insert(
   id: id,

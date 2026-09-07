@@ -72,6 +72,30 @@ public sealed class MusicScanServiceTests
         StringAssert.Contains(result.LastError!, "does not exist");
     }
 
+    [TestMethod]
+    public async Task GetTrackFileReturnsOnlyCurrentAccountsIndexedFile()
+    {
+        var root = Directory.CreateDirectory(System.IO.Path.Combine(_directory.Path, "Library")).FullName;
+        var filePath = System.IO.Path.Combine(root, "Track.mp3");
+        await File.WriteAllBytesAsync(filePath, [1, 2, 3, 4]);
+        var store = new FakeScanSourceStore();
+        var scanner = CreateScanner(store, root);
+        var source = scanner.CreateSource("alice", new CreateScanSourceRequest(root, 60, true));
+        await scanner.ScanNowAsync("alice", source.Id, CancellationToken.None);
+        var indexed = scanner.GetTracks("alice", source.Id, 10).Single();
+
+        var track = scanner.GetTrackFile("alice", source.Id, indexed.Id);
+
+        Assert.IsNotNull(track);
+        Assert.AreEqual(filePath, track!.FilePath);
+        Assert.AreEqual("audio/mpeg", track.ContentType);
+        Assert.AreEqual(4, track.FileSize);
+        Assert.IsNull(scanner.GetTrackFile("bob", source.Id, indexed.Id));
+
+        File.Delete(filePath);
+        Assert.IsNull(scanner.GetTrackFile("alice", source.Id, indexed.Id));
+    }
+
     private MusicScanService CreateScanner(FakeScanSourceStore store, string allowedRoot) => new(
         store,
         new FakeAuditLogStore(),
@@ -85,6 +109,7 @@ public sealed class MusicScanServiceTests
 internal sealed class FakeScanSourceStore : IScanSourceStore
 {
     private ScanSourceResponse? _source;
+    private readonly List<ScannedTrackResponse> _tracks = [];
 
     public List<DiscoveredTrack> CompletedTracks { get; } = [];
 
@@ -121,6 +146,17 @@ internal sealed class FakeScanSourceStore : IScanSourceStore
     {
         CompletedTracks.Clear();
         CompletedTracks.AddRange(tracks);
+        _tracks.Clear();
+        _tracks.AddRange(tracks.Select((track, index) => new ScannedTrackResponse(
+            $"{id}-track-{index}",
+            id,
+            track.FilePath,
+            track.Title,
+            track.Artist,
+            track.Album,
+            track.Extension,
+            track.FileSize,
+            track.ModifiedAt)));
         _source = _source! with { Status = "idle", TrackCount = tracks.Count, LastScanAt = completedAt, NextScanAt = completedAt.AddMinutes(_source.IntervalMinutes), LastError = null };
     }
 
@@ -129,7 +165,13 @@ internal sealed class FakeScanSourceStore : IScanSourceStore
         _source = _source! with { Status = "failed", LastError = error, LastScanAt = failedAt, NextScanAt = failedAt.AddMinutes(_source.IntervalMinutes) };
     }
 
-    public IReadOnlyList<ScannedTrackResponse> GetTracks(string username, string sourceId, int limit) => [];
+    public IReadOnlyList<ScannedTrackResponse> GetTracks(string username, string sourceId, int limit) =>
+        _source is { Id: var id } && id == sourceId && id.StartsWith(username, StringComparison.Ordinal)
+            ? _tracks.Take(limit).ToArray()
+            : [];
+
+    public ScannedTrackResponse? GetTrack(string username, string sourceId, string trackId) =>
+        GetTracks(username, sourceId, int.MaxValue).SingleOrDefault(track => track.Id == trackId);
 }
 
 internal sealed class FakeAuditLogStore : IAuditLogStore

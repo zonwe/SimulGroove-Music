@@ -32,6 +32,12 @@ public sealed record ScannedTrackResponse(
     long FileSize,
     DateTimeOffset ModifiedAt);
 
+public sealed record ScannedTrackFile(
+    string FilePath,
+    string ContentType,
+    long FileSize,
+    DateTimeOffset ModifiedAt);
+
 public sealed record DiscoveredTrack(
     string FilePath,
     string Title,

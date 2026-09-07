@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_music/core/library/library_scanner_io.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -31,6 +32,7 @@ void main() {
     expect(track.uri, Uri.file(p.normalize(audio.absolute.path)).toString());
     expect(track.title, 'Track');
     expect(track.lyrics, '[00:01.00]Linux lyric');
+    expect(track.contentFingerprint, 'sha256:${sha256.convert(_emptyPcmWave)}');
   });
 }
 

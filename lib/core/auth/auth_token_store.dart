@@ -5,11 +5,13 @@ class StoredAuthTokens {
     required this.token,
     required this.refreshToken,
     required this.expiresAt,
+    this.trackMatchKey,
   });
 
   final String token;
   final String refreshToken;
   final DateTime expiresAt;
+  final String? trackMatchKey;
 }
 
 abstract interface class AuthTokenStore {
@@ -27,6 +29,7 @@ class SecureAuthTokenStore implements AuthTokenStore {
   static const _accessTokenKey = 'auth.access_token';
   static const _refreshTokenKey = 'auth.refresh_token';
   static const _expiresAtKey = 'auth.expires_at';
+  static const _trackMatchKey = 'auth.track_match_key';
 
   final FlutterSecureStorage _storage;
 
@@ -36,6 +39,7 @@ class SecureAuthTokenStore implements AuthTokenStore {
       _storage.read(key: _accessTokenKey),
       _storage.read(key: _refreshTokenKey),
       _storage.read(key: _expiresAtKey),
+      _storage.read(key: _trackMatchKey),
     ]);
     final token = values[0];
     final refreshToken = values[1];
@@ -45,6 +49,7 @@ class SecureAuthTokenStore implements AuthTokenStore {
       token: token,
       refreshToken: refreshToken,
       expiresAt: expiresAt.toUtc(),
+      trackMatchKey: values[3],
     );
   }
 
@@ -56,6 +61,10 @@ class SecureAuthTokenStore implements AuthTokenStore {
       key: _expiresAtKey,
       value: tokens.expiresAt.toUtc().toIso8601String(),
     ),
+    if (tokens.trackMatchKey case final value?)
+      _storage.write(key: _trackMatchKey, value: value)
+    else
+      _storage.delete(key: _trackMatchKey),
   ]);
 
   @override
@@ -63,5 +72,6 @@ class SecureAuthTokenStore implements AuthTokenStore {
     _storage.delete(key: _accessTokenKey),
     _storage.delete(key: _refreshTokenKey),
     _storage.delete(key: _expiresAtKey),
+    _storage.delete(key: _trackMatchKey),
   ]);
 }

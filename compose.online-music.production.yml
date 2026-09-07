@@ -1,0 +1,184 @@
+name: flutter-music-online-production
+
+services:
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    init: true
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      MUSIC_DOMAIN: "${MUSIC_DOMAIN:?Set MUSIC_DOMAIN in .env}"
+      ACME_EMAIL: "${ACME_EMAIL:?Set ACME_EMAIL in .env}"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      music-api:
+        condition: service_healthy
+    networks:
+      - edge
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+  music-api:
+    build:
+      context: .
+      dockerfile: backend/Music.Api/Dockerfile
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cpus: "${MUSIC_API_CPU_LIMIT:-1.0}"
+    mem_limit: "${MUSIC_API_MEMORY_LIMIT:-512m}"
+    expose:
+      - "8080"
+    environment:
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      AllowedHosts: "${MUSIC_DOMAIN:?Set MUSIC_DOMAIN in .env}"
+      Auth__JwtKey: "${MUSIC_API_JWT_KEY:?Set MUSIC_API_JWT_KEY in .env}"
+      Administration__Username: "${MUSIC_API_ADMIN_USERNAME:-admin}"
+      Administration__Password: "${MUSIC_API_ADMIN_PASSWORD:?Set MUSIC_API_ADMIN_PASSWORD in .env}"
+      Cors__AllowedOrigins__0: "https://${MUSIC_DOMAIN:?Set MUSIC_DOMAIN in .env}"
+      Cors__AllowedOrigins__1: "${MUSIC_API_CORS_ORIGIN_1:-}"
+      Cors__AllowedOrigins__2: "${MUSIC_API_CORS_ORIGIN_2:-}"
+      Observability__OtlpEndpoint: "http://otel-collector:4317"
+      OnlineMusic__Enabled: "${ONLINE_MUSIC_ENABLED:-false}"
+      OnlineMusic__SidecarBaseUrl: "http://music-sidecar:8080"
+      OnlineMusic__AllowedSources__0: "${ONLINE_MUSIC_SOURCE_0:-}"
+      OnlineMusic__AllowedSources__1: "${ONLINE_MUSIC_SOURCE_1:-}"
+      OnlineMusic__AllowedSources__2: "${ONLINE_MUSIC_SOURCE_2:-}"
+    volumes:
+      - music-api-data:/data
+      - music-api-keys:/home/music-api/.aspnet/DataProtection-Keys
+    depends_on:
+      music-sidecar:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - edge
+      - online-private
+      - observability-private
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  music-sidecar:
+    build:
+      context: ./go-music-dl
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cpus: "${MUSIC_SIDECAR_CPU_LIMIT:-2.0}"
+    mem_limit: "${MUSIC_SIDECAR_MEMORY_LIMIT:-1g}"
+    command: ["./music-dl", "integration", "--host", "0.0.0.0", "--port", "8080"]
+    expose:
+      - "8080"
+    volumes:
+      - music-sidecar-data:/home/appuser/data
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8080/integration/v1/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    networks:
+      - online-private
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.160.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yml"]
+    expose:
+      - "4317"
+      - "9464"
+    volumes:
+      - ./deploy/observability/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro
+    networks:
+      - observability-private
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}
+      - --web.enable-lifecycle
+    expose:
+      - "9090"
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/online_music_alerts.yml:/etc/prometheus/rules/online_music_alerts.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      otel-collector:
+        condition: service_started
+      alertmanager:
+        condition: service_started
+    networks:
+      - observability-private
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    expose:
+      - "9093"
+    volumes:
+      - type: bind
+        source: "${ALERTMANAGER_CONFIG_PATH:?Set ALERTMANAGER_CONFIG_PATH to a reviewed local config}"
+        target: /etc/alertmanager/alertmanager.yml
+        read_only: true
+      - alertmanager-data:/alertmanager
+    networks:
+      - observability-private
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  edge:
+    driver: bridge
+  online-private:
+    driver: bridge
+  observability-private:
+    driver: bridge
+    internal: true
+
+volumes:
+  caddy-data:
+  caddy-config:
+  music-api-data:
+  music-api-keys:
+  music-sidecar-data:
+  prometheus-data:
+  alertmanager-data:

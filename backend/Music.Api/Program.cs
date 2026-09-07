@@ -9,6 +9,8 @@ using Music.Api.Services;
 using Music.Api.Services.Administration;
 using Music.Api.Services.OnlineMusic;
 using Music.Api.Services.Scanning;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,6 +24,32 @@ builder.Services.Configure<AdministrationOptions>(
 	builder.Configuration.GetSection(AdministrationOptions.SectionName));
 builder.Services.Configure<OnlineMusicOptions>(
 	builder.Configuration.GetSection(OnlineMusicOptions.SectionName));
+
+var otlpEndpointValue = builder.Configuration["Observability:OtlpEndpoint"];
+if (!string.IsNullOrWhiteSpace(otlpEndpointValue))
+{
+	if (!Uri.TryCreate(otlpEndpointValue, UriKind.Absolute, out var otlpEndpoint) ||
+		otlpEndpoint.Scheme is not ("http" or "https"))
+	{
+		throw new InvalidOperationException(
+			"Observability:OtlpEndpoint must be an absolute HTTP or HTTPS URI.");
+	}
+
+	var observabilityServiceName =
+		builder.Configuration["Observability:ServiceName"]?.Trim();
+	if (string.IsNullOrWhiteSpace(observabilityServiceName))
+	{
+		observabilityServiceName = "music-api";
+	}
+
+	builder.Services
+		.AddOpenTelemetry()
+		.ConfigureResource(resource => resource.AddService(observabilityServiceName))
+		.WithMetrics(metrics => metrics
+			.AddMeter(OnlineMusicTelemetry.MeterName)
+			.AddAspNetCoreInstrumentation()
+			.AddOtlpExporter(options => options.Endpoint = otlpEndpoint));
+}
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);

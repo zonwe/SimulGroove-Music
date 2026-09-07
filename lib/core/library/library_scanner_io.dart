@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
+import 'package:crypto/crypto.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -160,6 +161,7 @@ class IoLibraryScanner implements LibraryScanner {
               _cleanLyrics(song['lyrics'] as String?) ??
               (data == null ? null : await _tryReadSidecarLyrics(data)),
           fileSize: song['size'] as int?,
+          contentFingerprint: song['contentFingerprint'] as String?,
           modifiedAt: song['dateModifiedMs'] != null
               ? DateTime.fromMillisecondsSinceEpoch(
                   song['dateModifiedMs'] as int,
@@ -299,6 +301,7 @@ Future<ScanResult> scanDesktopDirectory(
             await _readDesktopSidecarLyrics(canonicalPath),
         fileSize: stat.size,
         modifiedAt: stat.modified,
+        contentFingerprint: await _contentFingerprint(file),
       ),
     );
   }
@@ -309,6 +312,18 @@ Future<ScanResult> scanDesktopDirectory(
         ? p.normalize(selected)
         : p.basename(p.normalize(selected)),
   );
+}
+
+Future<String?> _contentFingerprint(File file) async {
+  try {
+    final digest = await sha256.bind(file.openRead()).first;
+    return 'sha256:$digest';
+  } catch (error) {
+    // Fingerprints improve cross-device matching, but an unreadable file must
+    // still remain available through the normal metadata fallback.
+    AppLog.debug('计算音频内容指纹失败：${file.path}', error);
+    return null;
+  }
 }
 
 bool _isDesktopAudioFile(String path) {

@@ -1,8 +1,15 @@
 name: CI
 
 on:
+  workflow_dispatch:
+    inputs:
+      run_linux:
+        description: 运行暂缓的 Linux Release 构建
+        required: false
+        default: false
+        type: boolean
   push:
-    branches: [main]
+    branches: [main, "codex/**"]
   pull_request:
 
 concurrency:
@@ -45,3 +52,85 @@ jobs:
         run: dotnet build backend/Music.Api/Music.Api.csproj --no-restore
       - name: 运行测试
         run: dotnet test backend/Music.Api.Tests/Music.Api.Tests.csproj --no-restore -c Release
+
+  android:
+    name: Android Debug 构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: 安装依赖
+        run: flutter pub get
+      - name: 构建 Android Debug APK
+        run: flutter build apk --debug
+
+  deployment-config:
+    name: 生产部署配置校验
+    runs-on: ubuntu-latest
+    env:
+      MUSIC_DOMAIN: music.example.com
+      ACME_EMAIL: ops@example.com
+      MUSIC_API_JWT_KEY: ci-only-placeholder-with-at-least-32-characters
+      MUSIC_API_ADMIN_PASSWORD: ci-only-placeholder-with-at-least-32-characters
+      ALERTMANAGER_CONFIG_PATH: ${{ github.workspace }}/deploy/observability/alertmanager.example.yml
+    steps:
+      - uses: actions/checkout@v4
+      - name: 校验 Compose 合并与变量
+        run: docker compose -f compose.online-music.production.yml config --quiet
+      - name: 校验 Caddy HTTPS 配置
+        run: >-
+          docker run --rm
+          --env MUSIC_DOMAIN --env ACME_EMAIL
+          --volume "$PWD/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro"
+          --entrypoint caddy
+          caddy:2.11.4-alpine
+          validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: 校验 OpenTelemetry Collector 配置
+        run: >-
+          docker run --rm
+          --volume "$PWD/deploy/observability/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro"
+          --entrypoint /otelcol-contrib
+          otel/opentelemetry-collector-contrib:0.160.0
+          validate --config=/etc/otelcol-contrib/config.yml
+      - name: 校验 Prometheus 配置与告警规则
+        run: >-
+          docker run --rm
+          --volume "$PWD/deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+          --volume "$PWD/deploy/observability/online_music_alerts.yml:/etc/prometheus/rules/online_music_alerts.yml:ro"
+          --entrypoint /bin/promtool
+          prom/prometheus:v3.14.0
+          check config /etc/prometheus/prometheus.yml
+      - name: 校验 Alertmanager 配置结构
+        run: >-
+          docker run --rm
+          --volume "$PWD/deploy/observability/alertmanager.example.yml:/etc/alertmanager/alertmanager.yml:ro"
+          --entrypoint /bin/amtool
+          prom/alertmanager:v0.34.0
+          check-config /etc/alertmanager/alertmanager.yml
+
+  linux:
+    name: Linux Release 构建
+    if: github.event_name == 'workflow_dispatch' && inputs.run_linux == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Linux 桌面依赖
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install --yes
+          clang cmake ninja-build pkg-config
+          libgtk-3-dev liblzma-dev libmpv-dev mpv libnotify-dev
+          libayatana-appindicator3-dev libkeybinder-3.0-dev libsecret-1-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: 启用 Linux 桌面
+        run: flutter config --enable-linux-desktop
+      - name: 安装依赖
+        run: flutter pub get
+      - name: 构建 Linux Release
+        run: flutter build linux --release

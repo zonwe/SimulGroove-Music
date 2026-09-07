@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Music.Api.Data;
+using Music.Api.Models;
 using Music.Api.Services;
 
 namespace Music.Api.Tests;
@@ -51,6 +52,26 @@ public sealed class SqliteScanSourceStoreTests
         var otherAccountSource = store.Create("other", @"D:\MusicDownload", 60, true);
         Assert.AreEqual(otherAccountSource.Id, store.GetForUser("other").Single().Id);
         Assert.AreEqual(1, store.GetForUser("admin").Count);
+    }
+
+    [TestMethod]
+    public void GetTrackIsScopedToAccountSourceAndTrack()
+    {
+        var store = new SqliteScanSourceStore(
+            CreateConfiguration(),
+            new TestHostEnvironment(_directory.Path));
+        var source = store.Create("admin", @"D:\MusicDownload", 60, true);
+        store.CompleteScan(
+            source.Id,
+            "scan-1",
+            [new DiscoveredTrack(@"D:\MusicDownload\song.mp3", "Song", "Artist", "Album", "mp3", 123, DateTimeOffset.UtcNow)],
+            DateTimeOffset.UtcNow);
+        var indexed = store.GetTracks("admin", source.Id, 10).Single();
+
+        Assert.IsNotNull(store.GetTrack("admin", source.Id, indexed.Id));
+        Assert.IsNull(store.GetTrack("other", source.Id, indexed.Id));
+        Assert.IsNull(store.GetTrack("admin", "another-source", indexed.Id));
+        Assert.IsNull(store.GetTrack("admin", source.Id, "another-track"));
     }
 
     private IConfiguration CreateConfiguration() => new ConfigurationBuilder()

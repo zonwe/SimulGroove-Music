@@ -28,17 +28,32 @@ public sealed class AuthServiceTests
         Assert.IsNotNull(initial);
         Assert.AreEqual("alice@example.com", initial!.Account.Username);
         Assert.AreEqual("alice", initial.Account.DisplayName);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(initial.TrackMatchSalt));
         Assert.IsNotNull(service.Authenticate(initial.Token));
 
         var rotated = service.Refresh(initial.RefreshToken);
         Assert.IsNotNull(rotated);
         Assert.AreNotEqual(initial.RefreshToken, rotated!.RefreshToken);
+        Assert.AreEqual(initial.TrackMatchSalt, rotated.TrackMatchSalt);
         Assert.IsNotNull(service.Authenticate(rotated.Token));
 
         // A rotated token is single-use. Replaying it revokes the account's
         // remaining refresh tokens so a stolen token cannot be used silently.
         Assert.IsNull(service.Refresh(initial.RefreshToken));
         Assert.IsNull(service.Refresh(rotated.RefreshToken));
+    }
+
+    [TestMethod]
+    public void TrackMatchSaltIsStablePerAccountAndDifferentAcrossAccounts()
+    {
+        var service = CreateService();
+
+        var first = service.SignIn("first@example.com", "first-password")!;
+        var again = service.SignIn("first@example.com", "first-password")!;
+        var second = service.SignIn("second@example.com", "second-password")!;
+
+        Assert.AreEqual(first.TrackMatchSalt, again.TrackMatchSalt);
+        Assert.AreNotEqual(first.TrackMatchSalt, second.TrackMatchSalt);
     }
 
     [TestMethod]

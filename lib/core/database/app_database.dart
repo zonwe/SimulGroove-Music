@@ -33,6 +33,7 @@ class Tracks extends Table {
   TextColumn get lyrics => text().nullable()();
   IntColumn get fileSize => integer().nullable()();
   DateTimeColumn get modifiedAt => dateTime().nullable()();
+  TextColumn get contentFingerprint => text().nullable()();
   BoolColumn get isAvailable => boolean().withDefault(const Constant(true))();
   TextColumn get syncState => text().withDefault(const Constant('local'))();
   DateTimeColumn get updatedAt => dateTime()();
@@ -179,7 +180,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -188,6 +189,7 @@ class AppDatabase extends _$AppDatabase {
       if (from < 2) await m.createTable(likedTracks);
       if (from < 3) await m.createTable(equalizerPresets);
       if (from < 4) await m.createTable(syncTombstones);
+      if (from < 5) await m.addColumn(tracks, tracks.contentFingerprint);
     },
   );
 

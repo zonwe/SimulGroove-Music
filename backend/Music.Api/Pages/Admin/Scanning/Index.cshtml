@@ -12,7 +12,7 @@
         <div>
             <span class="eyebrow">LIBRARY OPERATIONS</span>
             <h1 id="console-title">服务器音乐目录</h1>
-            <p>管理后端机器可访问的绝对路径。扫描只建立索引，不会把音频复制到数据库。</p>
+            <p>管理后端机器可访问的绝对路径。扫描只建立索引，不会把音频复制到数据库；索引完成后可直接试听。</p>
         </div>
         <a class="button button-secondary" asp-page="/Admin/Scanning/Index">刷新状态</a>
     </div>
@@ -193,7 +193,16 @@
                                 <span>@track.Artist · @track.Album</span>
                                 <span title="@track.FilePath">@track.FilePath</span>
                             </div>
-                            <span class="track-format">@track.Extension.ToUpperInvariant()</span>
+                            <div class="track-actions">
+                                <span class="track-format">@track.Extension.ToUpperInvariant()</span>
+                                <a class="button button-secondary button-small"
+                                   asp-page="/Admin/Scanning/Index"
+                                   asp-page-handler="Stream"
+                                   asp-route-sourceId="@track.ScanSourceId"
+                                   asp-route-trackId="@track.Id"
+                                   target="_blank"
+                                   rel="noopener">试听</a>
+                            </div>
                         </div>
                     }
                 </div>

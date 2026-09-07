@@ -14,4 +14,5 @@ public interface IScanSourceStore
     void CompleteScan(string id, string runId, IReadOnlyList<DiscoveredTrack> tracks, DateTimeOffset completedAt);
     void FailScan(string id, string error, DateTimeOffset failedAt);
     IReadOnlyList<ScannedTrackResponse> GetTracks(string username, string sourceId, int limit);
+    ScannedTrackResponse? GetTrack(string username, string sourceId, string trackId);
 }
