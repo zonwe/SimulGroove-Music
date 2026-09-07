@@ -14,6 +14,9 @@ param(
 
     [string]$ConfirmationReference,
 
+    [ValidatePattern("^[0-9A-Fa-f]{7,64}$")]
+    [string]$BuildRevision,
+
     [switch]$SkipInstall,
 
     [switch]$RequireProductionSignature,
@@ -216,6 +219,15 @@ if (-not $SkipInstall) {
 
 $packagePath = (Invoke-Adb @("shell", "pm", "path", $PackageName) "确认应用安装") -join [Environment]::NewLine
 Assert-Condition ($packagePath -match "(?m)^package:") "设备上未找到包 $PackageName。"
+$baseApkMatch = [regex]::Match($packagePath, "(?m)^package:(.+/base\.apk)\s*$")
+Assert-Condition $baseApkMatch.Success "未能从设备包信息定位已安装的 base.apk。"
+$installedApkPath = $baseApkMatch.Groups[1].Value.Trim()
+$installedHashOutput = (
+    Invoke-Adb @("shell", "sha256sum", $installedApkPath) "校验设备上的 APK"
+) -join [Environment]::NewLine
+Assert-Condition ($installedHashOutput -match "(?i)^([0-9a-f]{64})\s+") "设备未返回有效的 APK SHA-256。"
+$installedApkHash = $Matches[1].ToUpperInvariant()
+Assert-Condition ($installedApkHash -eq $apkHash) "设备安装的 APK 与本次验收候选包不一致。"
 
 $null = Invoke-Adb @("shell", "am", "force-stop", $PackageName) "停止旧应用进程"
 $launchOutput = Invoke-Adb @(
@@ -254,6 +266,7 @@ $result = [ordered]@{
     checked_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
     status = if ($pendingChecks.Count -eq 0) { "complete" } else { "manual_checks_pending" }
     confirmation_reference = $ConfirmationReference
+    build_revision = $BuildRevision
     apk = [ordered]@{
         path = [IO.Path]::GetRelativePath($repositoryRoot, $resolvedApkPath)
         size_bytes = $apkSize
@@ -279,6 +292,7 @@ $result = [ordered]@{
         version_name = $versionName
         version_code = $versionCode
         primary_cpu_abi = $primaryCpuAbi
+        apk_sha256 = $installedApkHash
         process_id = $processId
         install_skipped = [bool]$SkipInstall
         launch_status = "ok"

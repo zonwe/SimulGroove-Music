@@ -102,3 +102,18 @@ pwsh ./tool/production_acceptance.ps1 `
 最终汇总要求七天内三个场景的 `scenario_complete` 证据都与当前域名、在线音乐启用状态和来源白名单一致。只有汇总证据状态才是 `complete`。
 
 若 `ONLINE_MUSIC_ENABLED=true`，脚本还要求 `-ApprovedSourceId` 与生产白名单完全相同，并要求 `-SourceApprovalEvidencePath` 指向仓库外的结构化 JSON 记录；字段模板见 [`deploy/compliance/online_music_source_approval.example.json`](../deploy/compliance/online_music_source_approval.example.json)。脚本会校验批准状态、有效期、能力范围、政策链接、三方审批人、固定提交、镜像摘要、对应源码地址和敏感字段名。该检查不能替代业务、安全与法律/合规审批，只用于防止部署参数绕过已经定义的门禁。
+
+### GitHub 受保护验收工作流
+
+`.github/workflows/production-acceptance.yml` 把上述命令封装为只允许从仓库默认分支手动触发的生产验收。工作流使用 `production` Environment 和带有 `simulgroove-production` 自定义标签的自托管执行器；应为 Environment 配置必需审批人，并确保执行器与生产 Compose 位于同一受控主机或能够访问同一 Docker daemon。GitHub 托管执行器不能替代这个条件。
+
+在 `production` Environment 中配置以下变量，所有路径都必须位于检出的仓库工作区之外：
+
+- `PRODUCTION_BASE_URL`：真实 HTTPS API 根地址。
+- `PRODUCTION_ENV_FILE`：生产 `.env` 的绝对路径；文件本身继续留在主机的密钥存储边界内。
+- `PRODUCTION_ACCEPTANCE_EVIDENCE_DIR`：跨工作流运行持久保存 Fire、Resolve 和 Finalize 证据的目录。
+- `PRODUCTION_APPROVED_SOURCE_IDS`：用逗号分隔的已批准来源 ID；在线音乐关闭时可为空。
+- `PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE`：在线音乐启用时必填的仓库外 JSON 审批索引。
+- `PRODUCTION_RUNBOOK_URL`：执行 Fire 或 Resolve 时使用的真实 HTTPS 处置手册地址。
+
+工作流按 `Configuration`、`Runtime`、`Fire`、`Resolve`、`Finalize` 五个阶段运行。三个告警场景必须分别使用相同测试编号完成 Fire 与 Resolve，最后再运行 Finalize。工作流摘要只显示阶段和状态，完整证据保留在自托管执行器的外部证据目录，不上传到 GitHub；输入的通知回执编号也必须是不含秘密或个人信息的审计引用。

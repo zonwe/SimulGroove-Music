@@ -71,3 +71,17 @@ pwsh ./tool/android_device_acceptance.ps1 `
 ```
 
 只有所有检查项和 `ConfirmationReference` 均存在时，证据状态才会是 `complete`。结果写入已被忽略的 `build/acceptance/android/`，设备序列号仅保存 SHA-256 截断指纹，不采集音乐文件名、账号、令牌或应用日志。
+
+## GitHub 受保护验收工作流
+
+`.github/workflows/android-device-acceptance.yml` 提供只允许从仓库默认分支手动触发的两阶段真机验收。它使用 `android-k80-acceptance` Environment，以及同时带有 `windows`、`x64` 和 `simulgroove-android-device` 标签的自托管执行器。执行器必须连接目标真机，并预装 Android SDK、`adb`、`apksigner` 和 Flutter 所需构建工具；应为 Environment 配置必需审批人。
+
+在 `android-k80-acceptance` Environment 中配置：
+
+- `ANDROID_ACCEPTANCE_EVIDENCE_DIR` 变量：位于检出工作区之外、可跨工作流运行持久保存证据的绝对目录。
+- `ANDROID_EXPECTED_MODEL_PATTERN` 变量：可选，留空时脚本继续使用 `K80|25060`。
+- `ANDROID_DEVICE_SERIAL` 密钥：可选；留空时执行器必须只连接一台已授权设备。使用密钥可以避免设备序列号出现在公开的手动输入中。
+
+先选择 `Preflight`，工作流会构建 ARM64 Release APK、把该提交的候选包保存在外部证据目录、验证 ABI 与签名、安装并启动应用，预期生成 `manual_checks_pending` 证据。随后在设备上完成七项人工回归，再从同一提交选择 `Complete`、勾选全部确认项并填写仅含字母、数字、点、下划线或连字符的验收批次编号；工作流会复用同一候选包，并通过设备端 SHA-256 证明当前安装包与候选包一致。只有脚本生成 `complete` 才通过。
+
+完整 JSON 证据保留在自托管执行器的外部目录，不上传到 GitHub。若勾选正式签名要求，脚本会拒绝当前 Android Debug 证书，因此只能在发布签名已经配置后使用。

@@ -17,6 +17,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  workflow-lint:
+    name: GitHub Actions 静态检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.24.x
+          cache: false
+      - name: 校验工作流
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
   flutter:
     name: Flutter 分析与测试
     runs-on: ubuntu-latest
