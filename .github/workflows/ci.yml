@@ -110,6 +110,30 @@ jobs:
           --entrypoint /bin/amtool
           prom/alertmanager:v0.34.0
           check-config /etc/alertmanager/alertmanager.yml
+      - name: 构建并冒烟运行非 root API 镜像
+        run: |
+          image_name=simulgroove-music-api:ci
+          container_name=simulgroove-music-api-smoke
+          docker build --file backend/Music.Api/Dockerfile --tag "$image_name" .
+          test "$(docker image inspect --format '{{.Config.User}}' "$image_name")" = "music-api"
+          docker run --detach \
+            --name "$container_name" \
+            --publish 127.0.0.1:18080:8080 \
+            --env Auth__JwtKey="$MUSIC_API_JWT_KEY" \
+            --env Administration__Password="$MUSIC_API_ADMIN_PASSWORD" \
+            "$image_name"
+          cleanup() {
+            docker rm --force "$container_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18080/health/ready >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs "$container_name"
+          exit 1
 
   linux:
     name: Linux Release 构建
