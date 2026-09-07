@@ -253,11 +253,12 @@ jobs:
             --env Auth__JwtKey="$MUSIC_API_JWT_KEY" \
             --env Administration__Password="$MUSIC_API_ADMIN_PASSWORD" \
             "$image_name"
+          # shellcheck disable=SC2317
           cleanup() {
             docker rm --force "$container_name" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          for attempt in {1..30}; do
+          for _ in {1..30}; do
             if curl --fail --silent http://127.0.0.1:18080/health/ready >/dev/null 2>&1; then
               exit 0
             fi
@@ -271,6 +272,7 @@ jobs:
           network_name=simulgroove-observability-smoke
           collector_name=simulgroove-otel-collector-smoke
           api_name=simulgroove-music-api-telemetry-smoke
+          # shellcheck disable=SC2317
           cleanup() {
             docker rm --force "$api_name" "$collector_name" >/dev/null 2>&1 || true
             docker network rm "$network_name" >/dev/null 2>&1 || true
@@ -327,9 +329,12 @@ jobs:
             if grep --quiet '^flutter_music_online_music_sidecar_requests_total' <<<"$metrics" && \
               grep --quiet '^flutter_music_online_music_sidecar_failures_total' <<<"$metrics" && \
               grep --quiet '^flutter_music_online_music_sidecar_circuit_rejections_total' <<<"$metrics"; then
-              ! grep --fixed-strings --quiet 'metric-smoke-query' <<<"$metrics"
-              ! grep --fixed-strings --quiet 'ci-telemetry' <<<"$metrics"
-              ! grep --fixed-strings --quiet "$access_token" <<<"$metrics"
+              if grep --fixed-strings --quiet 'metric-smoke-query' <<<"$metrics" || \
+                grep --fixed-strings --quiet 'ci-telemetry' <<<"$metrics" || \
+                grep --fixed-strings --quiet "$access_token" <<<"$metrics"; then
+                echo "指标意外包含敏感或高基数字段。"
+                exit 1
+              fi
               exit 0
             fi
             sleep 2
