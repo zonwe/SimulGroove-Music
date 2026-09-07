@@ -96,6 +96,7 @@ jobs:
           $hasParseErrors = $false
           foreach ($path in @(
             "tool/production_acceptance.ps1",
+            "tool/prometheus_acceptance.ps1",
             "tool/android_device_acceptance.ps1"
           )) {
             $parseErrors = $null
@@ -271,10 +272,11 @@ jobs:
           image_name=simulgroove-music-api:ci
           network_name=simulgroove-observability-smoke
           collector_name=simulgroove-otel-collector-smoke
+          prometheus_name=simulgroove-prometheus-smoke
           api_name=simulgroove-music-api-telemetry-smoke
           # shellcheck disable=SC2317
           cleanup() {
-            docker rm --force "$api_name" "$collector_name" >/dev/null 2>&1 || true
+            docker rm --force "$api_name" "$prometheus_name" "$collector_name" >/dev/null 2>&1 || true
             docker network rm "$network_name" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
@@ -282,10 +284,19 @@ jobs:
           docker run --detach \
             --name "$collector_name" \
             --network "$network_name" \
+            --network-alias otel-collector \
             --publish 127.0.0.1:19464:9464 \
             --volume "$PWD/deploy/observability/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro" \
             otel/opentelemetry-collector-contrib:0.160.0 \
             --config=/etc/otelcol-contrib/config.yml
+          docker run --detach \
+            --name "$prometheus_name" \
+            --network "$network_name" \
+            --network-alias prometheus \
+            --volume "$PWD/deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            --volume "$PWD/deploy/observability/online_music_alerts.yml:/etc/prometheus/rules/online_music_alerts.yml:ro" \
+            prom/prometheus:v3.14.0 \
+            --config.file=/etc/prometheus/prometheus.yml
           docker run --detach \
             --name "$api_name" \
             --network "$network_name" \
@@ -335,6 +346,11 @@ jobs:
                 echo "指标意外包含敏感或高基数字段。"
                 exit 1
               fi
+              pwsh ./tool/prometheus_acceptance.ps1 \
+                -DockerNetwork "$network_name" \
+                -RequireOnlineMusicSeries \
+                -LookbackDays 1 \
+                -TimeoutSeconds 60
               exit 0
             fi
             sleep 2

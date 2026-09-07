@@ -500,6 +500,17 @@ $composeArguments = @(
 $null = Invoke-Docker -Arguments ($composeArguments + @("config", "--quiet")) -Capture
 $composeJson = (Invoke-Docker -Arguments ($composeArguments + @("config", "--format", "json")) -Capture) -join [Environment]::NewLine
 $composeConfiguration = $composeJson | ConvertFrom-Json
+$observabilityNetworkConfiguration = $composeConfiguration.networks."observability-private"
+$networkNameProperty = $observabilityNetworkConfiguration.PSObject.Properties["name"]
+$observabilityNetwork = if ($null -ne $networkNameProperty) {
+    [string]$networkNameProperty.Value
+}
+else {
+    ""
+}
+if ([string]::IsNullOrWhiteSpace($observabilityNetwork)) {
+    $observabilityNetwork = "$($composeConfiguration.name)_observability-private"
+}
 
 $result = [ordered]@{
     schema_version = 1
@@ -519,6 +530,7 @@ $result = [ordered]@{
     certificate = $null
     health = $null
     readiness = $null
+    prometheus = $null
     alert_test = [ordered]@{
         action = $AlertAction
         scenario = $AlertScenario
@@ -547,6 +559,16 @@ if (-not $ConfigurationOnly) {
         Assert-Condition ($runningServices -contains $service) "生产服务未运行：$service"
     }
     $result.compose_services = $runningServices
+
+    $prometheusArguments = @{
+        DockerNetwork = $observabilityNetwork
+        LookbackDays = 7
+        TimeoutSeconds = 60
+    }
+    if ($onlineMusicEnabled) {
+        $prometheusArguments.RequireOnlineMusicSeries = $true
+    }
+    $result.prometheus = & (Join-Path $PSScriptRoot "prometheus_acceptance.ps1") @prometheusArguments
 
     $certificateHolder = [hashtable]::Synchronized(@{
         certificate = $null
@@ -660,17 +682,6 @@ if (-not $ConfigurationOnly) {
             $result.alert_test.prerequisite_evidence_files = @($fireEvidence.path)
         }
 
-        $observabilityNetworkConfiguration = $composeConfiguration.networks."observability-private"
-        $networkNameProperty = $observabilityNetworkConfiguration.PSObject.Properties["name"]
-        $observabilityNetwork = if ($null -ne $networkNameProperty) {
-            [string]$networkNameProperty.Value
-        }
-        else {
-            ""
-        }
-        if ([string]::IsNullOrWhiteSpace($observabilityNetwork)) {
-            $observabilityNetwork = "$($composeConfiguration.name)_observability-private"
-        }
         $scenario = $alertScenarios[$AlertScenario]
         $now = [DateTimeOffset]::UtcNow
         $endsAt = if ($AlertAction -eq "Fire") { $now.AddHours(1) } else { $now }

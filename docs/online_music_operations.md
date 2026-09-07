@@ -57,13 +57,15 @@ pwsh ./tool/production_acceptance.ps1 `
   -ConfigurationOnly
 ```
 
-服务启动后执行运行时验收。它会确认全部私有服务正在运行、系统信任 HTTPS 证书、证书剩余有效期、Caddy 安全响应头、关联 ID 回显和存活/就绪检查：
+服务启动后执行运行时验收。它会确认全部私有服务正在运行、系统信任 HTTPS 证书、证书剩余有效期、Caddy 安全响应头、关联 ID 回显和存活/就绪检查；同时通过 Compose 私有网络查询 Prometheus，确认 `simulgroove-otel-collector` 抓取目标在线：
 
 ```powershell
 pwsh ./tool/production_acceptance.ps1 `
   -BaseUrl "https://music.example.org" `
   -EnvironmentFile "C:/secure/simulgroove/production.env"
 ```
+
+在线音乐启用时，运行时验收还要求 Prometheus 最近七天内实际存在请求、失败和熔断拒绝三个 counter。上线演练应先制造不包含用户或媒体数据的受控 sidecar 瞬时失败与熔断拒绝，再执行运行时验收；仅有 Collector 进程存活、CI 中的合成指标或直接向 Alertmanager 注入告警都不能替代这项生产证据。验收结果只保存每个指标的时间序列数量和标签名，不保存标签值；任何搜索词、来源、曲目、账号、用户、Token、Cookie、密码、StreamRef 或 URL 类标签名都会使验收失败。
 
 通知送达必须对 `FailureWarning`、`FailureCritical` 和 `CircuitBreaker` 三个场景分别完成，以命中真实规则使用的告警名、严重级别和组件标签。每个场景的第一步都从 Compose 私有观测网络向 Alertmanager 发送不含用户或媒体数据的受控告警：
 
