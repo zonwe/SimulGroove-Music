@@ -180,22 +180,34 @@ function Assert-NoSensitiveJsonFields {
         [string]$Path = "approval"
     )
 
-    if ($null -eq $Value -or $Value -is [string] -or $Value.GetType().IsPrimitive) {
+    if ($null -eq $Value -or $Value -is [string]) {
         return
     }
-    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [pscustomobject]) {
+    if ($Value -is [pscustomobject]) {
+        foreach ($property in $Value.PSObject.Properties) {
+            Assert-Condition (
+                $property.Name -notmatch "(?i)(password|token|cookie|secret|credential|authorization|private[_-]?key)"
+            ) "来源审批证据不得包含敏感字段：$Path.$($property.Name)"
+            Assert-NoSensitiveJsonFields $property.Value "$Path.$($property.Name)"
+        }
+        return
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($key in $Value.Keys) {
+            Assert-Condition (
+                ([string]$key) -notmatch "(?i)(password|token|cookie|secret|credential|authorization|private[_-]?key)"
+            ) "来源审批证据不得包含敏感字段：$Path.$key"
+            Assert-NoSensitiveJsonFields $Value[$key] "$Path.$key"
+        }
+        return
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
         $index = 0
         foreach ($item in $Value) {
             Assert-NoSensitiveJsonFields $item "$Path[$index]"
             $index++
         }
         return
-    }
-    foreach ($property in $Value.PSObject.Properties) {
-        Assert-Condition (
-            $property.Name -notmatch "(?i)(password|token|cookie|secret|credential|authorization|private[_-]?key)"
-        ) "来源审批证据不得包含敏感字段：$Path.$($property.Name)"
-        Assert-NoSensitiveJsonFields $property.Value "$Path.$($property.Name)"
     }
 }
 
