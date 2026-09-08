@@ -128,6 +128,7 @@ class BackendAuthRepository implements AuthRepository {
       await _clearSession();
       throw StateError('账号会话不一致，请重新登录。');
     }
+    final expectedAccountRemoteId = session.account.remoteId;
     final localTrackMatcher = _LocalTrackMatcher(
       await _database.tracksForSync(account.id),
       trackMatchKey: session.trackMatchKey,
@@ -180,12 +181,16 @@ class BackendAuthRepository implements AuthRepository {
         .map((row) => _backendDeletion(row, localTrackMatcher))
         .toList(growable: false);
 
+    await _ensureSyncAccountCurrent(expectedAccountRemoteId);
     final remote = await _syncWithRefresh(
+      session,
+      expectedAccountRemoteId,
       playlists,
       likedTracks,
       presets,
       deletions,
     );
+    await _ensureSyncAccountCurrent(expectedAccountRemoteId);
     String deletionKey(String entityType, String remoteKey) =>
         '$entityType\u0000$remoteKey';
 
@@ -375,13 +380,13 @@ class BackendAuthRepository implements AuthRepository {
   }
 
   Future<BackendLibrary> _syncWithRefresh(
+    BackendSession session,
+    String expectedAccountRemoteId,
     List<BackendPlaylist> playlists,
     List<BackendTrack> likedTracks,
     List<BackendEqualizerPreset> equalizerPresets,
     List<BackendDeletion> deletions,
   ) async {
-    var session = await currentSession();
-    if (session == null) throw StateError('请先登录账号。');
     try {
       return await _gateway.syncLibrary(
         session,
@@ -392,15 +397,33 @@ class BackendAuthRepository implements AuthRepository {
       );
     } on BackendException catch (error) {
       if (!error.isUnauthorized) rethrow;
-      session = await currentSession(forceRefresh: true);
-      if (session == null) throw StateError('登录已过期，请重新登录。');
+      if (_session?.account.remoteId != expectedAccountRemoteId) {
+        throw StateError('账号已切换，本次同步已取消。');
+      }
+      final refreshedSession = await currentSession(forceRefresh: true);
+      if (refreshedSession == null) {
+        throw StateError('登录已过期，请重新登录。');
+      }
+      if (refreshedSession.account.remoteId != expectedAccountRemoteId) {
+        throw StateError('账号已切换，本次同步已取消。');
+      }
       return _gateway.syncLibrary(
-        session,
+        refreshedSession,
         playlists,
         likedTracks,
         equalizerPresets,
         deletions,
       );
+    }
+  }
+
+  Future<void> _ensureSyncAccountCurrent(String expectedRemoteId) async {
+    final activeSession = _session;
+    final activeAccount = await _database.watchCurrentAccount().first;
+    if (activeSession?.account.remoteId != expectedRemoteId ||
+        activeAccount == null ||
+        (activeAccount.remoteId ?? activeAccount.id) != expectedRemoteId) {
+      throw StateError('账号已切换，本次同步已取消。');
     }
   }
 

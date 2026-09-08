@@ -17,6 +17,10 @@ class _FakeGateway implements BackendGateway {
   List<BackendTrack> uploadedLikedTracks = const [];
   List<BackendEqualizerPreset> uploadedEqualizerPresets = const [];
   List<BackendDeletion> uploadedDeletions = const [];
+  final List<String> syncAccountRemoteIds = [];
+  int syncCallCount = 0;
+  int refreshCallCount = 0;
+  BackendException? nextSyncException;
   Future<void> Function()? beforeResponse;
   BackendSession? signInResponse;
   BackendSession? refreshResponse;
@@ -28,8 +32,10 @@ class _FakeGateway implements BackendGateway {
   }) async => signInResponse ?? (throw UnimplementedError());
 
   @override
-  Future<BackendSession> refreshSession(String refreshToken) async =>
-      refreshResponse ?? (throw UnimplementedError());
+  Future<BackendSession> refreshSession(String refreshToken) async {
+    refreshCallCount++;
+    return refreshResponse ?? (throw UnimplementedError());
+  }
 
   @override
   Future<void> signOut(String token) async {}
@@ -42,11 +48,16 @@ class _FakeGateway implements BackendGateway {
     List<BackendEqualizerPreset> equalizerPresets = const [],
     List<BackendDeletion> deletions = const [],
   ]) async {
+    syncCallCount++;
+    syncAccountRemoteIds.add(session.account.remoteId);
     uploadedPlaylists = List.of(playlists);
     uploadedLikedTracks = List.of(likedTracks);
     uploadedEqualizerPresets = List.of(equalizerPresets);
     uploadedDeletions = List.of(deletions);
     if (beforeResponse case final callback?) await callback();
+    final error = nextSyncException;
+    nextSyncException = null;
+    if (error != null) throw error;
     return response;
   }
 }
@@ -160,6 +171,118 @@ void main() {
     expect(await repository.currentSession(), equals(null));
     expect(tokenStore.tokens, equals(null));
     expect(await database.watchCurrentAccount().first, equals(null));
+  });
+
+  test('同步期间切换账号时不应用旧账号响应', () async {
+    gateway.response = BackendLibrary(
+      playlists: [
+        BackendPlaylist(
+          remoteId: 'stale-remote-playlist',
+          name: '旧账号云端歌单',
+          updatedAt: DateTime(2026, 9, 8, 12),
+          tracks: const [],
+        ),
+      ],
+      likedTracks: const [],
+    );
+    gateway.signInResponse = _accountTwoSession();
+    gateway.beforeResponse = () async {
+      gateway.beforeResponse = null;
+      await repository.signIn(
+        username: 'other@example.com',
+        password: 'password',
+      );
+    };
+
+    await expectLater(
+      repository.syncNow(),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('账号已切换'),
+        ),
+      ),
+    );
+
+    expect(gateway.syncAccountRemoteIds, ['remote-account-1']);
+    expect(
+      (await database.watchCurrentAccount().first)?.remoteId,
+      'remote-account-2',
+    );
+    expect(
+      (await database.watchPlaylists().first).where(
+        (playlist) => playlist.remoteId == 'stale-remote-playlist',
+      ),
+      isEmpty,
+    );
+  });
+
+  test('401 后切换账号时不会把旧账号数据重试给新账号', () async {
+    final now = DateTime(2026, 9, 8, 12);
+    await database.savePlaylistFromSync(
+      id: 'local-playlist',
+      remoteId: 'remote-playlist',
+      accountId: 'account-1',
+      name: '旧账号本地歌单',
+      createdAt: now,
+      updatedAt: now,
+      trackIds: const [],
+    );
+    gateway.nextSyncException = const BackendException(
+      'unauthorized',
+      statusCode: 401,
+    );
+    gateway.signInResponse = _accountTwoSession();
+    gateway.beforeResponse = () async {
+      gateway.beforeResponse = null;
+      await repository.signIn(
+        username: 'other@example.com',
+        password: 'password',
+      );
+    };
+
+    await expectLater(
+      repository.syncNow(),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('账号已切换'),
+        ),
+      ),
+    );
+
+    expect(gateway.syncCallCount, 1);
+    expect(gateway.syncAccountRemoteIds, ['remote-account-1']);
+    expect(gateway.uploadedPlaylists.single.name, '旧账号本地歌单');
+  });
+
+  test('401 后同账号会话只刷新并重试一次', () async {
+    gateway.nextSyncException = const BackendException(
+      'unauthorized',
+      statusCode: 401,
+    );
+    gateway.refreshResponse = BackendSession(
+      token: 'refreshed-token',
+      refreshToken: 'refreshed-refresh-token',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      account: const BackendAccount(
+        remoteId: 'remote-account-1',
+        username: 'user@example.com',
+        displayName: 'User',
+      ),
+    );
+
+    await repository.syncNow();
+
+    expect(gateway.refreshCallCount, 1);
+    expect(gateway.syncCallCount, 2);
+    expect(gateway.syncAccountRemoteIds, [
+      'remote-account-1',
+      'remote-account-1',
+    ]);
+    expect(tokenStore.tokens?.token, 'refreshed-token');
   });
 
   test('同步不会上传其他账号遗留的云端数据', () async {
@@ -1011,6 +1134,17 @@ void main() {
 }
 
 const _trackMatchKey = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+BackendSession _accountTwoSession() => BackendSession(
+  token: 'account-2-token',
+  refreshToken: 'account-2-refresh',
+  expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+  account: const BackendAccount(
+    remoteId: 'remote-account-2',
+    username: 'other@example.com',
+    displayName: 'Other',
+  ),
+);
 
 TracksCompanion _track(String id, {String? accountId}) =>
     TracksCompanion.insert(
