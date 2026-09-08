@@ -194,9 +194,10 @@ jobs:
           $null = New-Item -ItemType Directory -Path $productionEvidenceFilterDirectory -Force
           $productionEvidenceFilterPath = Join-Path $productionEvidenceFilterDirectory "production-ci.json"
           $productionImageDigest = "sha256:" + (("3" * 64) -join "")
+          $productionEvidenceCheckedAt = [DateTimeOffset]::UtcNow
           $productionEvidence = [ordered]@{
             schema_version = 2
-            checked_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
+            checked_at_utc = $productionEvidenceCheckedAt.ToString("O")
             status = "scenario_complete"
             build_revision = $env:GITHUB_SHA.ToLowerInvariant()
             base_url = "https://music.ci.internal"
@@ -224,11 +225,12 @@ jobs:
             RequiredConfiguredSources = @("ci-source")
             RequiredApprovedSources = @("ci-source")
             RequiredSidecarImageDigest = $productionImageDigest
+            CheckedAtNotAfterUtc = $productionEvidenceCheckedAt.AddSeconds(1)
           }
           if ($null -eq (Find-ProductionAcceptanceEvidence @productionEvidenceFilterArguments)) {
             throw "生产验收证据筛选器拒绝了有效证据。"
           }
-          foreach ($invalidCase in @("schema", "revision", "future", "configured-source", "approved-source", "image")) {
+          foreach ($invalidCase in @("schema", "revision", "future", "after-cutoff", "configured-source", "approved-source", "image")) {
             $candidate = $productionEvidence |
               ConvertTo-Json -Depth 5 |
               ConvertFrom-Json
@@ -237,6 +239,9 @@ jobs:
               "revision" { $candidate.build_revision = ("2" * 40) -join "" }
               "future" {
                 $candidate.checked_at_utc = [DateTimeOffset]::UtcNow.AddMinutes(6).ToString("O")
+              }
+              "after-cutoff" {
+                $candidate.checked_at_utc = $productionEvidenceCheckedAt.AddSeconds(2).ToString("O")
               }
               "configured-source" { $candidate.configured_sources = @("other-source") }
               "approved-source" { $candidate.approved_sources = @("other-source") }

@@ -33,7 +33,9 @@ function Find-ProductionAcceptanceEvidence {
         [int]$MaximumAgeDays = 7,
 
         [ValidateRange(0, 60)]
-        [int]$MaximumFutureMinutes = 5
+        [int]$MaximumFutureMinutes = 5,
+
+        [DateTimeOffset]$CheckedAtNotAfterUtc = [DateTimeOffset]::MaxValue
     )
 
     Set-StrictMode -Version Latest
@@ -56,6 +58,9 @@ function Find-ProductionAcceptanceEvidence {
     $now = [DateTimeOffset]::UtcNow
     $minimumTimestamp = $now.AddDays(-$MaximumAgeDays)
     $maximumTimestamp = $now.AddMinutes($MaximumFutureMinutes)
+    if ($CheckedAtNotAfterUtc -lt $maximumTimestamp) {
+        $maximumTimestamp = $CheckedAtNotAfterUtc
+    }
     $expectedConfiguredSources = ConvertTo-NormalizedSet $RequiredConfiguredSources
     $expectedApprovedSources = ConvertTo-NormalizedSet $RequiredApprovedSources
     $expectedDigest = $RequiredSidecarImageDigest.Trim().ToLowerInvariant()

@@ -37,6 +37,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$acceptanceStartedAt = [DateTimeOffset]::UtcNow
 
 . (Join-Path $PSScriptRoot "production_acceptance_evidence.ps1")
 
@@ -670,6 +671,7 @@ if (-not $ConfigurationOnly) {
                 else {
                     ""
                 }
+                CheckedAtNotAfterUtc = $acceptanceStartedAt
             }
             $scenarioEvidence = Find-ProductionAcceptanceEvidence @evidenceQuery
             Assert-Condition ($null -ne $scenarioEvidence) "缺少七天内完成的 $scenarioName 告警通知演练证据。"
@@ -706,6 +708,7 @@ if (-not $ConfigurationOnly) {
                 else {
                     ""
                 }
+                CheckedAtNotAfterUtc = $acceptanceStartedAt
             }
             $fireEvidence = Find-ProductionAcceptanceEvidence @evidenceQuery
             Assert-Condition ($null -ne $fireEvidence) "未找到同一提交、部署、场景、AlertTestId 和 BaseUrl 的有效 Fire 证据。"
@@ -794,6 +797,7 @@ if (-not $ConfigurationOnly) {
     }
 }
 
+$result.checked_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
 $null = New-Item -ItemType Directory -Path $resolvedEvidenceDirectory -Force
 $timestamp = [DateTimeOffset]::UtcNow.ToString("yyyyMMdd-HHmmss-fff")
 $evidencePath = Join-Path $resolvedEvidenceDirectory "production-$timestamp.json"
