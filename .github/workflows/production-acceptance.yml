@@ -105,6 +105,7 @@ jobs:
             BaseUrl = $env:PRODUCTION_BASE_URL
             EnvironmentFile = $environmentFile
             EvidenceDirectory = $evidenceDirectory
+            BuildRevision = $env:GITHUB_SHA
             AlertAction = "None"
           }
 

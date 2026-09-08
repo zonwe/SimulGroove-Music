@@ -23,6 +23,9 @@ param(
 
     [string]$NotificationReceiptReference,
 
+    [ValidatePattern("^[0-9A-Fa-f]{7,64}$")]
+    [string]$BuildRevision,
+
     [string[]]$ApprovedSourceId = @(),
 
     [string]$SourceApprovalEvidencePath,
@@ -249,6 +252,7 @@ function Find-AcceptanceEvidence {
         [string]$RequiredScenario,
         [string]$RequiredTestId,
         [string]$RequiredBaseUrl,
+        [string]$RequiredBuildRevision,
         [int]$MaximumAgeDays = 7
     )
 
@@ -272,6 +276,13 @@ function Find-AcceptanceEvidence {
             if (-not [string]::IsNullOrWhiteSpace($RequiredTestId) -and
                 $payload.alert_test.test_id -ne $RequiredTestId) {
                 continue
+            }
+            if (-not [string]::IsNullOrWhiteSpace($RequiredBuildRevision)) {
+                $buildRevisionProperty = $payload.PSObject.Properties["build_revision"]
+                if ($null -eq $buildRevisionProperty -or
+                    [string]$buildRevisionProperty.Value -ne $RequiredBuildRevision) {
+                    continue
+                }
             }
             return [pscustomobject]@{
                 path = $file.FullName
@@ -518,10 +529,34 @@ if ([string]::IsNullOrWhiteSpace($observabilityNetwork)) {
     $observabilityNetwork = "$($composeConfiguration.name)_observability-private"
 }
 
+$normalizedBuildRevision = if ([string]::IsNullOrWhiteSpace($BuildRevision)) {
+    $null
+}
+else {
+    $BuildRevision.ToLowerInvariant()
+}
+if ($null -ne $normalizedBuildRevision) {
+    Assert-Condition ($normalizedBuildRevision -notmatch "^0+$") "BuildRevision 不能为全零提交。"
+    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+    Assert-Condition ($null -ne $gitCommand) "提供 BuildRevision 时必须能够调用 git。"
+    $revisionOutput = @(
+        & $gitCommand.Source -C $repositoryRoot rev-parse HEAD 2>&1
+    )
+    Assert-Condition ($LASTEXITCODE -eq 0) "无法读取当前仓库提交。"
+    $repositoryRevision = ($revisionOutput -join "").Trim().ToLowerInvariant()
+    Assert-Condition (
+        $repositoryRevision -eq $normalizedBuildRevision
+    ) "BuildRevision 与当前检出提交不一致。"
+}
+if ($AlertAction -in @("Fire", "Resolve", "Finalize")) {
+    Assert-Condition ($null -ne $normalizedBuildRevision) "$AlertAction 阶段必须提供 -BuildRevision，以绑定同一仓库提交的证据链。"
+}
+
 $result = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     checked_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
     status = "configuration_valid"
+    build_revision = $normalizedBuildRevision
     base_url = $BaseUrl.AbsoluteUri.TrimEnd("/")
     domain = $domain
     environment_file = $environmentPath
@@ -671,6 +706,7 @@ if (-not $ConfigurationOnly) {
                 RequiredScenario = $scenarioName
                 RequiredTestId = ""
                 RequiredBaseUrl = $result.base_url
+                RequiredBuildRevision = $normalizedBuildRevision
             }
             $scenarioEvidence = Find-AcceptanceEvidence @evidenceQuery
             Assert-Condition ($null -ne $scenarioEvidence) "缺少七天内完成的 $scenarioName 告警通知演练证据。"
@@ -702,6 +738,7 @@ if (-not $ConfigurationOnly) {
                 RequiredScenario = $AlertScenario
                 RequiredTestId = $AlertTestId
                 RequiredBaseUrl = $result.base_url
+                RequiredBuildRevision = $normalizedBuildRevision
             }
             $fireEvidence = Find-AcceptanceEvidence @evidenceQuery
             Assert-Condition ($null -ne $fireEvidence) "未找到相同场景、AlertTestId 和 BaseUrl 的有效 Fire 证据。"

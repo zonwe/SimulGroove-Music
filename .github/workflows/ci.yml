@@ -190,6 +190,7 @@ jobs:
             EnvironmentFile = $environmentPath
             ConfigurationOnly = $true
             EvidenceDirectory = $evidenceDirectory
+            BuildRevision = $env:GITHUB_SHA
             ApprovedSourceId = @("ci-source")
             SourceApprovalEvidencePath = $approvalPath
           }
@@ -201,6 +202,26 @@ jobs:
             ConvertFrom-Json
           if ($evidence.status -ne "configuration_valid") {
             throw "生产配置验收证据状态不正确。"
+          }
+          if ($evidence.schema_version -ne 2 -or
+              $evidence.build_revision -ne $env:GITHUB_SHA.ToLowerInvariant()) {
+            throw "生产配置验收证据未绑定当前提交。"
+          }
+          try {
+            $missingRevisionArguments = $productionArguments.Clone()
+            $missingRevisionArguments.Remove("BuildRevision")
+            $missingRevisionArguments.Remove("ConfigurationOnly")
+            $missingRevisionArguments.AlertAction = "Fire"
+            $missingRevisionArguments.AlertScenario = "FailureWarning"
+            $missingRevisionArguments.AlertTestId = "ci-missing-revision"
+            $missingRevisionArguments.RunbookUrl = "https://runbooks.ci.internal/online-music"
+            ./tool/production_acceptance.ps1 @missingRevisionArguments
+            throw "生产验收脚本未拒绝缺少提交修订的 Fire 阶段。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "必须提供 -BuildRevision") {
+              throw
+            }
           }
 
           $badEnvironmentPath = Join-Path $env:RUNNER_TEMP "production-mismatched-image-ci.env"
@@ -231,6 +252,7 @@ jobs:
               EnvironmentFile = $badEnvironmentPath
               ConfigurationOnly = $true
               EvidenceDirectory = $evidenceDirectory
+              BuildRevision = $env:GITHUB_SHA
               ApprovedSourceId = @("ci-source", "ci-source-2")
               SourceApprovalEvidencePath = $badApprovalPath
             }

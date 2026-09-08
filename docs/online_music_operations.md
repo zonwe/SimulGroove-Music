@@ -51,9 +51,11 @@
 上线前先让生产环境文件引用仓库外的真实 Alertmanager 配置。真实域名、ACME 邮箱、JWT 密钥和管理员密码不能保留示例值：
 
 ```powershell
+$buildRevision = git rev-parse HEAD
 pwsh ./tool/production_acceptance.ps1 `
   -BaseUrl "https://music.example.org" `
   -EnvironmentFile "C:/secure/simulgroove/production.env" `
+  -BuildRevision $buildRevision `
   -ConfigurationOnly
 ```
 
@@ -62,7 +64,8 @@ pwsh ./tool/production_acceptance.ps1 `
 ```powershell
 pwsh ./tool/production_acceptance.ps1 `
   -BaseUrl "https://music.example.org" `
-  -EnvironmentFile "C:/secure/simulgroove/production.env"
+  -EnvironmentFile "C:/secure/simulgroove/production.env" `
+  -BuildRevision $buildRevision
 ```
 
 在线音乐启用时，运行时验收还要求 Prometheus 最近七天内实际存在请求、失败和熔断拒绝三个 counter。上线演练应先制造不包含用户或媒体数据的受控 sidecar 瞬时失败与熔断拒绝，再执行运行时验收；仅有 Collector 进程存活、CI 中的合成指标或直接向 Alertmanager 注入告警都不能替代这项生产证据。验收结果只保存每个指标的时间序列数量和标签名，不保存标签值；任何搜索词、来源、曲目、账号、用户、Token、Cookie、密码、StreamRef 或 URL 类标签名都会使验收失败。
@@ -73,6 +76,7 @@ pwsh ./tool/production_acceptance.ps1 `
 pwsh ./tool/production_acceptance.ps1 `
   -BaseUrl "https://music.example.org" `
   -EnvironmentFile "C:/secure/simulgroove/production.env" `
+  -BuildRevision $buildRevision `
   -AlertAction Fire `
   -AlertScenario FailureWarning `
   -AlertTestId CHG-20260907-01 `
@@ -85,6 +89,7 @@ pwsh ./tool/production_acceptance.ps1 `
 pwsh ./tool/production_acceptance.ps1 `
   -BaseUrl "https://music.example.org" `
   -EnvironmentFile "C:/secure/simulgroove/production.env" `
+  -BuildRevision $buildRevision `
   -AlertAction Resolve `
   -AlertScenario FailureWarning `
   -AlertTestId CHG-20260907-01 `
@@ -92,16 +97,17 @@ pwsh ./tool/production_acceptance.ps1 `
   -NotificationReceiptReference "INC-12345"
 ```
 
-恢复步骤必须找到七天内相同场景、测试 ID 与域名的 Fire 证据，并从 Alertmanager API 确认告警不再活动，随后生成 `scenario_complete`。三个场景均完成后执行最终汇总：
+恢复步骤必须找到七天内相同场景、测试 ID、域名与仓库提交的 Fire 证据，并从 Alertmanager API 确认告警不再活动，随后生成 `scenario_complete`。三个场景均完成后执行最终汇总：
 
 ```powershell
 pwsh ./tool/production_acceptance.ps1 `
   -BaseUrl "https://music.example.org" `
   -EnvironmentFile "C:/secure/simulgroove/production.env" `
+  -BuildRevision $buildRevision `
   -AlertAction Finalize
 ```
 
-最终汇总要求七天内三个场景的 `scenario_complete` 证据都与当前域名、在线音乐启用状态和来源白名单一致。只有汇总证据状态才是 `complete`。
+最终汇总要求七天内三个场景的 `scenario_complete` 证据都与当前仓库提交、域名、在线音乐启用状态和来源白名单一致。只有汇总证据状态才是 `complete`。脚本会验证 `-BuildRevision` 等于当前检出的 Git HEAD；Fire、Resolve 或 Finalize 缺少该参数时也会直接拒绝执行，避免伪造或跨提交拼接验收证据。
 
 若 `ONLINE_MUSIC_ENABLED=true`，脚本还要求 `-ApprovedSourceId` 与生产白名单完全相同，并要求 `-SourceApprovalEvidencePath` 指向仓库外的结构化 JSON 记录；字段模板见 [`deploy/compliance/online_music_source_approval.example.json`](../deploy/compliance/online_music_source_approval.example.json)。脚本会校验批准状态、有效期、能力范围、政策链接、三方审批人、固定提交、镜像摘要、对应源码地址和敏感字段名。运行时还会读取正在运行的 `music-sidecar` 容器镜像 ID，要求它与所有来源共同批准的 `image_digest` 完全一致；Finalize 只接受由同一镜像完成的三个告警场景。该检查不能替代业务、安全与法律/合规审批，只用于防止部署参数绕过已经定义的门禁。
 
@@ -118,4 +124,4 @@ pwsh ./tool/production_acceptance.ps1 `
 - `PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE`：在线音乐启用时必填的仓库外 JSON 审批索引。
 - `PRODUCTION_RUNBOOK_URL`：执行 Fire 或 Resolve 时使用的真实 HTTPS 处置手册地址。
 
-工作流按 `Configuration`、`Runtime`、`Fire`、`Resolve`、`Finalize` 五个阶段运行。三个告警场景必须分别使用相同测试编号完成 Fire 与 Resolve，最后再运行 Finalize。工作流摘要只显示阶段和状态，完整证据保留在自托管执行器的外部证据目录，不上传到 GitHub；输入的通知回执编号也必须是不含秘密或个人信息的审计引用。
+工作流按 `Configuration`、`Runtime`、`Fire`、`Resolve`、`Finalize` 五个阶段运行，并自动把当前 `GITHUB_SHA` 写入证据。三个告警场景必须在同一提交上分别使用相同测试编号完成 Fire 与 Resolve，最后再运行 Finalize；默认分支若在演练期间更新，应从新提交重新执行整套阶段。工作流摘要只显示阶段和状态，完整证据保留在自托管执行器的外部证据目录，不上传到 GitHub；输入的通知回执编号也必须是不含秘密或个人信息的审计引用。
