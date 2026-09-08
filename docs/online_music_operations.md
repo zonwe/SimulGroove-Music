@@ -117,6 +117,8 @@ pwsh ./tool/production_acceptance.ps1 `
 
 `.github/workflows/production-acceptance.yml` 把上述命令封装为只允许从仓库默认分支手动触发的生产验收。工作流使用 `production` Environment 和带有 `simulgroove-production` 自定义标签的自托管执行器；应为 Environment 配置必需审批人，并确保执行器与生产 Compose 位于同一受控主机或能够访问同一 Docker daemon。GitHub 托管执行器不能替代这个条件。
 
+外部证据目录可以跨阶段保留历史 JSON，但每次工作流只接受本次脚本新建且唯一的证据文件，并复核其 schema、提交和 Base URL；不会按文件修改时间把旧证据误认成本次结果。
+
 在 `production` Environment 中配置以下变量，所有路径都必须位于检出的仓库工作区之外：
 
 - `PRODUCTION_BASE_URL`：真实 HTTPS API 根地址。

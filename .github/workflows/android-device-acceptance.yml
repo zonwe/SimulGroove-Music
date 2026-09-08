@@ -179,14 +179,19 @@ jobs:
             throw "未知验收阶段：$($env:ACCEPTANCE_PHASE)"
           }
 
+          $evidenceFilesBefore = @{}
+          Get-ChildItem -LiteralPath $evidenceDirectory -Filter "android-*.json" -File |
+            ForEach-Object { $evidenceFilesBefore[$_.FullName] = $true }
           ./tool/android_device_acceptance.ps1 @arguments
 
-          $evidenceFile = Get-ChildItem -LiteralPath $evidenceDirectory -Filter "android-*.json" -File |
-            Sort-Object LastWriteTimeUtc -Descending |
-            Select-Object -First 1
-          if ($null -eq $evidenceFile) {
-            throw "Android 真机验收未生成证据文件。"
+          $newEvidenceFiles = @(
+            Get-ChildItem -LiteralPath $evidenceDirectory -Filter "android-*.json" -File |
+              Where-Object { -not $evidenceFilesBefore.ContainsKey($_.FullName) }
+          )
+          if ($newEvidenceFiles.Count -ne 1) {
+            throw "Android 真机验收必须恰好生成一个新证据文件；实际为 $($newEvidenceFiles.Count) 个。"
           }
+          $evidenceFile = $newEvidenceFiles[0]
           $evidence = Get-Content -LiteralPath $evidenceFile.FullName -Raw | ConvertFrom-Json
           if ($evidence.status -ne $expectedStatus) {
             throw "Android 真机验收状态不正确，预期 $expectedStatus，实际 $($evidence.status)。"

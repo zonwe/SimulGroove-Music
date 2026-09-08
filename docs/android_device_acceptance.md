@@ -95,3 +95,5 @@ pwsh ./tool/android_device_acceptance.ps1 `
 先选择 `Preflight`，工作流会构建 ARM64 Release APK、把该提交的候选包保存在外部证据目录、验证 ABI 与签名、安装并启动应用，预期生成 `manual_checks_pending` 证据。随后在设备上完成七项人工回归，再从同一提交选择 `Complete`、勾选全部确认项并填写仅含字母、数字、点、下划线或连字符的验收批次编号；工作流会复用同一候选包，通过设备端 SHA-256 证明当前安装包与候选包一致，并要求同一目录中存在匹配的七天内 Preflight 证据。只有脚本生成带前置证据引用的 `complete` 才通过；默认分支在两阶段之间更新时必须从新提交重新执行 Preflight。
 
 完整 JSON 证据保留在自托管执行器的外部目录，不上传到 GitHub。若勾选正式签名要求，脚本会拒绝当前 Android Debug 证书，因此只能在发布签名已经配置后使用。
+
+外部目录可保留历次 Preflight 与 Complete JSON，但每次工作流只接受本次脚本新建且唯一的证据文件，再核对状态、schema、提交与前置证据引用；文件修改时间不会被用来猜测本次结果。

@@ -95,6 +95,10 @@ jobs:
 
           $environmentFile = Assert-OutsideWorkspace $env:PRODUCTION_ENV_FILE "PRODUCTION_ENV_FILE" -MustExist
           $evidenceDirectory = Assert-OutsideWorkspace $env:PRODUCTION_ACCEPTANCE_EVIDENCE_DIR "PRODUCTION_ACCEPTANCE_EVIDENCE_DIR"
+          $null = New-Item -ItemType Directory -Path $evidenceDirectory -Force
+          $evidenceFilesBefore = @{}
+          Get-ChildItem -LiteralPath $evidenceDirectory -Filter "production-*.json" -File |
+            ForEach-Object { $evidenceFilesBefore[$_.FullName] = $true }
           $approvedSources = @(
             $env:PRODUCTION_APPROVED_SOURCE_IDS -split "," |
               ForEach-Object { $_.Trim().ToLowerInvariant() } |
@@ -157,15 +161,23 @@ jobs:
 
           ./tool/production_acceptance.ps1 @arguments
 
-          $evidenceFile = Get-ChildItem -LiteralPath $evidenceDirectory -Filter "production-*.json" -File |
-            Sort-Object LastWriteTimeUtc -Descending |
-            Select-Object -First 1
-          if ($null -eq $evidenceFile) {
-            throw "生产验收未生成证据文件。"
+          $newEvidenceFiles = @(
+            Get-ChildItem -LiteralPath $evidenceDirectory -Filter "production-*.json" -File |
+              Where-Object { -not $evidenceFilesBefore.ContainsKey($_.FullName) }
+          )
+          if ($newEvidenceFiles.Count -ne 1) {
+            throw "生产验收必须恰好生成一个新证据文件；实际为 $($newEvidenceFiles.Count) 个。"
           }
+          $evidenceFile = $newEvidenceFiles[0]
           $evidence = Get-Content -LiteralPath $evidenceFile.FullName -Raw | ConvertFrom-Json
           if ($evidence.status -ne $expectedStatus) {
             throw "生产验收状态不正确，预期 $expectedStatus，实际 $($evidence.status)。"
+          }
+          $expectedBaseUrl = ([uri]$env:PRODUCTION_BASE_URL).AbsoluteUri.TrimEnd("/")
+          if ($evidence.schema_version -ne 2 -or
+              $evidence.build_revision -ne $env:GITHUB_SHA.ToLowerInvariant() -or
+              $evidence.base_url -ne $expectedBaseUrl) {
+            throw "生产验收证据未绑定当前 schema、提交和 Base URL。"
           }
 
           "### 生产验收" >> $env:GITHUB_STEP_SUMMARY
