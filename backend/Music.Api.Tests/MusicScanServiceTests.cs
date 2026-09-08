@@ -96,6 +96,84 @@ public sealed class MusicScanServiceTests
         Assert.IsNull(scanner.GetTrackFile("alice", source.Id, indexed.Id));
     }
 
+    [TestMethod]
+    public void CreateSourceRejectsSymbolicLinkInsideAllowedRoot()
+    {
+        var allowedRoot = Directory.CreateDirectory(System.IO.Path.Combine(_directory.Path, "Allowed")).FullName;
+        var outsideRoot = Directory.CreateDirectory(System.IO.Path.Combine(_directory.Path, "Outside")).FullName;
+        var linkedRoot = System.IO.Path.Combine(allowedRoot, "Linked");
+        try
+        {
+            Directory.CreateSymbolicLink(linkedRoot, outsideRoot);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Inconclusive($"This host cannot create a directory symbolic link: {exception.Message}");
+        }
+        var scanner = CreateScanner(new FakeScanSourceStore(), allowedRoot);
+
+        var argumentException = Assert.ThrowsException<ArgumentException>(() =>
+            scanner.CreateSource("alice", new CreateScanSourceRequest(linkedRoot, 60, true)));
+
+        StringAssert.Contains(argumentException.Message, "symbolic link or reparse point");
+    }
+
+    [TestMethod]
+    public async Task ExistingSourceCannotStreamOrRescanAfterAllowedRootsAreTightened()
+    {
+        var originalRoot = Directory.CreateDirectory(System.IO.Path.Combine(_directory.Path, "Original")).FullName;
+        var restrictedRoot = Directory.CreateDirectory(System.IO.Path.Combine(_directory.Path, "Restricted")).FullName;
+        var filePath = System.IO.Path.Combine(originalRoot, "Track.mp3");
+        await File.WriteAllBytesAsync(filePath, [1, 2, 3, 4]);
+        var store = new FakeScanSourceStore();
+        var originalScanner = CreateScanner(store, originalRoot);
+        var source = originalScanner.CreateSource("alice", new CreateScanSourceRequest(originalRoot, 60, true));
+        await originalScanner.ScanNowAsync("alice", source.Id, CancellationToken.None);
+        var indexed = originalScanner.GetTracks("alice", source.Id, 10).Single();
+        var restrictedScanner = CreateScanner(store, restrictedRoot);
+
+        Assert.IsNull(restrictedScanner.GetTrackFile("alice", source.Id, indexed.Id));
+        var result = await restrictedScanner.ScanNowAsync("alice", source.Id, CancellationToken.None);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual("failed", result!.Status);
+        StringAssert.Contains(result.LastError!, "outside the configured scanning roots");
+    }
+
+    [TestMethod]
+    public async Task ExistingSourceCannotStreamOrRescanAfterDirectoryBecomesSymbolicLink()
+    {
+        var allowedRoot = Directory.CreateDirectory(System.IO.Path.Combine(_directory.Path, "Allowed")).FullName;
+        var sourceRoot = Directory.CreateDirectory(System.IO.Path.Combine(allowedRoot, "Library")).FullName;
+        var outsideRoot = Directory.CreateDirectory(System.IO.Path.Combine(_directory.Path, "Outside")).FullName;
+        var movedRoot = System.IO.Path.Combine(outsideRoot, "Library");
+        var filePath = System.IO.Path.Combine(sourceRoot, "Track.mp3");
+        await File.WriteAllBytesAsync(filePath, [1, 2, 3, 4]);
+        var store = new FakeScanSourceStore();
+        var scanner = CreateScanner(store, allowedRoot);
+        var source = scanner.CreateSource("alice", new CreateScanSourceRequest(sourceRoot, 60, true));
+        await scanner.ScanNowAsync("alice", source.Id, CancellationToken.None);
+        var indexed = scanner.GetTracks("alice", source.Id, 10).Single();
+        Directory.Move(sourceRoot, movedRoot);
+        try
+        {
+            Directory.CreateSymbolicLink(sourceRoot, movedRoot);
+        }
+        catch (Exception linkException) when (
+            linkException is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Inconclusive($"This host cannot create a directory symbolic link: {linkException.Message}");
+        }
+
+        Assert.IsNull(scanner.GetTrackFile("alice", source.Id, indexed.Id));
+        var result = await scanner.ScanNowAsync("alice", source.Id, CancellationToken.None);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual("failed", result!.Status);
+        StringAssert.Contains(result.LastError!, "symbolic link or reparse point");
+    }
+
     private MusicScanService CreateScanner(FakeScanSourceStore store, string allowedRoot) => new(
         store,
         new FakeAuditLogStore(),

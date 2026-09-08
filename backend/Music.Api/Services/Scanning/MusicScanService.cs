@@ -44,7 +44,7 @@ public sealed class MusicScanService : IMusicScanService
 
         try
         {
-            var sourceRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source.Path));
+            var sourceRoot = Path.TrimEndingDirectorySeparator(ValidatePath(source.Path));
             var filePath = Path.GetFullPath(track.FilePath);
             if (!IsWithinRoot(filePath, sourceRoot) || HasNestedReparsePoint(filePath, sourceRoot)) return null;
 
@@ -60,6 +60,11 @@ public sealed class MusicScanService : IMusicScanService
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
+            _logger.LogDebug(
+                exception,
+                "Indexed track validation failed for source {SourceId} and track {TrackId}.",
+                sourceId,
+                trackId);
             return null;
         }
     }
@@ -91,7 +96,8 @@ public sealed class MusicScanService : IMusicScanService
         var runId = Guid.NewGuid().ToString("N");
         try
         {
-            var discovered = await Task.Run(() => Discover(source.Path, cancellationToken), cancellationToken);
+            var sourcePath = ValidatePath(source.Path);
+            var discovered = await Task.Run(() => Discover(sourcePath, cancellationToken), cancellationToken);
             var completedAt = DateTimeOffset.UtcNow;
             _store.CompleteScan(id, runId, discovered, completedAt);
         }
@@ -164,18 +170,35 @@ public sealed class MusicScanService : IMusicScanService
     private string ValidatePath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("path is required.");
-        var fullPath = Path.GetFullPath(path.Trim().Trim('"'));
+        var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim().Trim('"')));
         if (!Directory.Exists(fullPath)) throw new ArgumentException("The directory does not exist or is not accessible.");
-        if (_allowedRoots.Length == 0) return fullPath;
+        if (_allowedRoots.Length == 0)
+        {
+            if (HasDirectoryReparsePoint(fullPath, fullPath))
+            {
+                throw new ArgumentException("The scanning directory cannot be a symbolic link or reparse point.");
+            }
+            return fullPath;
+        }
 
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var allowed = _allowedRoots.Any(root =>
+        var isInsideConfiguredRoot = false;
+        foreach (var root in _allowedRoots)
         {
-            var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return fullPath.Equals(fullRoot, comparison) || fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, comparison);
-        });
-        if (!allowed) throw new ArgumentException("The directory is outside the configured scanning roots.");
-        return fullPath;
+            var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+            var isInsideRoot = fullPath.Equals(fullRoot, comparison) ||
+                IsWithinRoot(fullPath, fullRoot);
+            if (!isInsideRoot) continue;
+
+            isInsideConfiguredRoot = true;
+            if (!HasDirectoryReparsePoint(fullPath, fullRoot)) return fullPath;
+        }
+
+        if (isInsideConfiguredRoot)
+        {
+            throw new ArgumentException("The scanning directory path contains a symbolic link or reparse point.");
+        }
+        throw new ArgumentException("The directory is outside the configured scanning roots.");
     }
 
     private static int ValidateInterval(int value)
@@ -201,5 +224,25 @@ public sealed class MusicScanService : IMusicScanService
             directory = directory.Parent;
         }
         return directory is null;
+    }
+
+    private static bool HasDirectoryReparsePoint(string directoryPath, string root)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        DirectoryInfo? directory = new(directoryPath);
+        try
+        {
+            while (directory is not null)
+            {
+                if (directory.Attributes.HasFlag(FileAttributes.ReparsePoint)) return true;
+                if (directory.FullName.Equals(root, comparison)) return false;
+                directory = directory.Parent;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+        return true;
     }
 }
