@@ -99,6 +99,7 @@ jobs:
             "tool/production_acceptance_evidence.ps1",
             "tool/prometheus_acceptance.ps1",
             "tool/container_image_acceptance.ps1",
+            "tool/acceptance_git_state.ps1",
             "tool/android_acceptance_evidence.ps1",
             "tool/android_device_acceptance.ps1"
           )) {
@@ -138,6 +139,7 @@ jobs:
               throw
             }
           }
+          . ./tool/acceptance_git_state.ps1
           . ./tool/android_acceptance_evidence.ps1
           $androidGitProbeDirectory = Join-Path $env:RUNNER_TEMP "android-git-state-$([guid]::NewGuid().ToString('N'))"
           $null = New-Item -ItemType Directory -Path $androidGitProbeDirectory
@@ -151,16 +153,18 @@ jobs:
             throw "无法创建 Android Git 状态测试仓库。"
           }
           $androidGitProbeRevision = (git -C $androidGitProbeDirectory rev-parse HEAD).Trim().ToLowerInvariant()
-          Assert-AndroidAcceptanceGitState `
+          Assert-AcceptanceGitState `
             -RepositoryRoot $androidGitProbeDirectory `
             -RequiredBuildRevision $androidGitProbeRevision `
-            -GitCommand (Get-Command git).Source | Out-Null
+            -GitCommand (Get-Command git).Source `
+            -AcceptanceName "验收测试" | Out-Null
           Add-Content -LiteralPath (Join-Path $androidGitProbeDirectory "tracked.txt") -Value "dirty"
           try {
-            Assert-AndroidAcceptanceGitState `
+            Assert-AcceptanceGitState `
               -RepositoryRoot $androidGitProbeDirectory `
               -RequiredBuildRevision $androidGitProbeRevision `
-              -GitCommand (Get-Command git).Source | Out-Null
+              -GitCommand (Get-Command git).Source `
+              -AcceptanceName "验收测试" | Out-Null
             throw "Android Git 状态门禁未拒绝脏工作区。"
           }
           catch {

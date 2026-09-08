@@ -34,6 +34,7 @@ if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
     $EvidenceDirectory = Join-Path $repositoryRoot "build/acceptance/android"
 }
 $resolvedEvidenceDirectory = [IO.Path]::GetFullPath($EvidenceDirectory)
+. (Join-Path $PSScriptRoot "acceptance_git_state.ps1")
 . (Join-Path $PSScriptRoot "android_acceptance_evidence.ps1")
 
 $acceptanceChecks = [ordered]@{
@@ -119,10 +120,11 @@ else {
 Assert-Condition ($null -ne $normalizedBuildRevision) "实际验收必须提供 -BuildRevision。"
 $gitCommand = Get-Command git -ErrorAction SilentlyContinue
 Assert-Condition ($null -ne $gitCommand) "验证 BuildRevision 时必须能够调用 git。"
-$null = Assert-AndroidAcceptanceGitState `
+$null = Assert-AcceptanceGitState `
     -RepositoryRoot $repositoryRoot `
     -RequiredBuildRevision $normalizedBuildRevision `
-    -GitCommand $gitCommand.Source
+    -GitCommand $gitCommand.Source `
+    -AcceptanceName "Android 真机验收"
 
 $normalizedConfirmedChecks = @(
     $ConfirmedCheck |

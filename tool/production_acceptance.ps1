@@ -40,6 +40,7 @@ $ErrorActionPreference = "Stop"
 $acceptanceStartedAt = [DateTimeOffset]::UtcNow
 
 . (Join-Path $PSScriptRoot "production_acceptance_evidence.ps1")
+. (Join-Path $PSScriptRoot "acceptance_git_state.ps1")
 
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $composeFile = Join-Path $repositoryRoot "compose.online-music.production.yml"
@@ -492,14 +493,11 @@ if ($null -ne $normalizedBuildRevision) {
     Assert-Condition ($normalizedBuildRevision -notmatch "^0+$") "BuildRevision 不能为全零提交。"
     $gitCommand = Get-Command git -ErrorAction SilentlyContinue
     Assert-Condition ($null -ne $gitCommand) "提供 BuildRevision 时必须能够调用 git。"
-    $revisionOutput = @(
-        & $gitCommand.Source -C $repositoryRoot rev-parse HEAD 2>&1
-    )
-    Assert-Condition ($LASTEXITCODE -eq 0) "无法读取当前仓库提交。"
-    $repositoryRevision = ($revisionOutput -join "").Trim().ToLowerInvariant()
-    Assert-Condition (
-        $repositoryRevision -eq $normalizedBuildRevision
-    ) "BuildRevision 与当前检出提交不一致。"
+    $null = Assert-AcceptanceGitState `
+        -RepositoryRoot $repositoryRoot `
+        -RequiredBuildRevision $normalizedBuildRevision `
+        -GitCommand $gitCommand.Source `
+        -AcceptanceName "生产验收"
 }
 if ($AlertAction -in @("Fire", "Resolve", "Finalize")) {
     Assert-Condition ($null -ne $normalizedBuildRevision) "$AlertAction 阶段必须提供 -BuildRevision，以绑定同一仓库提交的证据链。"
