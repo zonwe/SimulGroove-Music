@@ -139,6 +139,35 @@ jobs:
             }
           }
           . ./tool/android_acceptance_evidence.ps1
+          $androidGitProbeDirectory = Join-Path $env:RUNNER_TEMP "android-git-state-$([guid]::NewGuid().ToString('N'))"
+          $null = New-Item -ItemType Directory -Path $androidGitProbeDirectory
+          git -C $androidGitProbeDirectory init | Out-Null
+          git -C $androidGitProbeDirectory config user.email "ci@simulgroove.invalid"
+          git -C $androidGitProbeDirectory config user.name "SimulGroove CI"
+          Set-Content -LiteralPath (Join-Path $androidGitProbeDirectory "tracked.txt") -Value "clean" -Encoding utf8
+          git -C $androidGitProbeDirectory add tracked.txt
+          git -C $androidGitProbeDirectory commit -m "test fixture" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "无法创建 Android Git 状态测试仓库。"
+          }
+          $androidGitProbeRevision = (git -C $androidGitProbeDirectory rev-parse HEAD).Trim().ToLowerInvariant()
+          Assert-AndroidAcceptanceGitState `
+            -RepositoryRoot $androidGitProbeDirectory `
+            -RequiredBuildRevision $androidGitProbeRevision `
+            -GitCommand (Get-Command git).Source | Out-Null
+          Add-Content -LiteralPath (Join-Path $androidGitProbeDirectory "tracked.txt") -Value "dirty"
+          try {
+            Assert-AndroidAcceptanceGitState `
+              -RepositoryRoot $androidGitProbeDirectory `
+              -RequiredBuildRevision $androidGitProbeRevision `
+              -GitCommand (Get-Command git).Source | Out-Null
+            throw "Android Git 状态门禁未拒绝脏工作区。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "要求干净检出") {
+              throw
+            }
+          }
           $androidEvidenceDirectory = Join-Path $env:RUNNER_TEMP "android-evidence-ci"
           $null = New-Item -ItemType Directory -Path $androidEvidenceDirectory -Force
           $androidEvidencePath = Join-Path $androidEvidenceDirectory "android-ci-device-preflight.json"

@@ -119,16 +119,10 @@ else {
 Assert-Condition ($null -ne $normalizedBuildRevision) "实际验收必须提供 -BuildRevision。"
 $gitCommand = Get-Command git -ErrorAction SilentlyContinue
 Assert-Condition ($null -ne $gitCommand) "验证 BuildRevision 时必须能够调用 git。"
-$revisionOutput = Invoke-NativeCommand $gitCommand.Source @(
-    "-C",
-    $repositoryRoot,
-    "rev-parse",
-    "HEAD"
-) "读取当前仓库提交"
-$repositoryRevision = ($revisionOutput -join "").Trim().ToLowerInvariant()
-Assert-Condition (
-    $repositoryRevision -eq $normalizedBuildRevision
-) "BuildRevision 与当前检出提交不一致。"
+$null = Assert-AndroidAcceptanceGitState `
+    -RepositoryRoot $repositoryRoot `
+    -RequiredBuildRevision $normalizedBuildRevision `
+    -GitCommand $gitCommand.Source
 
 $normalizedConfirmedChecks = @(
     $ConfirmedCheck |

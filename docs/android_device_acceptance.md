@@ -39,7 +39,7 @@ pwsh ./tool/android_device_acceptance.ps1 `
 - 目标是已授权的真实设备，主 ABI 为 `arm64-v8a`。
 - APK 能覆盖安装，包名为 `top.zonwe.simul_groove_player`。
 - `MainActivity` 返回成功启动状态，应用进程在启动后仍存活。
-- 当前传入的完整提交修订等于检出仓库的 Git HEAD。
+- 当前传入的完整提交修订等于检出仓库的 Git HEAD，且工作区不存在未提交或未跟踪的非忽略文件，避免把脏工作区构建错误归属给该提交。
 - 记录 APK SHA-256、签名身份、设备型号、Android 版本和已安装版本。
 
 当前开发回归包使用 Android Debug 证书签名，因此可用于真机功能验收，但不能证明应用商店签名准备完成。正式发布签名就绪后增加 `-RequireProductionSignature`，脚本会拒绝 Debug 证书。
@@ -77,6 +77,8 @@ pwsh ./tool/android_device_acceptance.ps1 `
 ```
 
 只有所有检查项和 `ConfirmationReference` 均存在时，证据状态才可能是 `complete`。Complete 还必须在同一证据目录中找到七天内生成的 schema v2 Preflight 证据，并确认其仓库提交、设备指纹、候选 APK 与设备安装包哈希完全一致，且 Preflight 确实执行过安装。最终证据会记录前置证据文件，旧版或手工放置的候选 APK 不能单独完成验收。
+
+本地执行 Preflight 和 Complete 时都必须从干净检出运行；若当前目录保留个人文档、生成文件或其他未提交内容，请另建干净 worktree 或 clone 执行验收，不要为了通过门禁删除仍需保留的工作。
 
 结果写入已被忽略的 `build/acceptance/android/`，设备序列号仅保存 SHA-256 截断指纹，不采集音乐文件名、账号、令牌或应用日志。
 
