@@ -6,6 +6,7 @@ import 'package:flutter_music/core/auth/backend_gateway.dart';
 import 'package:flutter_music/core/auth/track_match_token.dart';
 import 'package:flutter_music/core/database/app_database.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:uuid/uuid.dart';
 
 class _FakeGateway implements BackendGateway {
   BackendLibrary response = const BackendLibrary(
@@ -248,6 +249,87 @@ void main() {
     expect(
       await database.watchLikedTrackIds().first,
       isNot(contains('account-2-remote')),
+    );
+  });
+
+  test('不同账号使用相同远端 ID 时不会覆盖本地资源', () async {
+    final now = DateTime(2026, 9, 8, 11);
+    final legacyPlaylistId = const Uuid().v5(
+      Namespace.url.value,
+      'playlist:shared-playlist',
+    );
+    final legacyPresetId = const Uuid().v5(
+      Namespace.url.value,
+      'equalizer:shared-preset',
+    );
+    await database.savePlaylistFromSync(
+      id: legacyPlaylistId,
+      remoteId: 'shared-playlist',
+      accountId: 'account-2',
+      name: '其他账号同 ID 歌单',
+      createdAt: now,
+      updatedAt: now,
+      trackIds: const [],
+    );
+    await database.saveEqualizerPreset(
+      EqualizerPresetsCompanion.insert(
+        id: legacyPresetId,
+        remoteId: const Value('shared-preset'),
+        accountId: const Value('account-2'),
+        name: '其他账号同 ID 预设',
+        gainsJson: '[]',
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+    gateway.response = BackendLibrary(
+      playlists: [
+        BackendPlaylist(
+          remoteId: 'shared-playlist',
+          name: '当前账号同 ID 歌单',
+          updatedAt: now.add(const Duration(minutes: 1)),
+          tracks: const [],
+        ),
+      ],
+      likedTracks: const [],
+      equalizerPresets: [
+        BackendEqualizerPreset(
+          remoteId: 'shared-preset',
+          name: '当前账号同 ID 预设',
+          gainsJson: '[]',
+          preampDb: 0,
+          updatedAt: now.add(const Duration(minutes: 1)),
+        ),
+      ],
+    );
+
+    await repository.syncNow();
+
+    final playlists = await database.watchPlaylists().first;
+    expect(playlists, hasLength(2));
+    expect(
+      playlists
+          .where((playlist) => playlist.accountId == 'account-2')
+          .single
+          .name,
+      '其他账号同 ID 歌单',
+    );
+    expect(
+      playlists
+          .where((playlist) => playlist.accountId == 'account-1')
+          .single
+          .name,
+      '当前账号同 ID 歌单',
+    );
+    final presets = await database.allEqualizerPresets();
+    expect(presets, hasLength(2));
+    expect(
+      presets.where((preset) => preset.accountId == 'account-2').single.name,
+      '其他账号同 ID 预设',
+    );
+    expect(
+      presets.where((preset) => preset.accountId == 'account-1').single.name,
+      '当前账号同 ID 预设',
     );
   });
 

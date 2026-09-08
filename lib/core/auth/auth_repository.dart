@@ -275,7 +275,7 @@ class BackendAuthRepository implements AuthRepository {
             local?.id ??
             _uuid.v5(
               Namespace.url.value,
-              'playlist:${remotePlaylist.remoteId}',
+              'playlist:${account.id}:${remotePlaylist.remoteId}',
             ),
         remoteId: remotePlaylist.remoteId,
         accountId: account.id,
@@ -316,7 +316,7 @@ class BackendAuthRepository implements AuthRepository {
               local?.id ??
               _uuid.v5(
                 Namespace.url.value,
-                'equalizer:${remotePreset.remoteId}',
+                'equalizer:${account.id}:${remotePreset.remoteId}',
               ),
           remoteId: Value(remotePreset.remoteId),
           accountId: Value(account.id),
