@@ -21,13 +21,16 @@ pwsh ./tool/android_device_acceptance.ps1 -ListChecks
 只连接一台设备时可直接运行：
 
 ```powershell
-pwsh ./tool/android_device_acceptance.ps1
+$buildRevision = git rev-parse HEAD
+pwsh ./tool/android_device_acceptance.ps1 -BuildRevision $buildRevision
 ```
 
 连接多台设备时使用 `adb devices -l` 显示的序列号：
 
 ```powershell
-pwsh ./tool/android_device_acceptance.ps1 -Serial "DEVICE_SERIAL"
+pwsh ./tool/android_device_acceptance.ps1 `
+  -BuildRevision $buildRevision `
+  -Serial "DEVICE_SERIAL"
 ```
 
 脚本会完成以下自动检查：
@@ -36,6 +39,7 @@ pwsh ./tool/android_device_acceptance.ps1 -Serial "DEVICE_SERIAL"
 - 目标是已授权的真实设备，主 ABI 为 `arm64-v8a`。
 - APK 能覆盖安装，包名为 `top.zonwe.simul_groove_player`。
 - `MainActivity` 返回成功启动状态，应用进程在启动后仍存活。
+- 当前传入的完整提交修订等于检出仓库的 Git HEAD。
 - 记录 APK SHA-256、签名身份、设备型号、Android 版本和已安装版本。
 
 当前开发回归包使用 Android Debug 证书签名，因此可用于真机功能验收，但不能证明应用商店签名准备完成。正式发布签名就绪后增加 `-RequireProductionSignature`，脚本会拒绝 Debug 证书。
@@ -44,6 +48,7 @@ pwsh ./tool/android_device_acceptance.ps1 -Serial "DEVICE_SERIAL"
 
 ```powershell
 pwsh ./tool/android_device_acceptance.ps1 `
+  -BuildRevision $buildRevision `
   -Serial "DEVICE_SERIAL" `
   -ExpectedModelPattern "Redmi|25060"
 ```
@@ -64,13 +69,16 @@ pwsh ./tool/android_device_acceptance.ps1 `
 
 ```powershell
 pwsh ./tool/android_device_acceptance.ps1 `
+  -BuildRevision $buildRevision `
   -Serial "DEVICE_SERIAL" `
   -SkipInstall `
   -ConfirmedCheck permission-flow,folder-scan,device-scan,scan-notification,local-playback,media-controls,account-sync `
   -ConfirmationReference "K80-20260907-01"
 ```
 
-只有所有检查项和 `ConfirmationReference` 均存在时，证据状态才会是 `complete`。结果写入已被忽略的 `build/acceptance/android/`，设备序列号仅保存 SHA-256 截断指纹，不采集音乐文件名、账号、令牌或应用日志。
+只有所有检查项和 `ConfirmationReference` 均存在时，证据状态才可能是 `complete`。Complete 还必须在同一证据目录中找到七天内生成的 schema v2 Preflight 证据，并确认其仓库提交、设备指纹、候选 APK 与设备安装包哈希完全一致，且 Preflight 确实执行过安装。最终证据会记录前置证据文件，旧版或手工放置的候选 APK 不能单独完成验收。
+
+结果写入已被忽略的 `build/acceptance/android/`，设备序列号仅保存 SHA-256 截断指纹，不采集音乐文件名、账号、令牌或应用日志。
 
 ## GitHub 受保护验收工作流
 
@@ -82,6 +90,6 @@ pwsh ./tool/android_device_acceptance.ps1 `
 - `ANDROID_EXPECTED_MODEL_PATTERN` 变量：可选，留空时脚本继续使用 `K80|25060`。
 - `ANDROID_DEVICE_SERIAL` 密钥：可选；留空时执行器必须只连接一台已授权设备。使用密钥可以避免设备序列号出现在公开的手动输入中。
 
-先选择 `Preflight`，工作流会构建 ARM64 Release APK、把该提交的候选包保存在外部证据目录、验证 ABI 与签名、安装并启动应用，预期生成 `manual_checks_pending` 证据。随后在设备上完成七项人工回归，再从同一提交选择 `Complete`、勾选全部确认项并填写仅含字母、数字、点、下划线或连字符的验收批次编号；工作流会复用同一候选包，并通过设备端 SHA-256 证明当前安装包与候选包一致。只有脚本生成 `complete` 才通过。
+先选择 `Preflight`，工作流会构建 ARM64 Release APK、把该提交的候选包保存在外部证据目录、验证 ABI 与签名、安装并启动应用，预期生成 `manual_checks_pending` 证据。随后在设备上完成七项人工回归，再从同一提交选择 `Complete`、勾选全部确认项并填写仅含字母、数字、点、下划线或连字符的验收批次编号；工作流会复用同一候选包，通过设备端 SHA-256 证明当前安装包与候选包一致，并要求同一目录中存在匹配的七天内 Preflight 证据。只有脚本生成带前置证据引用的 `complete` 才通过；默认分支在两阶段之间更新时必须从新提交重新执行 Preflight。
 
 完整 JSON 证据保留在自托管执行器的外部目录，不上传到 GitHub。若勾选正式签名要求，脚本会拒绝当前 Android Debug 证书，因此只能在发布签名已经配置后使用。

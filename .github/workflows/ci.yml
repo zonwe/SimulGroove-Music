@@ -98,6 +98,7 @@ jobs:
             "tool/production_acceptance.ps1",
             "tool/prometheus_acceptance.ps1",
             "tool/container_image_acceptance.ps1",
+            "tool/android_acceptance_evidence.ps1",
             "tool/android_device_acceptance.ps1"
           )) {
             $parseErrors = $null
@@ -115,6 +116,75 @@ jobs:
             throw "验收脚本存在 PowerShell 语法错误。"
           }
           ./tool/android_device_acceptance.ps1 -ListChecks | Out-Null
+          try {
+            ./tool/android_device_acceptance.ps1
+            throw "Android 验收脚本未拒绝缺少提交修订的实际验收。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "必须提供 -BuildRevision") {
+              throw
+            }
+          }
+          try {
+            $androidRevisionArguments = @{
+              BuildRevision = "1111111111111111111111111111111111111111"
+            }
+            ./tool/android_device_acceptance.ps1 @androidRevisionArguments
+            throw "Android 验收脚本未拒绝与当前检出不一致的提交修订。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "与当前检出提交不一致") {
+              throw
+            }
+          }
+          . ./tool/android_acceptance_evidence.ps1
+          $androidEvidenceDirectory = Join-Path $env:RUNNER_TEMP "android-evidence-ci"
+          $null = New-Item -ItemType Directory -Path $androidEvidenceDirectory -Force
+          $androidEvidencePath = Join-Path $androidEvidenceDirectory "android-ci-device-preflight.json"
+          $androidApkHash = ("A" * 64) -join ""
+          $androidEvidence = [ordered]@{
+            schema_version = 2
+            checked_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
+            status = "manual_checks_pending"
+            build_revision = $env:GITHUB_SHA.ToLowerInvariant()
+            apk = [ordered]@{ sha256 = $androidApkHash }
+            device = [ordered]@{ serial_fingerprint = "ci-device" }
+            installed_app = [ordered]@{
+              apk_sha256 = $androidApkHash
+              install_skipped = $false
+            }
+          }
+          $androidEvidence |
+            ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath $androidEvidencePath -Encoding utf8
+          $androidEvidenceArguments = @{
+            EvidenceDirectory = $androidEvidenceDirectory
+            DeviceEvidenceId = "ci-device"
+            RequiredBuildRevision = $env:GITHUB_SHA.ToLowerInvariant()
+            RequiredApkHash = $androidApkHash
+          }
+          if ($null -eq (Find-AndroidPreflightEvidence @androidEvidenceArguments)) {
+            throw "Android Preflight 证据筛选器拒绝了有效证据。"
+          }
+          foreach ($invalidCase in @("schema", "revision", "install", "expired")) {
+            $candidate = $androidEvidence |
+              ConvertTo-Json -Depth 5 |
+              ConvertFrom-Json
+            switch ($invalidCase) {
+              "schema" { $candidate.schema_version = 1 }
+              "revision" { $candidate.build_revision = ("2" * 40) -join "" }
+              "install" { $candidate.installed_app.install_skipped = $true }
+              "expired" {
+                $candidate.checked_at_utc = [DateTimeOffset]::UtcNow.AddDays(-8).ToString("O")
+              }
+            }
+            $candidate |
+              ConvertTo-Json -Depth 5 |
+              Set-Content -LiteralPath $androidEvidencePath -Encoding utf8
+            if ($null -ne (Find-AndroidPreflightEvidence @androidEvidenceArguments)) {
+              throw "Android Preflight 证据筛选器未拒绝 $invalidCase 证据。"
+            }
+          }
           try {
             $productionArguments = @{
               BaseUrl = "https://music.example.com"

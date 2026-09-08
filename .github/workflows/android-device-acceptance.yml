@@ -191,6 +191,14 @@ jobs:
           if ($evidence.status -ne $expectedStatus) {
             throw "Android 真机验收状态不正确，预期 $expectedStatus，实际 $($evidence.status)。"
           }
+          if ($evidence.schema_version -ne 2 -or
+              $evidence.build_revision -ne $env:GITHUB_SHA.ToLowerInvariant()) {
+            throw "Android 真机验收证据未绑定当前提交。"
+          }
+          if ($env:ACCEPTANCE_PHASE -eq "Complete" -and
+              [string]::IsNullOrWhiteSpace($evidence.prerequisite_evidence_file)) {
+            throw "Android Complete 证据未关联 Preflight 证据。"
+          }
 
           "### Android 真机验收" >> $env:GITHUB_STEP_SUMMARY
           "- 阶段：$($env:ACCEPTANCE_PHASE)" >> $env:GITHUB_STEP_SUMMARY

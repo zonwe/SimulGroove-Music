@@ -23,7 +23,7 @@ param(
 
     [string]$NotificationReceiptReference,
 
-    [ValidatePattern("^[0-9A-Fa-f]{7,64}$")]
+    [ValidatePattern("^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$")]
     [string]$BuildRevision,
 
     [string[]]$ApprovedSourceId = @(),

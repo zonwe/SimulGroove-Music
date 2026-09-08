@@ -14,7 +14,7 @@ param(
 
     [string]$ConfirmationReference,
 
-    [ValidatePattern("^[0-9A-Fa-f]{7,64}$")]
+    [ValidatePattern("^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$")]
     [string]$BuildRevision,
 
     [switch]$SkipInstall,
@@ -33,6 +33,8 @@ $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
     $EvidenceDirectory = Join-Path $repositoryRoot "build/acceptance/android"
 }
+$resolvedEvidenceDirectory = [IO.Path]::GetFullPath($EvidenceDirectory)
+. (Join-Path $PSScriptRoot "android_acceptance_evidence.ps1")
 
 $acceptanceChecks = [ordered]@{
     "permission-flow" = "分别拒绝和允许通知、媒体读取权限，确认应用给出可理解反馈"
@@ -107,6 +109,26 @@ function Get-DeviceProperty {
 
     return ((Invoke-Adb @("shell", "getprop", $Name) "读取设备属性 $Name") -join "").Trim()
 }
+
+$normalizedBuildRevision = if ([string]::IsNullOrWhiteSpace($BuildRevision)) {
+    $null
+}
+else {
+    $BuildRevision.ToLowerInvariant()
+}
+Assert-Condition ($null -ne $normalizedBuildRevision) "实际验收必须提供 -BuildRevision。"
+$gitCommand = Get-Command git -ErrorAction SilentlyContinue
+Assert-Condition ($null -ne $gitCommand) "验证 BuildRevision 时必须能够调用 git。"
+$revisionOutput = Invoke-NativeCommand $gitCommand.Source @(
+    "-C",
+    $repositoryRoot,
+    "rev-parse",
+    "HEAD"
+) "读取当前仓库提交"
+$repositoryRevision = ($revisionOutput -join "").Trim().ToLowerInvariant()
+Assert-Condition (
+    $repositoryRevision -eq $normalizedBuildRevision
+) "BuildRevision 与当前检出提交不一致。"
 
 $normalizedConfirmedChecks = @(
     $ConfirmedCheck |
@@ -261,12 +283,32 @@ if ($pendingChecks.Count -eq 0) {
     Assert-Condition (-not [string]::IsNullOrWhiteSpace($ConfirmationReference)) "全部人工检查完成后必须填写 -ConfirmationReference，记录设备回归批次或证据编号。"
 }
 
+$preflightEvidence = $null
+if ($pendingChecks.Count -eq 0) {
+    $preflightArguments = @{
+        EvidenceDirectory = $resolvedEvidenceDirectory
+        DeviceEvidenceId = $deviceEvidenceId
+        RequiredBuildRevision = $normalizedBuildRevision
+        RequiredApkHash = $apkHash
+    }
+    $preflightEvidence = Find-AndroidPreflightEvidence @preflightArguments
+    Assert-Condition (
+        $null -ne $preflightEvidence
+    ) "未找到七天内同一提交、设备和 APK 的有效 Preflight 证据。"
+}
+
 $result = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     checked_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
     status = if ($pendingChecks.Count -eq 0) { "complete" } else { "manual_checks_pending" }
     confirmation_reference = $ConfirmationReference
-    build_revision = $BuildRevision
+    build_revision = $normalizedBuildRevision
+    prerequisite_evidence_file = if ($null -ne $preflightEvidence) {
+        $preflightEvidence.path
+    }
+    else {
+        $null
+    }
     apk = [ordered]@{
         path = [IO.Path]::GetRelativePath($repositoryRoot, $resolvedApkPath)
         size_bytes = $apkSize
@@ -301,7 +343,6 @@ $result = [ordered]@{
     pending_checks = $pendingChecks
 }
 
-$resolvedEvidenceDirectory = [IO.Path]::GetFullPath($EvidenceDirectory)
 $null = New-Item -ItemType Directory -Path $resolvedEvidenceDirectory -Force
 $timestamp = [DateTimeOffset]::UtcNow.ToString("yyyyMMdd-HHmmss-fff")
 $evidencePath = Join-Path $resolvedEvidenceDirectory "android-$deviceEvidenceId-$timestamp.json"
