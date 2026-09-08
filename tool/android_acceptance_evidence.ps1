@@ -25,11 +25,14 @@ function Find-AndroidPreflightEvidence {
         return $null
     }
 
-    $minimumTimestamp = [DateTimeOffset]::UtcNow.AddDays(-$MaximumAgeDays)
+    $now = [DateTimeOffset]::UtcNow
+    $minimumTimestamp = $now.AddDays(-$MaximumAgeDays)
+    $maximumTimestamp = $now.AddMinutes(5)
     foreach ($file in Get-ChildItem -LiteralPath $EvidenceDirectory -Filter "android-$DeviceEvidenceId-*.json" -File |
         Sort-Object LastWriteTimeUtc -Descending) {
         try {
             $payload = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
+            $checkedAt = [DateTimeOffset]::MinValue
             if ($payload.schema_version -ne 2 -or
                 $payload.status -ne "manual_checks_pending" -or
                 $payload.build_revision -ne $RequiredBuildRevision -or
@@ -37,7 +40,9 @@ function Find-AndroidPreflightEvidence {
                 $payload.installed_app.apk_sha256 -ne $RequiredApkHash -or
                 [bool]$payload.installed_app.install_skipped -or
                 $payload.device.serial_fingerprint -ne $DeviceEvidenceId -or
-                [DateTimeOffset]::Parse($payload.checked_at_utc) -lt $minimumTimestamp) {
+                -not [DateTimeOffset]::TryParse([string]$payload.checked_at_utc, [ref]$checkedAt) -or
+                $checkedAt -lt $minimumTimestamp -or
+                $checkedAt -gt $maximumTimestamp) {
                 continue
             }
             return [pscustomobject]@{

@@ -96,6 +96,7 @@ jobs:
           $hasParseErrors = $false
           foreach ($path in @(
             "tool/production_acceptance.ps1",
+            "tool/production_acceptance_evidence.ps1",
             "tool/prometheus_acceptance.ps1",
             "tool/container_image_acceptance.ps1",
             "tool/android_acceptance_evidence.ps1",
@@ -166,7 +167,7 @@ jobs:
           if ($null -eq (Find-AndroidPreflightEvidence @androidEvidenceArguments)) {
             throw "Android Preflight 证据筛选器拒绝了有效证据。"
           }
-          foreach ($invalidCase in @("schema", "revision", "install", "expired")) {
+          foreach ($invalidCase in @("schema", "revision", "install", "expired", "future")) {
             $candidate = $androidEvidence |
               ConvertTo-Json -Depth 5 |
               ConvertFrom-Json
@@ -177,12 +178,78 @@ jobs:
               "expired" {
                 $candidate.checked_at_utc = [DateTimeOffset]::UtcNow.AddDays(-8).ToString("O")
               }
+              "future" {
+                $candidate.checked_at_utc = [DateTimeOffset]::UtcNow.AddMinutes(6).ToString("O")
+              }
             }
             $candidate |
               ConvertTo-Json -Depth 5 |
               Set-Content -LiteralPath $androidEvidencePath -Encoding utf8
             if ($null -ne (Find-AndroidPreflightEvidence @androidEvidenceArguments)) {
               throw "Android Preflight 证据筛选器未拒绝 $invalidCase 证据。"
+            }
+          }
+          . ./tool/production_acceptance_evidence.ps1
+          $productionEvidenceFilterDirectory = Join-Path $env:RUNNER_TEMP "production-evidence-filter-ci"
+          $null = New-Item -ItemType Directory -Path $productionEvidenceFilterDirectory -Force
+          $productionEvidenceFilterPath = Join-Path $productionEvidenceFilterDirectory "production-ci.json"
+          $productionImageDigest = "sha256:$(("3" * 64) -join "")"
+          $productionEvidence = [ordered]@{
+            schema_version = 2
+            checked_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
+            status = "scenario_complete"
+            build_revision = $env:GITHUB_SHA.ToLowerInvariant()
+            base_url = "https://music.ci.internal"
+            online_music_enabled = $true
+            configured_sources = @("ci-source")
+            approved_sources = @("ci-source")
+            sidecar_image = [ordered]@{ image_digest = $productionImageDigest }
+            alert_test = [ordered]@{
+              scenario = "FailureWarning"
+              test_id = "ci-production-evidence"
+            }
+          }
+          $productionEvidence |
+            ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath $productionEvidenceFilterPath -Encoding utf8
+          $productionEvidenceFilterArguments = @{
+            EvidenceDirectory = $productionEvidenceFilterDirectory
+            RequiredStatus = "scenario_complete"
+            RequiredScenario = "FailureWarning"
+            RequiredTestId = "ci-production-evidence"
+            RequiredBaseUrl = "https://music.ci.internal"
+            RequiredBuildRevision = $env:GITHUB_SHA.ToLowerInvariant()
+            MatchDeployment = $true
+            RequiredOnlineMusicEnabled = $true
+            RequiredConfiguredSources = @("ci-source")
+            RequiredApprovedSources = @("ci-source")
+            RequiredSidecarImageDigest = $productionImageDigest
+          }
+          if ($null -eq (Find-ProductionAcceptanceEvidence @productionEvidenceFilterArguments)) {
+            throw "生产验收证据筛选器拒绝了有效证据。"
+          }
+          foreach ($invalidCase in @("schema", "revision", "future", "configured-source", "approved-source", "image")) {
+            $candidate = $productionEvidence |
+              ConvertTo-Json -Depth 5 |
+              ConvertFrom-Json
+            switch ($invalidCase) {
+              "schema" { $candidate.schema_version = 1 }
+              "revision" { $candidate.build_revision = ("2" * 40) -join "" }
+              "future" {
+                $candidate.checked_at_utc = [DateTimeOffset]::UtcNow.AddMinutes(6).ToString("O")
+              }
+              "configured-source" { $candidate.configured_sources = @("other-source") }
+              "approved-source" { $candidate.approved_sources = @("other-source") }
+              "image" {
+                $candidate.sidecar_image.image_digest =
+                  "sha256:$(("4" * 64) -join "")"
+              }
+            }
+            $candidate |
+              ConvertTo-Json -Depth 5 |
+              Set-Content -LiteralPath $productionEvidenceFilterPath -Encoding utf8
+            if ($null -ne (Find-ProductionAcceptanceEvidence @productionEvidenceFilterArguments)) {
+              throw "生产验收证据筛选器未拒绝 $invalidCase 证据。"
             }
           }
           try {

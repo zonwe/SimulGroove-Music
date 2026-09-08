@@ -38,6 +38,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "production_acceptance_evidence.ps1")
+
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $composeFile = Join-Path $repositoryRoot "compose.online-music.production.yml"
 if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
@@ -244,56 +246,6 @@ function Invoke-Docker {
     foreach ($line in $output) {
         Write-Host $line
     }
-}
-
-function Find-AcceptanceEvidence {
-    param(
-        [string]$RequiredStatus,
-        [string]$RequiredScenario,
-        [string]$RequiredTestId,
-        [string]$RequiredBaseUrl,
-        [string]$RequiredBuildRevision,
-        [int]$MaximumAgeDays = 7
-    )
-
-    if (-not (Test-Path -LiteralPath $resolvedEvidenceDirectory -PathType Container)) {
-        return $null
-    }
-    $minimumTimestamp = [DateTimeOffset]::UtcNow.AddDays(-$MaximumAgeDays)
-    foreach ($file in Get-ChildItem -LiteralPath $resolvedEvidenceDirectory -Filter "production-*.json" -File |
-        Sort-Object LastWriteTimeUtc -Descending) {
-        try {
-            $payload = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
-            if ($payload.status -ne $RequiredStatus -or
-                $payload.base_url -ne $RequiredBaseUrl -or
-                [DateTimeOffset]::Parse($payload.checked_at_utc) -lt $minimumTimestamp) {
-                continue
-            }
-            if (-not [string]::IsNullOrWhiteSpace($RequiredScenario) -and
-                $payload.alert_test.scenario -ne $RequiredScenario) {
-                continue
-            }
-            if (-not [string]::IsNullOrWhiteSpace($RequiredTestId) -and
-                $payload.alert_test.test_id -ne $RequiredTestId) {
-                continue
-            }
-            if (-not [string]::IsNullOrWhiteSpace($RequiredBuildRevision)) {
-                $buildRevisionProperty = $payload.PSObject.Properties["build_revision"]
-                if ($null -eq $buildRevisionProperty -or
-                    [string]$buildRevisionProperty.Value -ne $RequiredBuildRevision) {
-                    continue
-                }
-            }
-            return [pscustomobject]@{
-                path = $file.FullName
-                payload = $payload
-            }
-        }
-        catch {
-            Write-Warning "忽略无法解析的旧验收证据：$($file.FullName)"
-        }
-    }
-    return $null
 }
 
 function Get-ResponseHeader {
@@ -702,26 +654,25 @@ if (-not $ConfigurationOnly) {
         $scenarioEvidenceFiles = @()
         foreach ($scenarioName in $alertScenarios.Keys) {
             $evidenceQuery = @{
+                EvidenceDirectory = $resolvedEvidenceDirectory
                 RequiredStatus = "scenario_complete"
                 RequiredScenario = $scenarioName
                 RequiredTestId = ""
                 RequiredBaseUrl = $result.base_url
                 RequiredBuildRevision = $normalizedBuildRevision
+                MatchDeployment = $true
+                RequiredOnlineMusicEnabled = $onlineMusicEnabled
+                RequiredConfiguredSources = $configuredSources
+                RequiredApprovedSources = $approvedSources
+                RequiredSidecarImageDigest = if ($onlineMusicEnabled) {
+                    $result.sidecar_image.image_digest
+                }
+                else {
+                    ""
+                }
             }
-            $scenarioEvidence = Find-AcceptanceEvidence @evidenceQuery
+            $scenarioEvidence = Find-ProductionAcceptanceEvidence @evidenceQuery
             Assert-Condition ($null -ne $scenarioEvidence) "缺少七天内完成的 $scenarioName 告警通知演练证据。"
-            Assert-Condition (
-                [bool]$scenarioEvidence.payload.online_music_enabled -eq $onlineMusicEnabled
-            ) "$scenarioName 演练证据的在线音乐启用状态与当前配置不一致。"
-            if ($onlineMusicEnabled) {
-                Assert-Condition (
-                    $scenarioEvidence.payload.sidecar_image.image_digest -eq $result.sidecar_image.image_digest
-                ) "$scenarioName 演练证据的 sidecar 镜像与当前部署不一致。"
-            }
-            $sourceDifference = @(
-                Compare-Object @($scenarioEvidence.payload.configured_sources) $configuredSources
-            )
-            Assert-Condition ($sourceDifference.Count -eq 0) "$scenarioName 演练证据的来源白名单与当前配置不一致。"
             $scenarioEvidenceFiles += $scenarioEvidence.path
         }
         $result.alert_test.prerequisite_evidence_files = $scenarioEvidenceFiles
@@ -731,17 +682,33 @@ if (-not $ConfigurationOnly) {
         Assert-Condition (-not [string]::IsNullOrWhiteSpace($AlertTestId)) "告警演练必须提供 -AlertTestId。"
         Assert-Condition (-not [string]::IsNullOrWhiteSpace($AlertScenario)) "告警演练必须提供 -AlertScenario。"
         Assert-Condition ($null -ne $RunbookUrl -and $RunbookUrl.Scheme -eq "https") "告警演练必须提供可访问的 HTTPS -RunbookUrl。"
+        Assert-HttpsUrl $RunbookUrl.AbsoluteUri "告警演练 RunbookUrl"
         if ($AlertAction -eq "Resolve") {
             Assert-Condition (-not [string]::IsNullOrWhiteSpace($NotificationReceiptReference)) "恢复告警前必须记录值班渠道的通知或工单编号。"
+            Assert-Condition (
+                $NotificationReceiptReference -match "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+            ) "通知或工单编号必须为 1 到 128 位安全字符。"
+            Assert-NotPlaceholder $NotificationReceiptReference "通知或工单编号"
             $evidenceQuery = @{
+                EvidenceDirectory = $resolvedEvidenceDirectory
                 RequiredStatus = "alert_fired_awaiting_notification_confirmation"
                 RequiredScenario = $AlertScenario
                 RequiredTestId = $AlertTestId
                 RequiredBaseUrl = $result.base_url
                 RequiredBuildRevision = $normalizedBuildRevision
+                MatchDeployment = $true
+                RequiredOnlineMusicEnabled = $onlineMusicEnabled
+                RequiredConfiguredSources = $configuredSources
+                RequiredApprovedSources = $approvedSources
+                RequiredSidecarImageDigest = if ($onlineMusicEnabled) {
+                    $result.sidecar_image.image_digest
+                }
+                else {
+                    ""
+                }
             }
-            $fireEvidence = Find-AcceptanceEvidence @evidenceQuery
-            Assert-Condition ($null -ne $fireEvidence) "未找到相同场景、AlertTestId 和 BaseUrl 的有效 Fire 证据。"
+            $fireEvidence = Find-ProductionAcceptanceEvidence @evidenceQuery
+            Assert-Condition ($null -ne $fireEvidence) "未找到同一提交、部署、场景、AlertTestId 和 BaseUrl 的有效 Fire 证据。"
             $result.alert_test.prerequisite_evidence_files = @($fireEvidence.path)
         }
 
