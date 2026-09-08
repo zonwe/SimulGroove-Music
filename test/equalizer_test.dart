@@ -166,6 +166,7 @@ void main() {
         token: 'token',
         refreshToken: 'refresh',
         expiresAt: now.add(const Duration(hours: 1)),
+        accountRemoteId: 'remote-acc-1',
       );
     });
 

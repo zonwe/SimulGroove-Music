@@ -95,6 +95,11 @@ class BackendAuthRepository implements AuthRepository {
         if (tokens != null || account != null) await _clearSession();
         return null;
       }
+      final accountRemoteId = account.remoteId ?? account.id;
+      if (tokens.accountRemoteId != accountRemoteId) {
+        await _clearSession();
+        return null;
+      }
       _session = BackendSession(
         token: tokens.token,
         refreshToken: tokens.refreshToken,
@@ -119,15 +124,23 @@ class BackendAuthRepository implements AuthRepository {
     if (session == null) throw StateError('请先登录账号。');
     final account = await _database.watchCurrentAccount().first;
     if (account == null) throw StateError('请先登录账号。');
+    if ((account.remoteId ?? account.id) != session.account.remoteId) {
+      await _clearSession();
+      throw StateError('账号会话不一致，请重新登录。');
+    }
     final localTrackMatcher = _LocalTrackMatcher(
-      await _database.allTracks(),
+      await _database.tracksForSync(account.id),
       trackMatchKey: session.trackMatchKey,
     );
 
-    final localPlaylists = await _database.watchPlaylists().first;
+    final localPlaylists = await _database.playlistsForSync(account.id);
     final playlists = <BackendPlaylist>[];
     for (final playlist in localPlaylists) {
-      final tracks = await _database.watchPlaylistTracks(playlist.id).first;
+      final tracks = (await _database.watchPlaylistTracks(playlist.id).first)
+          .where(
+            (track) => track.accountId == null || track.accountId == account.id,
+          )
+          .toList(growable: false);
       playlists.add(
         BackendPlaylist(
           remoteId: playlist.remoteId ?? 'playlist-${playlist.id}',
@@ -144,7 +157,9 @@ class BackendAuthRepository implements AuthRepository {
         ),
       );
     }
-    final localLikes = await _database.allLikedTracksForSync();
+    final localLikes = await _database.allLikedTracksForSync(
+      accountId: account.id,
+    );
     final likedTracks = localLikes
         .map(
           (item) => BackendTrack.fromLocal(
@@ -154,7 +169,7 @@ class BackendAuthRepository implements AuthRepository {
           ),
         )
         .toList(growable: false);
-    final localPresets = await _database.allEqualizerPresets();
+    final localPresets = await _database.equalizerPresetsForSync(account.id);
     final presets = localPresets
         .map(BackendEqualizerPreset.fromLocal)
         .toList(growable: false);
@@ -174,14 +189,16 @@ class BackendAuthRepository implements AuthRepository {
     String deletionKey(String entityType, String remoteKey) =>
         '$entityType\u0000$remoteKey';
 
-    final currentPlaylists = await _database.watchPlaylists().first;
+    final currentPlaylists = await _database.playlistsForSync(account.id);
     final playlistByRemoteId = {
       for (final playlist in currentPlaylists)
         (playlist.remoteId ?? 'playlist-${playlist.id}'): playlist,
     };
-    final currentLikes = await _database.allLikedTracksForSync();
+    final currentLikes = await _database.allLikedTracksForSync(
+      accountId: account.id,
+    );
     final likeByUri = {for (final item in currentLikes) item.track.uri: item};
-    final currentPresets = await _database.allEqualizerPresets();
+    final currentPresets = await _database.equalizerPresetsForSync(account.id);
     final presetByRemoteId = {
       for (final preset in currentPresets)
         (preset.remoteId ?? 'preset-${preset.id}'): preset,
@@ -401,6 +418,13 @@ class BackendAuthRepository implements AuthRepository {
     if (refreshToken == null || refreshToken.isEmpty) return null;
     try {
       final refreshed = await _gateway.refreshSession(refreshToken);
+      final expectedAccountId =
+          _session?.account.remoteId ?? stored?.accountRemoteId;
+      if (expectedAccountId != null &&
+          refreshed.account.remoteId != expectedAccountId) {
+        await _clearSession();
+        return null;
+      }
       final effective = refreshed.withTrackMatchKey(
         _session?.trackMatchKey ?? stored?.trackMatchKey,
       );
@@ -414,29 +438,46 @@ class BackendAuthRepository implements AuthRepository {
   }
 
   Future<void> _saveSession(BackendSession session) async {
-    _session = session;
     final now = DateTime.now();
     final account = session.account;
-    await _database.saveAccount(
-      AccountsCompanion.insert(
-        id: _uuid.v5(Namespace.url.value, 'account:${account.remoteId}'),
-        remoteId: Value(account.remoteId),
-        username: account.username,
-        displayName: account.displayName,
-        avatarUri: Value(account.avatarUri),
-        createdAt: now,
-        updatedAt: now,
-        isMock: const Value(false),
-      ),
-    );
-    await _tokenStore.write(
-      StoredAuthTokens(
-        token: session.token,
-        refreshToken: session.refreshToken,
-        expiresAt: session.expiresAt,
-        trackMatchKey: session.trackMatchKey,
-      ),
-    );
+    try {
+      await _database.replaceCurrentAccount(
+        AccountsCompanion.insert(
+          id: _uuid.v5(Namespace.url.value, 'account:${account.remoteId}'),
+          remoteId: Value(account.remoteId),
+          username: account.username,
+          displayName: account.displayName,
+          avatarUri: Value(account.avatarUri),
+          createdAt: now,
+          updatedAt: now,
+          isMock: const Value(false),
+        ),
+      );
+      await _tokenStore.write(
+        StoredAuthTokens(
+          token: session.token,
+          refreshToken: session.refreshToken,
+          expiresAt: session.expiresAt,
+          accountRemoteId: account.remoteId,
+          trackMatchKey: session.trackMatchKey,
+        ),
+      );
+      _session = session;
+    } catch (_) {
+      _session = null;
+      try {
+        await _tokenStore.clear();
+      } catch (_) {
+        // Keep the original persistence error; restoration also checks the
+        // account binding before accepting any remaining token material.
+      }
+      try {
+        await _database.clearAccounts();
+      } catch (_) {
+        // Keep the original persistence error.
+      }
+      rethrow;
+    }
   }
 
   Future<void> _clearSession() async {

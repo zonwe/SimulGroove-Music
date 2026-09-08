@@ -13,9 +13,12 @@ class _FakeGateway implements BackendGateway {
     likedTracks: [],
   );
   List<BackendPlaylist> uploadedPlaylists = const [];
+  List<BackendTrack> uploadedLikedTracks = const [];
+  List<BackendEqualizerPreset> uploadedEqualizerPresets = const [];
   List<BackendDeletion> uploadedDeletions = const [];
   Future<void> Function()? beforeResponse;
   BackendSession? signInResponse;
+  BackendSession? refreshResponse;
 
   @override
   Future<BackendSession> signIn({
@@ -24,8 +27,8 @@ class _FakeGateway implements BackendGateway {
   }) async => signInResponse ?? (throw UnimplementedError());
 
   @override
-  Future<BackendSession> refreshSession(String refreshToken) =>
-      throw UnimplementedError();
+  Future<BackendSession> refreshSession(String refreshToken) async =>
+      refreshResponse ?? (throw UnimplementedError());
 
   @override
   Future<void> signOut(String token) async {}
@@ -39,6 +42,8 @@ class _FakeGateway implements BackendGateway {
     List<BackendDeletion> deletions = const [],
   ]) async {
     uploadedPlaylists = List.of(playlists);
+    uploadedLikedTracks = List.of(likedTracks);
+    uploadedEqualizerPresets = List.of(equalizerPresets);
     uploadedDeletions = List.of(deletions);
     if (beforeResponse case final callback?) await callback();
     return response;
@@ -84,6 +89,7 @@ void main() {
       token: 'token',
       refreshToken: 'refresh',
       expiresAt: now.add(const Duration(hours: 1)),
+      accountRemoteId: 'remote-account-1',
       trackMatchKey: _trackMatchKey,
     );
     repository = BackendAuthRepository(database, gateway, tokenStore);
@@ -113,7 +119,136 @@ void main() {
 
     expect(tokenStore.tokens?.trackMatchKey, isNot(null));
     expect(tokenStore.tokens?.trackMatchKey, hasLength(43));
+    expect(tokenStore.tokens?.accountRemoteId, 'signed-in-account');
     expect((await repository.currentSession())?.trackMatchKey, isNot(null));
+  });
+
+  test('安全令牌绑定账号不一致时拒绝恢复并清除本地会话', () async {
+    tokenStore.tokens = StoredAuthTokens(
+      token: 'other-token',
+      refreshToken: 'other-refresh',
+      expiresAt: DateTime.now().add(const Duration(hours: 1)),
+      accountRemoteId: 'remote-account-2',
+      trackMatchKey: _trackMatchKey,
+    );
+
+    expect(await repository.currentSession(), equals(null));
+    expect(tokenStore.tokens, equals(null));
+    expect(await database.watchCurrentAccount().first, equals(null));
+  });
+
+  test('刷新响应切换账号时拒绝沿用原账号曲目密钥', () async {
+    tokenStore.tokens = StoredAuthTokens(
+      token: 'expired-token',
+      refreshToken: 'refresh-account-1',
+      expiresAt: DateTime.now().subtract(const Duration(minutes: 1)),
+      accountRemoteId: 'remote-account-1',
+      trackMatchKey: _trackMatchKey,
+    );
+    gateway.refreshResponse = BackendSession(
+      token: 'account-2-token',
+      refreshToken: 'account-2-refresh',
+      expiresAt: DateTime.now().add(const Duration(hours: 1)),
+      account: const BackendAccount(
+        remoteId: 'remote-account-2',
+        username: 'other@example.com',
+        displayName: 'Other',
+      ),
+    );
+
+    expect(await repository.currentSession(), equals(null));
+    expect(tokenStore.tokens, equals(null));
+    expect(await database.watchCurrentAccount().first, equals(null));
+  });
+
+  test('同步不会上传其他账号遗留的云端数据', () async {
+    final now = DateTime(2026, 9, 8, 10);
+    await database.upsertTracks([
+      _track('account-1-track', accountId: 'account-1'),
+      _track('account-2-track', accountId: 'account-2'),
+      _track('account-2-remote', accountId: 'account-2'),
+    ]);
+    await database.setTrackLikedFromSync(
+      'account-1-track',
+      true,
+      updatedAt: now,
+    );
+    await database.setTrackLikedFromSync(
+      'account-2-track',
+      true,
+      updatedAt: now,
+    );
+    await database.savePlaylistFromSync(
+      id: 'account-1-playlist',
+      remoteId: 'remote-playlist-1',
+      accountId: 'account-1',
+      name: '当前账号歌单',
+      createdAt: now,
+      updatedAt: now,
+      trackIds: const ['account-1-track', 'account-2-track'],
+    );
+    await database.savePlaylistFromSync(
+      id: 'account-2-playlist',
+      remoteId: 'remote-playlist-2',
+      accountId: 'account-2',
+      name: '其他账号歌单',
+      createdAt: now,
+      updatedAt: now,
+      trackIds: const ['account-2-track'],
+    );
+    await database.saveEqualizerPreset(
+      EqualizerPresetsCompanion.insert(
+        id: 'account-1-preset',
+        remoteId: const Value('remote-preset-1'),
+        accountId: const Value('account-1'),
+        name: '当前账号预设',
+        gainsJson: '[]',
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+    await database.saveEqualizerPreset(
+      EqualizerPresetsCompanion.insert(
+        id: 'account-2-preset',
+        remoteId: const Value('remote-preset-2'),
+        accountId: const Value('account-2'),
+        name: '其他账号预设',
+        gainsJson: '[]',
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+    gateway.response = BackendLibrary(
+      playlists: const [],
+      likedTracks: [
+        BackendTrack(
+          uri: 'test://account-2-remote',
+          title: 'account-2-remote',
+          artist: 'artist',
+          album: 'album',
+          updatedAt: now,
+        ),
+      ],
+    );
+
+    await repository.syncNow();
+
+    expect(gateway.uploadedPlaylists.map((playlist) => playlist.name), [
+      '当前账号歌单',
+    ]);
+    expect(gateway.uploadedPlaylists.single.tracks.map((track) => track.uri), [
+      'test://account-1-track',
+    ]);
+    expect(gateway.uploadedLikedTracks.map((track) => track.uri), [
+      'test://account-1-track',
+    ]);
+    expect(gateway.uploadedEqualizerPresets.map((preset) => preset.name), [
+      '当前账号预设',
+    ]);
+    expect(
+      await database.watchLikedTrackIds().first,
+      isNot(contains('account-2-remote')),
+    );
   });
 
   test('newer remote playlist replaces local name and track order', () async {
@@ -795,13 +930,15 @@ void main() {
 
 const _trackMatchKey = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
-TracksCompanion _track(String id) => TracksCompanion.insert(
-  id: id,
-  sourceType: 'test',
-  sourceId: id,
-  uri: 'test://$id',
-  title: id,
-  artist: const Value('artist'),
-  album: const Value('album'),
-  updatedAt: DateTime(2026, 8, 23),
-);
+TracksCompanion _track(String id, {String? accountId}) =>
+    TracksCompanion.insert(
+      id: id,
+      accountId: accountId == null ? const Value.absent() : Value(accountId),
+      sourceType: 'test',
+      sourceId: id,
+      uri: 'test://$id',
+      title: id,
+      artist: const Value('artist'),
+      album: const Value('album'),
+      updatedAt: DateTime(2026, 8, 23),
+    );

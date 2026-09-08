@@ -202,6 +202,14 @@ class AppDatabase extends _$AppDatabase {
   Future<List<Track>> allTracks() =>
       (select(tracks)..orderBy([(row) => OrderingTerm.asc(row.title)])).get();
 
+  Future<List<Track>> tracksForSync(String accountId) =>
+      (select(tracks)
+            ..where(
+              (row) => row.accountId.isNull() | row.accountId.equals(accountId),
+            )
+            ..orderBy([(row) => OrderingTerm.asc(row.title)]))
+          .get();
+
   Future<Track?> findTrackByUri(String uri) =>
       (select(tracks)..where((row) => row.uri.equals(uri))).getSingleOrNull();
 
@@ -291,6 +299,13 @@ class AppDatabase extends _$AppDatabase {
   Future<void> saveAccount(AccountsCompanion value) =>
       into(accounts).insertOnConflictUpdate(value);
 
+  Future<void> replaceCurrentAccount(AccountsCompanion value) async {
+    await transaction(() async {
+      await delete(accounts).go();
+      await into(accounts).insert(value);
+    });
+  }
+
   Future<void> clearAccounts() => delete(accounts).go();
 
   Future<Account?> _currentAccountOnce() {
@@ -357,6 +372,14 @@ class AppDatabase extends _$AppDatabase {
   Stream<List<Playlist>> watchPlaylists() => (select(
     playlists,
   )..orderBy([(row) => OrderingTerm.asc(row.name)])).watch();
+
+  Future<List<Playlist>> playlistsForSync(String accountId) =>
+      (select(playlists)
+            ..where(
+              (row) => row.accountId.isNull() | row.accountId.equals(accountId),
+            )
+            ..orderBy([(row) => OrderingTerm.asc(row.name)]))
+          .get();
 
   Future<void> createPlaylist(PlaylistsCompanion value) =>
       into(playlists).insert(value);
@@ -631,10 +654,17 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
-  Future<List<LikedTrackSyncData>> allLikedTracksForSync() async {
+  Future<List<LikedTrackSyncData>> allLikedTracksForSync({
+    String? accountId,
+  }) async {
     final query = select(
       tracks,
     ).join([innerJoin(likedTracks, likedTracks.trackId.equalsExp(tracks.id))]);
+    if (accountId != null) {
+      query.where(
+        tracks.accountId.isNull() | tracks.accountId.equals(accountId),
+      );
+    }
     final rows = await query.get();
     return rows
         .map(
@@ -704,6 +734,14 @@ class AppDatabase extends _$AppDatabase {
   Future<List<EqualizerPresetData>> allEqualizerPresets() => (select(
     equalizerPresets,
   )..orderBy([(row) => OrderingTerm.asc(row.name)])).get();
+
+  Future<List<EqualizerPresetData>> equalizerPresetsForSync(String accountId) =>
+      (select(equalizerPresets)
+            ..where(
+              (row) => row.accountId.isNull() | row.accountId.equals(accountId),
+            )
+            ..orderBy([(row) => OrderingTerm.asc(row.name)]))
+          .get();
 
   Future<void> saveEqualizerPreset(EqualizerPresetsCompanion value) =>
       into(equalizerPresets).insertOnConflictUpdate(value);
