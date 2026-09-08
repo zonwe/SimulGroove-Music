@@ -103,7 +103,7 @@ pwsh ./tool/production_acceptance.ps1 `
 
 最终汇总要求七天内三个场景的 `scenario_complete` 证据都与当前域名、在线音乐启用状态和来源白名单一致。只有汇总证据状态才是 `complete`。
 
-若 `ONLINE_MUSIC_ENABLED=true`，脚本还要求 `-ApprovedSourceId` 与生产白名单完全相同，并要求 `-SourceApprovalEvidencePath` 指向仓库外的结构化 JSON 记录；字段模板见 [`deploy/compliance/online_music_source_approval.example.json`](../deploy/compliance/online_music_source_approval.example.json)。脚本会校验批准状态、有效期、能力范围、政策链接、三方审批人、固定提交、镜像摘要、对应源码地址和敏感字段名。该检查不能替代业务、安全与法律/合规审批，只用于防止部署参数绕过已经定义的门禁。
+若 `ONLINE_MUSIC_ENABLED=true`，脚本还要求 `-ApprovedSourceId` 与生产白名单完全相同，并要求 `-SourceApprovalEvidencePath` 指向仓库外的结构化 JSON 记录；字段模板见 [`deploy/compliance/online_music_source_approval.example.json`](../deploy/compliance/online_music_source_approval.example.json)。脚本会校验批准状态、有效期、能力范围、政策链接、三方审批人、固定提交、镜像摘要、对应源码地址和敏感字段名。运行时还会读取正在运行的 `music-sidecar` 容器镜像 ID，要求它与所有来源共同批准的 `image_digest` 完全一致；Finalize 只接受由同一镜像完成的三个告警场景。该检查不能替代业务、安全与法律/合规审批，只用于防止部署参数绕过已经定义的门禁。
 
 ### GitHub 受保护验收工作流
 

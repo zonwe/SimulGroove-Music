@@ -34,7 +34,7 @@
 
 `go-music-dl` 上游采用 GNU AGPL-3.0。每次公开部署前还必须：
 
-- 记录上游仓库地址、固定 commit、内部 fork commit 和本次部署镜像 digest。
+- 记录上游仓库地址、固定 commit、内部 fork commit 和本次部署 `music-sidecar` 容器的镜像 ID；`image_digest` 必须使用 `docker inspect --type container --format '{{.Image}}' <container>` 返回的 `sha256:` 值，而不是标签或未经运行验证的清单摘要。
 - 保留许可证与版权声明，并审查内部修改是否触发向网络用户提供对应源代码的义务。
 - 准备与实际部署版本一致的对应源代码获取方式，且不能只提供未修改的上游地址。
 - 对依赖许可证和第三方素材再次扫描，保存结果与审批记录。
@@ -62,7 +62,7 @@
 - `decision` 为 `approved`，已经生效且尚未过期。
 - `allowed_capabilities` 覆盖当前产品会暴露的搜索、元数据、封面、歌词、播放、Range 和下载。
 - 至少三条非示例 HTTPS 政策链接，并记录地区、访问方式和业务、安全、合规审批人。
-- 上游提交、内部 fork 提交、部署镜像 SHA-256 摘要和对应源码 HTTPS 地址均为非占位值。
+- 上游提交、内部 fork 提交、当前运行容器的镜像 SHA-256 ID 和对应源码 HTTPS 地址均为非占位值；同一部署中的所有批准来源必须绑定同一个 sidecar 镜像 ID。
 - JSON 属性名不得包含密码、Token、Cookie、私钥或其他秘密字段。
 
 该 JSON 是发布门禁的结构化索引，不应嵌入合同、Cookie、Token 或签名参数。合同和审批原件继续保存在受控证据库中，并由 `change_ticket` 和审批人身份关联。

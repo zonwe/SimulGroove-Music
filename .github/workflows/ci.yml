@@ -97,6 +97,7 @@ jobs:
           foreach ($path in @(
             "tool/production_acceptance.ps1",
             "tool/prometheus_acceptance.ps1",
+            "tool/container_image_acceptance.ps1",
             "tool/android_device_acceptance.ps1"
           )) {
             $parseErrors = $null
@@ -201,6 +202,46 @@ jobs:
           if ($evidence.status -ne "configuration_valid") {
             throw "生产配置验收证据状态不正确。"
           }
+
+          $badEnvironmentPath = Join-Path $env:RUNNER_TEMP "production-mismatched-image-ci.env"
+          Get-Content -LiteralPath $environmentPath |
+            ForEach-Object {
+              if ($_ -eq "ONLINE_MUSIC_SOURCE_1=") {
+                "ONLINE_MUSIC_SOURCE_1=ci-source-2"
+              }
+              else {
+                $_
+              }
+            } |
+            Set-Content -LiteralPath $badEnvironmentPath -Encoding utf8
+          $badApprovalPath = Join-Path $env:RUNNER_TEMP "source-approval-mismatched-image-ci.json"
+          $badApproval = Get-Content -LiteralPath $approvalPath -Raw | ConvertFrom-Json
+          $secondSource = $badApproval.sources[0] |
+            ConvertTo-Json -Depth 6 |
+            ConvertFrom-Json
+          $secondSource.source_id = "ci-source-2"
+          $secondSource.image_digest = "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+          $badApproval.sources = @($badApproval.sources[0], $secondSource)
+          $badApproval |
+            ConvertTo-Json -Depth 6 |
+            Set-Content -LiteralPath $badApprovalPath -Encoding utf8
+          try {
+            $badProductionArguments = @{
+              BaseUrl = "https://music.ci.internal"
+              EnvironmentFile = $badEnvironmentPath
+              ConfigurationOnly = $true
+              EvidenceDirectory = $evidenceDirectory
+              ApprovedSourceId = @("ci-source", "ci-source-2")
+              SourceApprovalEvidencePath = $badApprovalPath
+            }
+            ./tool/production_acceptance.ps1 @badProductionArguments
+            throw "生产验收脚本未拒绝多个来源绑定不同镜像摘要。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "同一个生产 sidecar 镜像摘要") {
+              throw
+            }
+          }
       - name: 校验 Compose 合并与变量
         run: docker compose -f compose.online-music.production.yml config --quiet
       - name: 校验 Caddy HTTPS 配置
@@ -254,6 +295,17 @@ jobs:
             --env Auth__JwtKey="$MUSIC_API_JWT_KEY" \
             --env Administration__Password="$MUSIC_API_ADMIN_PASSWORD" \
             "$image_name"
+          image_id=$(docker inspect --type container --format '{{.Image}}' "$container_name")
+          pwsh ./tool/container_image_acceptance.ps1 \
+            -ContainerId "$container_name" \
+            -ApprovedDigest "$image_id" >/dev/null
+          if pwsh ./tool/container_image_acceptance.ps1 \
+            -ContainerId "$container_name" \
+            -ApprovedDigest "sha256:1111111111111111111111111111111111111111111111111111111111111111" \
+            >/dev/null 2>&1; then
+            echo "容器镜像验收器未拒绝不匹配的摘要。"
+            exit 1
+          fi
           # shellcheck disable=SC2317
           cleanup() {
             docker rm --force "$container_name" >/dev/null 2>&1 || true

@@ -369,6 +369,7 @@ $approvedSources = @(
 )
 $sourceEvidencePath = $null
 $sourceApprovalSummary = $null
+$approvedImageDigests = @()
 
 if ($onlineMusicEnabled) {
     Assert-Condition ($configuredSources.Count -gt 0) "在线音乐启用时至少需要一个已批准来源。"
@@ -463,18 +464,23 @@ if ($onlineMusicEnabled) {
         Assert-Condition ($forkCommit -match "^[0-9a-fA-F]{7,64}$" -and $forkCommit -notmatch "^0+$") "$context 的 fork_commit 无效。"
         $imageDigest = Get-RequiredJsonString $record "image_digest" $context
         Assert-Condition ($imageDigest -match "^sha256:[0-9a-fA-F]{64}$" -and $imageDigest -notmatch "^sha256:0+$") "$context 的 image_digest 无效。"
+        $normalizedImageDigest = $imageDigest.ToLowerInvariant()
+        $approvedImageDigests += $normalizedImageDigest
         $correspondingSourceUrl = Get-RequiredJsonString $record "corresponding_source_url" $context
         Assert-HttpsUrl $correspondingSourceUrl "$context 的 corresponding_source_url"
 
         $approvalExpirySummary += [ordered]@{
             source_id = $sourceId
             expires_at_utc = $expiresAt.ToUniversalTime().ToString("O")
+            image_digest = $normalizedImageDigest
         }
     }
     $sourceApprovalSummary = [ordered]@{
         change_ticket = $changeTicket
         sources = $approvalExpirySummary
     }
+    $approvedImageDigests = @($approvedImageDigests | Select-Object -Unique)
+    Assert-Condition ($approvedImageDigests.Count -eq 1) "所有批准来源必须绑定同一个生产 sidecar 镜像摘要。"
 }
 elseif ($configuredSources.Count -gt 0) {
     Write-Warning "在线音乐当前关闭，但环境文件已填写来源；启用前仍必须提供逐来源审批证据。"
@@ -531,6 +537,7 @@ $result = [ordered]@{
     health = $null
     readiness = $null
     prometheus = $null
+    sidecar_image = $null
     alert_test = [ordered]@{
         action = $AlertAction
         scenario = $AlertScenario
@@ -559,6 +566,20 @@ if (-not $ConfigurationOnly) {
         Assert-Condition ($runningServices -contains $service) "生产服务未运行：$service"
     }
     $result.compose_services = $runningServices
+
+    if ($onlineMusicEnabled) {
+        $sidecarContainerIds = @(
+            Invoke-Docker -Arguments ($composeArguments + @("ps", "--quiet", "music-sidecar")) -Capture |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { $_ }
+        )
+        Assert-Condition ($sidecarContainerIds.Count -eq 1) "无法唯一定位正在运行的 music-sidecar 容器。"
+        $sidecarImageArguments = @{
+            ContainerId = $sidecarContainerIds[0]
+            ApprovedDigest = $approvedImageDigests[0]
+        }
+        $result.sidecar_image = & (Join-Path $PSScriptRoot "container_image_acceptance.ps1") @sidecarImageArguments
+    }
 
     $prometheusArguments = @{
         DockerNetwork = $observabilityNetwork
@@ -656,6 +677,11 @@ if (-not $ConfigurationOnly) {
             Assert-Condition (
                 [bool]$scenarioEvidence.payload.online_music_enabled -eq $onlineMusicEnabled
             ) "$scenarioName 演练证据的在线音乐启用状态与当前配置不一致。"
+            if ($onlineMusicEnabled) {
+                Assert-Condition (
+                    $scenarioEvidence.payload.sidecar_image.image_digest -eq $result.sidecar_image.image_digest
+                ) "$scenarioName 演练证据的 sidecar 镜像与当前部署不一致。"
+            }
             $sourceDifference = @(
                 Compare-Object @($scenarioEvidence.payload.configured_sources) $configuredSources
             )
