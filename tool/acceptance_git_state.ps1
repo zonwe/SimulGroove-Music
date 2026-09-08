@@ -34,6 +34,6 @@ function Assert-AcceptanceGitState {
         throw "检查当前工作区状态失败。$([Environment]::NewLine)$($statusOutput -join [Environment]::NewLine)"
     }
     if ($statusOutput.Count -gt 0) {
-        throw "$AcceptanceName 要求干净检出；当前工作区存在未提交或未跟踪文件。"
+        throw "${AcceptanceName}要求干净检出；当前工作区存在未提交或未跟踪文件。"
     }
 }

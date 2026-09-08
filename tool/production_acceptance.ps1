@@ -95,6 +95,24 @@ function Resolve-RequiredPath {
     return [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $candidate).Path)
 }
 
+function Resolve-RequiredDirectory {
+    param(
+        [string]$Path,
+        [string]$BaseDirectory,
+        [string]$Description
+    )
+
+    Assert-Condition (-not [string]::IsNullOrWhiteSpace($Path)) "$Description 未配置。"
+    $candidate = if ([IO.Path]::IsPathRooted($Path)) {
+        $Path
+    }
+    else {
+        Join-Path $BaseDirectory $Path
+    }
+    Assert-Condition (Test-Path -LiteralPath $candidate -PathType Container) "$Description 不存在或不是目录：$candidate"
+    return [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $candidate).Path)
+}
+
 function Test-IsInsideRepository {
     param([string]$Path)
 
@@ -266,6 +284,26 @@ function Get-ResponseHeader {
     return $null
 }
 
+$normalizedBuildRevision = if ([string]::IsNullOrWhiteSpace($BuildRevision)) {
+    $null
+}
+else {
+    $BuildRevision.ToLowerInvariant()
+}
+if ($null -ne $normalizedBuildRevision) {
+    Assert-Condition ($normalizedBuildRevision -notmatch "^0+$") "BuildRevision 不能为全零提交。"
+    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+    Assert-Condition ($null -ne $gitCommand) "提供 BuildRevision 时必须能够调用 git。"
+    $null = Assert-AcceptanceGitState `
+        -RepositoryRoot $repositoryRoot `
+        -RequiredBuildRevision $normalizedBuildRevision `
+        -GitCommand $gitCommand.Source `
+        -AcceptanceName "生产验收"
+}
+if ($AlertAction -in @("Fire", "Resolve", "Finalize")) {
+    Assert-Condition ($null -ne $normalizedBuildRevision) "$AlertAction 阶段必须提供 -BuildRevision，以绑定同一仓库提交的证据链。"
+}
+
 $environmentPath = Resolve-RequiredPath $EnvironmentFile $repositoryRoot "生产环境文件"
 $environmentDirectory = Split-Path -Parent $environmentPath
 $environment = Read-DotEnv $environmentPath
@@ -291,6 +329,7 @@ $acmeEmail = Get-RequiredEnvironmentValue $environment "ACME_EMAIL"
 $jwtKey = Get-RequiredEnvironmentValue $environment "MUSIC_API_JWT_KEY"
 $adminPassword = Get-RequiredEnvironmentValue $environment "MUSIC_API_ADMIN_PASSWORD"
 $alertmanagerConfigValue = Get-RequiredEnvironmentValue $environment "ALERTMANAGER_CONFIG_PATH"
+$serverLibraryValue = Get-RequiredEnvironmentValue $environment "MUSIC_SERVER_LIBRARY_PATH"
 
 Assert-NotPlaceholder $domain "MUSIC_DOMAIN"
 Assert-NotPlaceholder $acmeEmail "ACME_EMAIL"
@@ -301,6 +340,10 @@ $parsedAddress = $null
 Assert-Condition (-not [Net.IPAddress]::TryParse($domain, [ref]$parsedAddress)) "MUSIC_DOMAIN 必须是真实域名，不能是 IP 地址。"
 Assert-Condition ($jwtKey.Length -ge 32) "MUSIC_API_JWT_KEY 至少需要 32 个字符。"
 Assert-Condition ($adminPassword.Length -ge 16) "MUSIC_API_ADMIN_PASSWORD 至少需要 16 个字符。"
+
+Assert-Condition ([IO.Path]::IsPathRooted($serverLibraryValue)) "MUSIC_SERVER_LIBRARY_PATH 必须是绝对路径。"
+$serverLibraryPath = Resolve-RequiredDirectory $serverLibraryValue $environmentDirectory "服务器音乐目录"
+Assert-Condition (-not (Test-IsInsideRepository $serverLibraryPath)) "服务器音乐目录必须位于仓库外。"
 
 $alertmanagerConfigPath = Resolve-RequiredPath $alertmanagerConfigValue $environmentDirectory "Alertmanager 配置"
 Assert-Condition (-not (Test-IsInsideRepository $alertmanagerConfigPath)) "真实 Alertmanager 配置必须位于仓库外。"
@@ -471,6 +514,30 @@ $composeArguments = @(
 $null = Invoke-Docker -Arguments ($composeArguments + @("config", "--quiet")) -Capture
 $composeJson = (Invoke-Docker -Arguments ($composeArguments + @("config", "--format", "json")) -Capture) -join [Environment]::NewLine
 $composeConfiguration = $composeJson | ConvertFrom-Json
+$musicApiConfiguration = $composeConfiguration.services."music-api"
+Assert-Condition ($null -ne $musicApiConfiguration) "生产 Compose 缺少 music-api 服务。"
+$scanRootProperty = $musicApiConfiguration.environment.PSObject.Properties["Scanning__AllowedRoots__0"]
+Assert-Condition (
+    $null -ne $scanRootProperty -and [string]$scanRootProperty.Value -eq "/music"
+) "music-api 必须把唯一生产扫描允许根配置为 /music。"
+$serverLibraryMounts = @(
+    $musicApiConfiguration.volumes |
+        Where-Object { [string]$_.target -eq "/music" }
+)
+Assert-Condition ($serverLibraryMounts.Count -eq 1) "music-api 必须且只能把一个宿主音乐目录挂载到 /music。"
+$serverLibraryMount = $serverLibraryMounts[0]
+Assert-Condition ([string]$serverLibraryMount.type -eq "bind") "music-api 的 /music 必须使用宿主目录 bind mount。"
+Assert-Condition ([bool]$serverLibraryMount.read_only) "music-api 的 /music 必须只读挂载。"
+$composeLibrarySource = [IO.Path]::GetFullPath([string]$serverLibraryMount.source)
+$pathComparison = if ([OperatingSystem]::IsWindows()) {
+    [StringComparison]::OrdinalIgnoreCase
+}
+else {
+    [StringComparison]::Ordinal
+}
+Assert-Condition (
+    [string]::Equals($composeLibrarySource, $serverLibraryPath, $pathComparison)
+) "music-api 的 /music 挂载源与 MUSIC_SERVER_LIBRARY_PATH 不一致。"
 $observabilityNetworkConfiguration = $composeConfiguration.networks."observability-private"
 $networkNameProperty = $observabilityNetworkConfiguration.PSObject.Properties["name"]
 $observabilityNetwork = if ($null -ne $networkNameProperty) {
@@ -483,26 +550,6 @@ if ([string]::IsNullOrWhiteSpace($observabilityNetwork)) {
     $observabilityNetwork = "$($composeConfiguration.name)_observability-private"
 }
 
-$normalizedBuildRevision = if ([string]::IsNullOrWhiteSpace($BuildRevision)) {
-    $null
-}
-else {
-    $BuildRevision.ToLowerInvariant()
-}
-if ($null -ne $normalizedBuildRevision) {
-    Assert-Condition ($normalizedBuildRevision -notmatch "^0+$") "BuildRevision 不能为全零提交。"
-    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
-    Assert-Condition ($null -ne $gitCommand) "提供 BuildRevision 时必须能够调用 git。"
-    $null = Assert-AcceptanceGitState `
-        -RepositoryRoot $repositoryRoot `
-        -RequiredBuildRevision $normalizedBuildRevision `
-        -GitCommand $gitCommand.Source `
-        -AcceptanceName "生产验收"
-}
-if ($AlertAction -in @("Fire", "Resolve", "Finalize")) {
-    Assert-Condition ($null -ne $normalizedBuildRevision) "$AlertAction 阶段必须提供 -BuildRevision，以绑定同一仓库提交的证据链。"
-}
-
 $result = [ordered]@{
     schema_version = 2
     checked_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
@@ -512,6 +559,11 @@ $result = [ordered]@{
     domain = $domain
     environment_file = $environmentPath
     alertmanager_config_file = $alertmanagerConfigPath
+    server_library = [ordered]@{
+        container_root = "/music"
+        read_only = $true
+        host_path_outside_repository = $true
+    }
     online_music_enabled = $onlineMusicEnabled
     configured_sources = $configuredSources
     approved_sources = $approvedSources

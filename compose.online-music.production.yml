@@ -50,6 +50,7 @@ services:
       Cors__AllowedOrigins__0: "https://${MUSIC_DOMAIN:?Set MUSIC_DOMAIN in .env}"
       Cors__AllowedOrigins__1: "${MUSIC_API_CORS_ORIGIN_1:-}"
       Cors__AllowedOrigins__2: "${MUSIC_API_CORS_ORIGIN_2:-}"
+      Scanning__AllowedRoots__0: "/music"
       Observability__OtlpEndpoint: "http://otel-collector:4317"
       OnlineMusic__Enabled: "${ONLINE_MUSIC_ENABLED:-false}"
       OnlineMusic__SidecarBaseUrl: "http://music-sidecar:8080"
@@ -57,6 +58,10 @@ services:
       OnlineMusic__AllowedSources__1: "${ONLINE_MUSIC_SOURCE_1:-}"
       OnlineMusic__AllowedSources__2: "${ONLINE_MUSIC_SOURCE_2:-}"
     volumes:
+      - type: bind
+        source: "${MUSIC_SERVER_LIBRARY_PATH:?Set MUSIC_SERVER_LIBRARY_PATH to an existing host directory}"
+        target: /music
+        read_only: true
       - music-api-data:/data
       - music-api-keys:/home/music-api/.aspnet/DataProtection-Keys
     depends_on:
