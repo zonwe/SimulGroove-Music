@@ -93,7 +93,7 @@ public static class ScanSourceEndpoints
             var account = Authenticate(httpContext.Request, auth);
             if (account is null) return Results.Unauthorized();
 
-            var track = scanner.GetTrackFile(account.Username, id, trackId);
+            var track = scanner.OpenTrackFile(account.Username, id, trackId);
             if (track is null)
             {
                 return Results.Json(
@@ -104,7 +104,7 @@ public static class ScanSourceEndpoints
             httpContext.Response.Headers.CacheControl = "private, no-store";
             httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
             return Results.File(
-                track.FilePath,
+                track.Content,
                 track.ContentType,
                 lastModified: track.ModifiedAt,
                 enableRangeProcessing: true);

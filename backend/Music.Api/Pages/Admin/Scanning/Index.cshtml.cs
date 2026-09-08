@@ -34,12 +34,12 @@ public sealed class IndexModel(IMusicScanService scanner, IAuditLogStore audit) 
 
     public IActionResult OnGetStream(string sourceId, string trackId)
     {
-        var track = scanner.GetTrackFile(Username, sourceId, trackId);
+        var track = scanner.OpenTrackFile(Username, sourceId, trackId);
         if (track is null) return NotFound();
 
         Response.Headers.CacheControl = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
-        return new PhysicalFileResult(track.FilePath, track.ContentType)
+        return new FileStreamResult(track.Content, track.ContentType)
         {
             EnableRangeProcessing = true,
             LastModified = track.ModifiedAt

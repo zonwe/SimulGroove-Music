@@ -73,7 +73,7 @@ public sealed class MusicScanServiceTests
     }
 
     [TestMethod]
-    public async Task GetTrackFileReturnsOnlyCurrentAccountsIndexedFile()
+    public async Task OpenTrackFileReturnsOnlyCurrentAccountsIndexedReadStream()
     {
         var root = Directory.CreateDirectory(System.IO.Path.Combine(_directory.Path, "Library")).FullName;
         var filePath = System.IO.Path.Combine(root, "Track.mp3");
@@ -84,16 +84,23 @@ public sealed class MusicScanServiceTests
         await scanner.ScanNowAsync("alice", source.Id, CancellationToken.None);
         var indexed = scanner.GetTracks("alice", source.Id, 10).Single();
 
-        var track = scanner.GetTrackFile("alice", source.Id, indexed.Id);
+        var track = scanner.OpenTrackFile("alice", source.Id, indexed.Id);
 
         Assert.IsNotNull(track);
-        Assert.AreEqual(filePath, track!.FilePath);
-        Assert.AreEqual("audio/mpeg", track.ContentType);
-        Assert.AreEqual(4, track.FileSize);
-        Assert.IsNull(scanner.GetTrackFile("bob", source.Id, indexed.Id));
+        await using (track!)
+        {
+            Assert.AreEqual("audio/mpeg", track.ContentType);
+            Assert.AreEqual(4, track.FileSize);
+            Assert.IsTrue(track.Content.CanRead);
+            Assert.IsFalse(track.Content.CanWrite);
+            using var output = new MemoryStream();
+            await track.Content.CopyToAsync(output);
+            CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, output.ToArray());
+        }
+        Assert.IsNull(scanner.OpenTrackFile("bob", source.Id, indexed.Id));
 
         File.Delete(filePath);
-        Assert.IsNull(scanner.GetTrackFile("alice", source.Id, indexed.Id));
+        Assert.IsNull(scanner.OpenTrackFile("alice", source.Id, indexed.Id));
     }
 
     [TestMethod]
@@ -133,7 +140,7 @@ public sealed class MusicScanServiceTests
         var indexed = originalScanner.GetTracks("alice", source.Id, 10).Single();
         var restrictedScanner = CreateScanner(store, restrictedRoot);
 
-        Assert.IsNull(restrictedScanner.GetTrackFile("alice", source.Id, indexed.Id));
+        Assert.IsNull(restrictedScanner.OpenTrackFile("alice", source.Id, indexed.Id));
         var result = await restrictedScanner.ScanNowAsync("alice", source.Id, CancellationToken.None);
 
         Assert.IsNotNull(result);
@@ -166,7 +173,7 @@ public sealed class MusicScanServiceTests
             Assert.Inconclusive($"This host cannot create a directory symbolic link: {linkException.Message}");
         }
 
-        Assert.IsNull(scanner.GetTrackFile("alice", source.Id, indexed.Id));
+        Assert.IsNull(scanner.OpenTrackFile("alice", source.Id, indexed.Id));
         var result = await scanner.ScanNowAsync("alice", source.Id, CancellationToken.None);
 
         Assert.IsNotNull(result);

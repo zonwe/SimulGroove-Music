@@ -36,12 +36,13 @@ public sealed class MusicScanService : IMusicScanService
     public IReadOnlyList<ScannedTrackResponse> GetTracks(string username, string sourceId, int limit) =>
         _store.GetTracks(username, sourceId, limit);
 
-    public ScannedTrackFile? GetTrackFile(string username, string sourceId, string trackId)
+    public ScannedTrackFile? OpenTrackFile(string username, string sourceId, string trackId)
     {
         var source = _store.Get(username, sourceId);
         var track = _store.GetTrack(username, sourceId, trackId);
         if (source is null || track is null) return null;
 
+        FileStream? content = null;
         try
         {
             var sourceRoot = Path.TrimEndingDirectorySeparator(ValidatePath(source.Path));
@@ -52,14 +53,36 @@ public sealed class MusicScanService : IMusicScanService
             if (!file.Exists || file.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
                 !SupportedContentTypes.TryGetValue(file.Extension, out var contentType)) return null;
 
-            return new ScannedTrackFile(
-                file.FullName,
+            content = new FileStream(file.FullName, new FileStreamOptions
+            {
+                Mode = FileMode.Open,
+                Access = FileAccess.Read,
+                Share = FileShare.Read,
+                BufferSize = 64 * 1024,
+                Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+            });
+
+            // Revalidate after opening so the response owns this exact file handle
+            // instead of resolving the path again after the security checks.
+            file.Refresh();
+            if (!file.Exists || file.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+                HasNestedReparsePoint(file.FullName, sourceRoot))
+            {
+                content.Dispose();
+                return null;
+            }
+
+            var result = new ScannedTrackFile(
+                content,
                 contentType,
-                file.Length,
+                content.Length,
                 new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero));
+            content = null;
+            return result;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
+            content?.Dispose();
             _logger.LogDebug(
                 exception,
                 "Indexed track validation failed for source {SourceId} and track {TrackId}.",

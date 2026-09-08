@@ -32,11 +32,21 @@ public sealed record ScannedTrackResponse(
     long FileSize,
     DateTimeOffset ModifiedAt);
 
-public sealed record ScannedTrackFile(
-    string FilePath,
-    string ContentType,
-    long FileSize,
-    DateTimeOffset ModifiedAt);
+public sealed class ScannedTrackFile(
+    Stream content,
+    string contentType,
+    long fileSize,
+    DateTimeOffset modifiedAt) : IDisposable, IAsyncDisposable
+{
+    public Stream Content { get; } = content;
+    public string ContentType { get; } = contentType;
+    public long FileSize { get; } = fileSize;
+    public DateTimeOffset ModifiedAt { get; } = modifiedAt;
+
+    public void Dispose() => Content.Dispose();
+
+    public ValueTask DisposeAsync() => Content.DisposeAsync();
+}
 
 public sealed record DiscoveredTrack(
     string FilePath,
