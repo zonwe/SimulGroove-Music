@@ -37,3 +37,63 @@ function Assert-AcceptanceGitState {
         throw "${AcceptanceName}要求干净检出；当前工作区存在未提交或未跟踪文件。"
     }
 }
+
+function Resolve-AcceptanceExternalPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepositoryRoot,
+
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [ValidateSet("Any", "Container", "Leaf")]
+        [string]$PathType = "Any",
+
+        [switch]$MustExist
+    )
+
+    Set-StrictMode -Version Latest
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathRooted($Path)) {
+        throw "$Name 必须是绝对路径。"
+    }
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if ($null -eq [IO.Directory]::GetParent($fullPath)) {
+        throw "$Name 不能是文件系统根目录。"
+    }
+
+    $fullRepositoryRoot = [IO.Path]::GetFullPath($RepositoryRoot)
+    $relative = [IO.Path]::GetRelativePath($fullRepositoryRoot, $fullPath)
+    $insideRepository = -not [IO.Path]::IsPathRooted($relative) -and
+        $relative -ne ".." -and
+        -not $relative.StartsWith("..$([IO.Path]::DirectorySeparatorChar)")
+    if ($insideRepository) {
+        throw "$Name 必须位于仓库工作区之外。"
+    }
+
+    if ($MustExist -and -not (Test-Path -LiteralPath $fullPath -PathType $PathType)) {
+        throw "$Name 不存在或类型不正确。"
+    }
+
+    $probePath = $fullPath
+    while (-not (Test-Path -LiteralPath $probePath)) {
+        $parent = [IO.Directory]::GetParent($probePath)
+        if ($null -eq $parent) {
+            throw "$Name 无法解析到现有父目录。"
+        }
+        $probePath = $parent.FullName
+    }
+    $item = Get-Item -LiteralPath $probePath -Force
+    while ($null -ne $item) {
+        if ($item.Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) {
+            throw "$Name 路径不能包含符号链接或目录联接。"
+        }
+        $item = if ($item -is [IO.FileInfo]) { $item.Directory } else { $item.Parent }
+    }
+
+    return $fullPath
+}

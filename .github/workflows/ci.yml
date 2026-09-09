@@ -162,6 +162,53 @@ jobs:
           }
           . ./tool/acceptance_git_state.ps1
           . ./tool/android_acceptance_evidence.ps1
+          $externalPathProbeDirectory = Join-Path $env:RUNNER_TEMP "acceptance-external-path-$([guid]::NewGuid().ToString('N'))"
+          $externalPathTarget = Join-Path $externalPathProbeDirectory "target"
+          $externalPathChild = Join-Path $externalPathTarget "child"
+          $null = New-Item -ItemType Directory -Path $externalPathChild -Force
+          $resolvedExternalPath = Resolve-AcceptanceExternalPath `
+            -RepositoryRoot $env:GITHUB_WORKSPACE `
+            -Path $externalPathChild `
+            -Name "验收路径测试" `
+            -PathType Container `
+            -MustExist
+          if ($resolvedExternalPath -ne [IO.Path]::GetFullPath($externalPathChild)) {
+            throw "共享外部路径校验未返回规范化路径。"
+          }
+          $externalPathCases = [ordered]@{
+            root = [IO.Path]::GetPathRoot($env:RUNNER_TEMP)
+            repository = $env:GITHUB_WORKSPACE
+          }
+          foreach ($entry in $externalPathCases.GetEnumerator()) {
+            try {
+              Resolve-AcceptanceExternalPath `
+                -RepositoryRoot $env:GITHUB_WORKSPACE `
+                -Path $entry.Value `
+                -Name "验收路径测试" | Out-Null
+              throw "共享外部路径校验未拒绝 $($entry.Key) 路径。"
+            }
+            catch {
+              if ($_.Exception.Message -notmatch "文件系统根目录|仓库工作区之外") {
+                throw
+              }
+            }
+          }
+          $externalPathLink = Join-Path $externalPathProbeDirectory "link"
+          $null = New-Item -ItemType SymbolicLink -Path $externalPathLink -Target $externalPathTarget
+          try {
+            Resolve-AcceptanceExternalPath `
+              -RepositoryRoot $env:GITHUB_WORKSPACE `
+              -Path (Join-Path $externalPathLink "child") `
+              -Name "验收路径测试" `
+              -PathType Container `
+              -MustExist | Out-Null
+            throw "共享外部路径校验未拒绝符号链接。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "符号链接或目录联接") {
+              throw
+            }
+          }
           $androidGitProbeDirectory = Join-Path $env:RUNNER_TEMP "android-git-state-$([guid]::NewGuid().ToString('N'))"
           $null = New-Item -ItemType Directory -Path $androidGitProbeDirectory
           git -C $androidGitProbeDirectory init | Out-Null

@@ -121,7 +121,7 @@ pwsh ./tool/production_acceptance.ps1 `
 
 外部证据目录可以跨阶段保留历史 JSON，但每次工作流只接受本次脚本新建且唯一的证据文件，并复核其 schema、提交和 Base URL；不会按文件修改时间把旧证据误认成本次结果。
 
-在 `production` Environment 中配置以下变量，所有路径都必须位于检出的仓库工作区之外：
+在 `production` Environment 中配置以下变量，所有路径都必须使用绝对路径并位于检出的仓库工作区之外；不得使用文件系统根目录，路径任一级也不得是符号链接或目录联接：
 
 - `PRODUCTION_BASE_URL`：真实 HTTPS API 根地址。
 - `PRODUCTION_ENV_FILE`：生产 `.env` 的绝对路径；文件本身继续留在主机的密钥存储边界内。

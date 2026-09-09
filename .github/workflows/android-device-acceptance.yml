@@ -104,19 +104,16 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          . ./tool/acceptance_git_state.ps1
           if ([string]::IsNullOrWhiteSpace($env:ANDROID_ACCEPTANCE_EVIDENCE_DIR)) {
             throw "android-k80-acceptance Environment 未配置 ANDROID_ACCEPTANCE_EVIDENCE_DIR。"
           }
 
-          $evidenceDirectory = [IO.Path]::GetFullPath($env:ANDROID_ACCEPTANCE_EVIDENCE_DIR)
           $workspace = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
-          $relative = [IO.Path]::GetRelativePath($workspace, $evidenceDirectory)
-          $insideWorkspace = -not [IO.Path]::IsPathRooted($relative) -and
-            $relative -ne ".." -and
-            -not $relative.StartsWith("..$([IO.Path]::DirectorySeparatorChar)")
-          if ($insideWorkspace) {
-            throw "ANDROID_ACCEPTANCE_EVIDENCE_DIR 必须位于仓库工作区之外。"
-          }
+          $evidenceDirectory = Resolve-AcceptanceExternalPath `
+            -RepositoryRoot $workspace `
+            -Path $env:ANDROID_ACCEPTANCE_EVIDENCE_DIR `
+            -Name "ANDROID_ACCEPTANCE_EVIDENCE_DIR"
           $null = New-Item -ItemType Directory -Path $evidenceDirectory -Force
 
           $candidateApk = Join-Path $evidenceDirectory "android-candidate-$($env:GITHUB_SHA).apk"

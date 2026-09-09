@@ -88,7 +88,7 @@ pwsh ./tool/android_device_acceptance.ps1 `
 
 在 `android-k80-acceptance` Environment 中配置：
 
-- `ANDROID_ACCEPTANCE_EVIDENCE_DIR` 变量：位于检出工作区之外、可跨工作流运行持久保存证据的绝对目录。
+- `ANDROID_ACCEPTANCE_EVIDENCE_DIR` 变量：位于检出工作区之外、可跨工作流运行持久保存证据的专用绝对目录；不得使用文件系统根目录，路径任一级也不得是符号链接或目录联接。
 - `ANDROID_EXPECTED_MODEL_PATTERN` 变量：可选，留空时脚本继续使用 `K80|25060`。
 - `ANDROID_DEVICE_SERIAL` 密钥：可选；留空时执行器必须只连接一台已授权设备。使用密钥可以避免设备序列号出现在公开的手动输入中。
 

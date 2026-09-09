@@ -64,6 +64,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          . ./tool/acceptance_git_state.ps1
 
           function Assert-ConfiguredValue {
             param([string]$Value, [string]$Name)
@@ -72,29 +73,20 @@ jobs:
             }
           }
 
-          function Assert-OutsideWorkspace {
-            param([string]$Path, [string]$Name, [switch]$MustExist)
-            $fullPath = [IO.Path]::GetFullPath($Path)
-            $workspace = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
-            $relative = [IO.Path]::GetRelativePath($workspace, $fullPath)
-            $insideWorkspace = -not [IO.Path]::IsPathRooted($relative) -and
-              $relative -ne ".." -and
-              -not $relative.StartsWith("..$([IO.Path]::DirectorySeparatorChar)")
-            if ($insideWorkspace) {
-              throw "$Name 必须位于仓库工作区之外。"
-            }
-            if ($MustExist -and -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
-              throw "$Name 不存在。"
-            }
-            return $fullPath
-          }
-
           Assert-ConfiguredValue $env:PRODUCTION_BASE_URL "PRODUCTION_BASE_URL"
           Assert-ConfiguredValue $env:PRODUCTION_ENV_FILE "PRODUCTION_ENV_FILE"
           Assert-ConfiguredValue $env:PRODUCTION_ACCEPTANCE_EVIDENCE_DIR "PRODUCTION_ACCEPTANCE_EVIDENCE_DIR"
 
-          $environmentFile = Assert-OutsideWorkspace $env:PRODUCTION_ENV_FILE "PRODUCTION_ENV_FILE" -MustExist
-          $evidenceDirectory = Assert-OutsideWorkspace $env:PRODUCTION_ACCEPTANCE_EVIDENCE_DIR "PRODUCTION_ACCEPTANCE_EVIDENCE_DIR"
+          $environmentFile = Resolve-AcceptanceExternalPath `
+            -RepositoryRoot $env:GITHUB_WORKSPACE `
+            -Path $env:PRODUCTION_ENV_FILE `
+            -Name "PRODUCTION_ENV_FILE" `
+            -PathType Leaf `
+            -MustExist
+          $evidenceDirectory = Resolve-AcceptanceExternalPath `
+            -RepositoryRoot $env:GITHUB_WORKSPACE `
+            -Path $env:PRODUCTION_ACCEPTANCE_EVIDENCE_DIR `
+            -Name "PRODUCTION_ACCEPTANCE_EVIDENCE_DIR"
           $null = New-Item -ItemType Directory -Path $evidenceDirectory -Force
           $evidenceFilesBefore = @{}
           Get-ChildItem -LiteralPath $evidenceDirectory -Filter "production-*.json" -File |
@@ -116,9 +108,11 @@ jobs:
           if ($approvedSources.Count -gt 0) {
             Assert-ConfiguredValue $env:PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE "PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE"
             $arguments.ApprovedSourceId = $approvedSources
-            $arguments.SourceApprovalEvidencePath = Assert-OutsideWorkspace `
-              $env:PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE `
-              "PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE" `
+            $arguments.SourceApprovalEvidencePath = Resolve-AcceptanceExternalPath `
+              -RepositoryRoot $env:GITHUB_WORKSPACE `
+              -Path $env:PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE `
+              -Name "PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE" `
+              -PathType Leaf `
               -MustExist
           }
 

@@ -113,33 +113,6 @@ function Resolve-RequiredDirectory {
     return [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $candidate).Path)
 }
 
-function Test-IsInsideRepository {
-    param([string]$Path)
-
-    $relative = [IO.Path]::GetRelativePath($repositoryRoot, [IO.Path]::GetFullPath($Path))
-    return -not [IO.Path]::IsPathRooted($relative) -and
-        $relative -ne ".." -and
-        -not $relative.StartsWith("..$([IO.Path]::DirectorySeparatorChar)")
-}
-
-function Test-ContainsDirectoryReparsePoint {
-    param([string]$Path)
-
-    $directory = [IO.DirectoryInfo]::new([IO.Path]::GetFullPath($Path))
-    try {
-        while ($null -ne $directory) {
-            if ($directory.Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) {
-                return $true
-            }
-            $directory = $directory.Parent
-        }
-    }
-    catch {
-        return $true
-    }
-    return $false
-}
-
 function Read-DotEnv {
     param([string]$Path)
 
@@ -361,16 +334,20 @@ Assert-Condition ($adminPassword.Length -ge 16) "MUSIC_API_ADMIN_PASSWORD 至少
 
 Assert-Condition ([IO.Path]::IsPathRooted($serverLibraryValue)) "MUSIC_SERVER_LIBRARY_PATH 必须是绝对路径。"
 $serverLibraryPath = Resolve-RequiredDirectory $serverLibraryValue $environmentDirectory "服务器音乐目录"
-Assert-Condition (
-    $null -ne ([IO.DirectoryInfo]::new($serverLibraryPath).Parent)
-) "MUSIC_SERVER_LIBRARY_PATH 不能是文件系统根目录。"
-Assert-Condition (
-    -not (Test-ContainsDirectoryReparsePoint $serverLibraryPath)
-) "MUSIC_SERVER_LIBRARY_PATH 不能包含符号链接或目录联接。"
-Assert-Condition (-not (Test-IsInsideRepository $serverLibraryPath)) "服务器音乐目录必须位于仓库外。"
+$serverLibraryPath = Resolve-AcceptanceExternalPath `
+    -RepositoryRoot $repositoryRoot `
+    -Path $serverLibraryPath `
+    -Name "MUSIC_SERVER_LIBRARY_PATH" `
+    -PathType Container `
+    -MustExist
 
 $alertmanagerConfigPath = Resolve-RequiredPath $alertmanagerConfigValue $environmentDirectory "Alertmanager 配置"
-Assert-Condition (-not (Test-IsInsideRepository $alertmanagerConfigPath)) "真实 Alertmanager 配置必须位于仓库外。"
+$alertmanagerConfigPath = Resolve-AcceptanceExternalPath `
+    -RepositoryRoot $repositoryRoot `
+    -Path $alertmanagerConfigPath `
+    -Name "真实 Alertmanager 配置" `
+    -PathType Leaf `
+    -MustExist
 $alertmanagerConfig = Get-Content -LiteralPath $alertmanagerConfigPath -Raw
 Assert-Condition (
     $alertmanagerConfig -notmatch "(?i)(replace-before-production|example\.(com|net|org|invalid)|replace-with|change[-_ ]?me|placeholder)"
@@ -409,7 +386,12 @@ if ($onlineMusicEnabled) {
     $sourceDifference = @(Compare-Object $configuredSources $approvedSources)
     Assert-Condition ($sourceDifference.Count -eq 0) "生产白名单与 -ApprovedSourceId 不完全一致。"
     $sourceEvidencePath = Resolve-RequiredPath $SourceApprovalEvidencePath $environmentDirectory "来源审批证据"
-    Assert-Condition (-not (Test-IsInsideRepository $sourceEvidencePath)) "来源审批证据必须位于仓库外的受控证据库。"
+    $sourceEvidencePath = Resolve-AcceptanceExternalPath `
+        -RepositoryRoot $repositoryRoot `
+        -Path $sourceEvidencePath `
+        -Name "来源审批证据" `
+        -PathType Leaf `
+        -MustExist
     Assert-Condition ([IO.Path]::GetExtension($sourceEvidencePath) -eq ".json") "来源审批证据必须使用 JSON 格式。"
     try {
         $sourceApproval = Get-Content -LiteralPath $sourceEvidencePath -Raw | ConvertFrom-Json
