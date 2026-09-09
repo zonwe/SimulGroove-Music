@@ -1068,6 +1068,49 @@ void main() {
     expect(await database.watchLikedTrackIds().first, isEmpty);
   });
 
+  test('云端盲匹配令牌墓碑会撤回不可用曲目的本地喜欢', () async {
+    final likedAt = DateTime(2026, 8, 24, 8);
+    const fingerprint =
+        'sha256:55555555555555555555555555555555'
+        '55555555555555555555555555555555';
+    final matchToken = createTrackMatchToken(
+      contentFingerprint: fingerprint,
+      trackMatchKey: _trackMatchKey,
+    )!;
+    await database.upsertTracks([
+      TracksCompanion.insert(
+        id: 'liked-unavailable-fingerprint',
+        sourceType: 'android_media_store',
+        sourceId: '44',
+        uri: 'content://media/external/audio/media/44',
+        title: 'Unavailable song',
+        contentFingerprint: const Value(fingerprint),
+        isAvailable: const Value(false),
+        updatedAt: likedAt,
+      ),
+    ]);
+    await database.setTrackLikedFromSync(
+      'liked-unavailable-fingerprint',
+      true,
+      updatedAt: likedAt,
+    );
+    gateway.response = BackendLibrary(
+      playlists: const [],
+      likedTracks: const [],
+      deletions: [
+        BackendDeletion(
+          entityType: SyncEntityType.likedTrack,
+          remoteKey: matchToken,
+          deletedAt: likedAt.add(const Duration(minutes: 1)),
+        ),
+      ],
+    );
+
+    await repository.syncNow();
+
+    expect(await database.watchLikedTrackIds().first, isEmpty);
+  });
+
   test('本地取消喜欢会把 URI 墓碑转换为盲匹配令牌上传', () async {
     final likedAt = DateTime(2026, 8, 24, 8);
     const fingerprint =
@@ -1090,6 +1133,51 @@ void main() {
       updatedAt: likedAt,
     );
     await database.setTrackLiked('unliked-fingerprint', false);
+    gateway.beforeResponse = () async {
+      gateway.response = BackendLibrary(
+        playlists: const [],
+        likedTracks: const [],
+        deletions: gateway.uploadedDeletions,
+      );
+    };
+
+    await repository.syncNow();
+
+    final expected = createTrackMatchToken(
+      contentFingerprint: fingerprint,
+      trackMatchKey: _trackMatchKey,
+    );
+    expect(gateway.uploadedDeletions.single.remoteKey, expected);
+    expect(
+      (await database.syncTombstonesForAccount('account-1')).single.remoteKey,
+      expected,
+    );
+  });
+
+  test('本地不可用曲目的取消喜欢仍会上传盲匹配令牌', () async {
+    final likedAt = DateTime(2026, 8, 24, 8);
+    const fingerprint =
+        'sha256:66666666666666666666666666666666'
+        '66666666666666666666666666666666';
+    TracksCompanion track({required bool isAvailable}) =>
+        TracksCompanion.insert(
+          id: 'unliked-unavailable-fingerprint',
+          sourceType: 'windows_file',
+          sourceId: r'C:\Music\offline-song.mp3',
+          uri: 'file:///C:/Music/offline-song.mp3',
+          title: 'Offline song',
+          contentFingerprint: const Value(fingerprint),
+          isAvailable: Value(isAvailable),
+          updatedAt: likedAt,
+        );
+    await database.upsertTracks([track(isAvailable: true)]);
+    await database.setTrackLikedFromSync(
+      'unliked-unavailable-fingerprint',
+      true,
+      updatedAt: likedAt,
+    );
+    await database.setTrackLiked('unliked-unavailable-fingerprint', false);
+    await database.upsertTracks([track(isAvailable: false)]);
     gateway.beforeResponse = () async {
       gateway.response = BackendLibrary(
         playlists: const [],

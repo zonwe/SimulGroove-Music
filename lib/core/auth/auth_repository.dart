@@ -219,8 +219,8 @@ class BackendAuthRepository implements AuthRepository {
           }
         case SyncEntityType.likedTrack:
           final matchedTrack = isTrackMatchToken(deletion.remoteKey)
-              ? localTrackMatcher.findByMatchToken(deletion.remoteKey)
-              : localTrackMatcher.findByUri(deletion.remoteKey);
+              ? localTrackMatcher.findKnownByMatchToken(deletion.remoteKey)
+              : localTrackMatcher.findKnownByUri(deletion.remoteKey);
           final local = matchedTrack == null
               ? null
               : likeByUri[matchedTrack.uri];
@@ -542,7 +542,7 @@ BackendDeletion _backendDeletion(
   var remoteKey = row.remoteKey;
   if (entityType == SyncEntityType.likedTrack &&
       !isTrackMatchToken(remoteKey)) {
-    final track = matcher.findByUri(remoteKey);
+    final track = matcher.findKnownByUri(remoteKey);
     remoteKey = track == null
         ? remoteKey
         : matcher.matchTokenFor(track) ?? remoteKey;
@@ -573,10 +573,14 @@ const _indexedLocalSourceTypes = {
 class _LocalTrackMatcher {
   _LocalTrackMatcher(Iterable<Track> tracks, {required this.trackMatchKey}) {
     for (final track in tracks) {
+      _knownByUri[track.uri] = track;
+      final matchToken = matchTokenFor(track);
+      if (matchToken != null) {
+        _knownTracksByMatchToken.putIfAbsent(matchToken, () => []).add(track);
+      }
       if (!track.isAvailable) continue;
       _availableByUri[track.uri] = track;
       _availableById[track.id] = track;
-      final matchToken = matchTokenFor(track);
       if (matchToken != null) {
         _tracksByMatchToken.putIfAbsent(matchToken, () => []).add(track);
       }
@@ -594,12 +598,19 @@ class _LocalTrackMatcher {
 
   final Map<String, Track> _availableByUri = {};
   final Map<String, Track> _availableById = {};
+  final Map<String, Track> _knownByUri = {};
   final Map<String, List<Track>> _tracksByTitle = {};
   final Map<String, List<Track>> _tracksByFileName = {};
   final Map<String, List<Track>> _tracksByMatchToken = {};
+  final Map<String, List<Track>> _knownTracksByMatchToken = {};
   final String? trackMatchKey;
 
-  Track? findByUri(String uri) => _availableByUri[uri];
+  Track? findKnownByUri(String uri) => _knownByUri[uri];
+
+  Track? findKnownByMatchToken(String token) {
+    final matches = _knownTracksByMatchToken[token];
+    return matches?.length == 1 ? matches!.single : null;
+  }
 
   Track? findByMatchToken(String token) {
     final matches = _tracksByMatchToken[token];
