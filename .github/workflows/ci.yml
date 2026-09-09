@@ -97,7 +97,8 @@ jobs:
       - name: 校验生产与实机验收脚本
         shell: pwsh
         env:
-          MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music
+          # MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music 
+          MUSIC_SERVER_LIBRARY_PATH: $($env:MUSIC_SERVER_LIBRARY_PATH)
         run: |
           $hasParseErrors = $false
           foreach ($path in @(
