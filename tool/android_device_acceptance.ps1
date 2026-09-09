@@ -12,6 +12,7 @@ param(
 
     [string[]]$ConfirmedCheck = @(),
 
+    [ValidatePattern("^[A-Za-z0-9._-]{1,64}$")]
     [string]$ConfirmationReference,
 
     [ValidatePattern("^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$")]

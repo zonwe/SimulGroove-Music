@@ -124,6 +124,21 @@ jobs:
             throw "验收脚本存在 PowerShell 语法错误。"
           }
           ./tool/android_device_acceptance.ps1 -ListChecks | Out-Null
+          $invalidConfirmationReferenceRejected = $false
+          try {
+            ./tool/android_device_acceptance.ps1 `
+              -ListChecks `
+              -ConfirmationReference "invalid reference" | Out-Null
+          }
+          catch {
+            if ($_.FullyQualifiedErrorId -notlike "ParameterArgumentValidationError,*") {
+              throw
+            }
+            $invalidConfirmationReferenceRejected = $true
+          }
+          if (-not $invalidConfirmationReferenceRejected) {
+            throw "Android 验收脚本未拒绝无效的人工确认批次编号。"
+          }
           try {
             ./tool/android_device_acceptance.ps1
             throw "Android 验收脚本未拒绝缺少提交修订的实际验收。"

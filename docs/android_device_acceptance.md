@@ -76,7 +76,7 @@ pwsh ./tool/android_device_acceptance.ps1 `
   -ConfirmationReference "K80-20260907-01"
 ```
 
-只有所有检查项和 `ConfirmationReference` 均存在时，证据状态才可能是 `complete`。Complete 还必须在同一证据目录中找到七天内生成的 schema v2 Preflight 证据，并确认其仓库提交、设备指纹、候选 APK 与设备安装包哈希完全一致，且 Preflight 确实执行过安装。最终证据会记录前置证据文件，旧版或手工放置的候选 APK 不能单独完成验收。
+只有所有检查项和 `ConfirmationReference` 均存在时，证据状态才可能是 `complete`；批次编号只能包含 1 到 64 位字母、数字、点、下划线或连字符，不能写入账号、设备序列号等个人信息。Complete 还必须在同一证据目录中找到七天内生成的 schema v2 Preflight 证据，并确认其仓库提交、设备指纹、候选 APK 与设备安装包哈希完全一致，且 Preflight 确实执行过安装。最终证据会记录前置证据文件，旧版或手工放置的候选 APK 不能单独完成验收。
 
 本地执行 Preflight 和 Complete 时都必须从干净检出运行；若当前目录保留个人文档、生成文件或其他未提交内容，请另建干净 worktree 或 clone 执行验收，不要为了通过门禁删除仍需保留的工作。
 
