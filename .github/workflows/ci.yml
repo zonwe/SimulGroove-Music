@@ -92,14 +92,12 @@ jobs:
       - uses: actions/checkout@v7
       - name: 准备生产服务器扫描目录
         env:
-          # MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music
-          MUSIC_SERVER_LIBRARY_PATH: $($env:MUSIC_SERVER_LIBRARY_PATH)
+          MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music
         run: mkdir -p "$MUSIC_SERVER_LIBRARY_PATH"
       - name: 校验生产与实机验收脚本
         shell: pwsh
         env:
-          # MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music 
-          MUSIC_SERVER_LIBRARY_PATH: $($env:MUSIC_SERVER_LIBRARY_PATH)
+          MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music
         run: |
           $hasParseErrors = $false
           foreach ($path in @(
