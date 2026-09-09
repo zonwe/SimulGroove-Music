@@ -11,6 +11,9 @@ class MusicApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Start secure-token restoration with the app rather than waiting for the
+    // first account or online-music action to discover a stale session.
+    ref.watch(authSessionBootstrapProvider);
     final appearance = ref.watch(appearanceProvider).value;
     final seedColor = appearance?.seedColor ?? defaultThemeColor;
     return MaterialApp(

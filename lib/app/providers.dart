@@ -57,6 +57,9 @@ final authRepositoryProvider = Provider<AuthRepository>(
     ref.watch(authTokenStoreProvider),
   ),
 );
+final authSessionBootstrapProvider = FutureProvider<BackendSession?>(
+  (ref) => ref.watch(authRepositoryProvider).currentSession(),
+);
 final onlineMusicGatewayProvider = Provider<OnlineMusicGateway>(
   (ref) => HttpOnlineMusicGateway(
     readBaseUrl: () =>

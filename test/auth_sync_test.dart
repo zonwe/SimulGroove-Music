@@ -1,10 +1,12 @@
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
+import 'package:flutter_music/app/providers.dart';
 import 'package:flutter_music/core/auth/auth_repository.dart';
 import 'package:flutter_music/core/auth/auth_token_store.dart';
 import 'package:flutter_music/core/auth/backend_gateway.dart';
 import 'package:flutter_music/core/auth/track_match_token.dart';
 import 'package:flutter_music/core/database/app_database.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uuid/uuid.dart';
 
@@ -108,6 +110,18 @@ void main() {
   });
 
   tearDown(() => database.close());
+
+  test('启动会话 Provider 会恢复安全存储中的账号会话', () async {
+    final container = ProviderContainer(
+      overrides: [authRepositoryProvider.overrideWithValue(repository)],
+    );
+    addTearDown(container.dispose);
+
+    final session = await container.read(authSessionBootstrapProvider.future);
+
+    expect(session?.account.remoteId, 'remote-account-1');
+    expect(session?.trackMatchKey, _trackMatchKey);
+  });
 
   test('交互式登录派生并安全保存本地曲目匹配密钥', () async {
     await database.clearAccounts();
