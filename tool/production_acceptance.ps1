@@ -343,6 +343,9 @@ Assert-Condition ($adminPassword.Length -ge 16) "MUSIC_API_ADMIN_PASSWORD 至少
 
 Assert-Condition ([IO.Path]::IsPathRooted($serverLibraryValue)) "MUSIC_SERVER_LIBRARY_PATH 必须是绝对路径。"
 $serverLibraryPath = Resolve-RequiredDirectory $serverLibraryValue $environmentDirectory "服务器音乐目录"
+Assert-Condition (
+    $null -ne ([IO.DirectoryInfo]::new($serverLibraryPath).Parent)
+) "MUSIC_SERVER_LIBRARY_PATH 不能是文件系统根目录。"
 Assert-Condition (-not (Test-IsInsideRepository $serverLibraryPath)) "服务器音乐目录必须位于仓库外。"
 
 $alertmanagerConfigPath = Resolve-RequiredPath $alertmanagerConfigValue $environmentDirectory "Alertmanager 配置"
