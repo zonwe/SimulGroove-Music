@@ -88,16 +88,13 @@ jobs:
       MUSIC_API_JWT_KEY: ci-only-placeholder-with-at-least-32-characters
       MUSIC_API_ADMIN_PASSWORD: ci-only-placeholder-with-at-least-32-characters
       ALERTMANAGER_CONFIG_PATH: ${{ github.workspace }}/deploy/observability/alertmanager.example.yml
+      MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music
     steps:
       - uses: actions/checkout@v7
       - name: 准备生产服务器扫描目录
-        env:
-          MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music
         run: mkdir -p "$MUSIC_SERVER_LIBRARY_PATH"
       - name: 校验生产与实机验收脚本
         shell: pwsh
-        env:
-          MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music
         run: |
           $ciServerLibraryPath = [string]$env:MUSIC_SERVER_LIBRARY_PATH
           $hasParseErrors = $false
