@@ -65,6 +65,41 @@ public sealed class OpenApiDocumentTests
                 .GetString());
     }
 
+    [TestMethod]
+    public void ScannedTrackStreamDocumentsRangeRequestAndResponseHeaders()
+    {
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(OpenApiDocument.Create()));
+        var operation = document.RootElement
+            .GetProperty("paths")
+            .GetProperty("/api/scan-sources/{id}/tracks/{trackId}/stream")
+            .GetProperty("get");
+
+        var rangeParameter = operation.GetProperty("parameters")
+            .EnumerateArray()
+            .Single(parameter => parameter.GetProperty("name").GetString() == "Range");
+        Assert.AreEqual("header", rangeParameter.GetProperty("in").GetString());
+        Assert.IsFalse(rangeParameter.GetProperty("required").GetBoolean());
+
+        var responses = operation.GetProperty("responses");
+        AssertStreamContentTypes(responses.GetProperty("200"));
+        AssertStreamContentTypes(responses.GetProperty("206"));
+        AssertResponseHeaders(
+            responses.GetProperty("200"),
+            "Accept-Ranges",
+            "Content-Length",
+            "Last-Modified",
+            "Cache-Control",
+            "X-Content-Type-Options");
+        AssertResponseHeaders(
+            responses.GetProperty("206"),
+            "Accept-Ranges",
+            "Content-Length",
+            "Content-Range",
+            "Last-Modified",
+            "Cache-Control",
+            "X-Content-Type-Options");
+    }
+
     private static void AssertCollectionReferences(
         JsonElement schema,
         IReadOnlyDictionary<string, string> expectedReferences)
@@ -89,6 +124,26 @@ public sealed class OpenApiDocumentTests
             schema.GetProperty("required")
                 .EnumerateArray()
                 .Select(value => value.GetString() ?? string.Empty)
+                .ToArray());
+    }
+
+    private static void AssertStreamContentTypes(JsonElement response)
+    {
+        CollectionAssert.IsSubsetOf(
+            new[] { "audio/mpeg", "audio/flac", "audio/ogg", "application/octet-stream" },
+            response.GetProperty("content")
+                .EnumerateObject()
+                .Select(property => property.Name)
+                .ToArray());
+    }
+
+    private static void AssertResponseHeaders(JsonElement response, params string[] expected)
+    {
+        CollectionAssert.AreEquivalent(
+            expected,
+            response.GetProperty("headers")
+                .EnumerateObject()
+                .Select(property => property.Name)
                 .ToArray());
     }
 }

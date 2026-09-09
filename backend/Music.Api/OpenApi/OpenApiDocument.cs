@@ -27,12 +27,12 @@ public static class OpenApiDocument
             },
             ["/api/scan-sources/{id}/scan"] = new { post = new { summary = "Run a music scan immediately", security = Security(), parameters = IdParameter(), responses = new Dictionary<string, object> { ["200"] = Response("ScanSourceResponse"), ["401"] = ErrorResponse(), ["404"] = ErrorResponse() } } },
             ["/api/scan-sources/{id}/tracks"] = new { get = new { summary = "List tracks indexed for a scan source", security = Security(), parameters = IdAndLimitParameters(), responses = new Dictionary<string, object> { ["200"] = ArrayResponse("ScannedTrackResponse"), ["401"] = ErrorResponse() } } },
-            ["/api/scan-sources/{id}/tracks/{trackId}/stream"] = new { get = new { summary = "Stream an indexed server track with Range support", security = Security(), parameters = ScannedTrackStreamParameters(), responses = new Dictionary<string, object> { ["200"] = BinaryResponse(), ["206"] = BinaryResponse(), ["401"] = ErrorResponse(), ["404"] = ErrorResponse(), ["416"] = ErrorResponse() } } },
+            ["/api/scan-sources/{id}/tracks/{trackId}/stream"] = new { get = new { summary = "Stream an indexed server track with Range support", security = Security(), parameters = ScannedTrackStreamParameters(), responses = new Dictionary<string, object> { ["200"] = BinaryResponse(includeServerHeaders: true), ["206"] = BinaryResponse(partial: true, includeServerHeaders: true), ["401"] = ErrorResponse(), ["404"] = ErrorResponse(), ["416"] = ErrorResponse() } } },
             ["/api/audit-logs"] = new { get = new { summary = "Query account-scoped audit logs", security = Security(), parameters = AuditParameters(), responses = new Dictionary<string, object> { ["200"] = Response("AuditLogPageResponse"), ["401"] = ErrorResponse() } } },
             ["/api/online-music/sources"] = new { get = new { summary = "List configured online music sources", security = Security(), responses = new Dictionary<string, object> { ["200"] = Response("OnlineMusicSourcesResponse"), ["401"] = ErrorResponse() } } },
             ["/api/online-music/search"] = new { post = new { summary = "Search configured online music sources", security = Security(), requestBody = RequestBody("OnlineMusicSearchRequest"), responses = new Dictionary<string, object> { ["200"] = Response("OnlineMusicSearchResponse"), ["400"] = ErrorResponse(), ["401"] = ErrorResponse(), ["429"] = ErrorResponse(), ["503"] = ErrorResponse(), ["504"] = ErrorResponse() } } },
             ["/api/online-music/tracks/{source}/{trackId}/playback"] = new { post = new { summary = "Issue an account-bound online playback ticket", security = Security(), parameters = OnlineTrackParameters(), responses = new Dictionary<string, object> { ["200"] = Response("OnlineMusicPlaybackResponse"), ["400"] = ErrorResponse(), ["401"] = ErrorResponse(), ["503"] = ErrorResponse(), ["504"] = ErrorResponse() } } },
-            ["/api/online-music/playback/{ticket}"] = new { get = new { summary = "Stream online audio with Range support", security = Security(), parameters = PlaybackTicketParameters(), responses = new Dictionary<string, object> { ["200"] = BinaryResponse(), ["206"] = BinaryResponse(), ["401"] = ErrorResponse(), ["404"] = ErrorResponse(), ["410"] = ErrorResponse(), ["416"] = ErrorResponse(), ["502"] = ErrorResponse(), ["504"] = ErrorResponse() } } },
+            ["/api/online-music/playback/{ticket}"] = new { get = new { summary = "Stream online audio with Range support", security = Security(), parameters = PlaybackTicketParameters(), responses = new Dictionary<string, object> { ["200"] = BinaryResponse(), ["206"] = BinaryResponse(partial: true), ["401"] = ErrorResponse(), ["404"] = ErrorResponse(), ["410"] = ErrorResponse(), ["416"] = ErrorResponse(), ["502"] = ErrorResponse(), ["504"] = ErrorResponse() } } },
             ["/api/online-music/tracks/{source}/{trackId}/lyrics"] = new { get = new { summary = "Get normalized online track lyrics", security = Security(), parameters = OnlineTrackParameters(), responses = new Dictionary<string, object> { ["200"] = Response("OnlineMusicLyricsResponse"), ["400"] = ErrorResponse(), ["401"] = ErrorResponse(), ["404"] = ErrorResponse(), ["502"] = ErrorResponse(), ["504"] = ErrorResponse() } } },
             ["/api/online-music/tracks/{source}/{trackId}/cover"] = new { get = new { summary = "Get proxied online track artwork", security = Security(), parameters = OnlineTrackParameters(), responses = new Dictionary<string, object> { ["200"] = ArtworkResponse(), ["304"] = new { description = "Not modified" }, ["400"] = ErrorResponse(), ["401"] = ErrorResponse(), ["404"] = ErrorResponse(), ["502"] = ErrorResponse(), ["504"] = ErrorResponse() } } }
             , ["/api/online-music/tracks/{source}/{trackId}/download"] = new { get = new { summary = "Download an online track with embedded metadata when supported", security = Security(), parameters = OnlineTrackParameters(), responses = new Dictionary<string, object> { ["200"] = new { description = "Audio download" }, ["400"] = ErrorResponse(), ["401"] = ErrorResponse(), ["404"] = ErrorResponse(), ["502"] = ErrorResponse(), ["504"] = ErrorResponse() } } }
@@ -77,7 +77,44 @@ public static class OpenApiDocument
     private static object Response(string schema) => new { description = "Success", content = new Dictionary<string, object> { ["application/json"] = new { schema = Ref(schema) } } };
     private static object ArrayResponse(string schema) => new { description = "Success", content = new Dictionary<string, object> { ["application/json"] = new { schema = new { type = "array", items = Ref(schema) } } } };
     private static object ErrorResponse() => new { description = "Request failed" };
-    private static object BinaryResponse() => new { description = "Audio stream", content = new Dictionary<string, object> { ["application/octet-stream"] = new { schema = new { type = "string", format = "binary" } } } };
+    private static object BinaryResponse(bool partial = false, bool includeServerHeaders = false)
+    {
+        var headers = new Dictionary<string, object>
+        {
+            ["Accept-Ranges"] = Header("Supported range unit", "bytes"),
+            ["Content-Length"] = IntegerHeader("Response body length in bytes")
+        };
+        if (partial)
+        {
+            headers["Content-Range"] = Header("Returned byte range and complete resource length", "bytes 0-1048575/4194304");
+        }
+        if (includeServerHeaders)
+        {
+            headers["Last-Modified"] = DateTimeHeader("Last modification time of the indexed file");
+            headers["Cache-Control"] = Header("Private cache policy", "private, no-store");
+            headers["X-Content-Type-Options"] = Header("MIME sniffing policy", "nosniff");
+        }
+
+        var binarySchema = new { schema = new { type = "string", format = "binary" } };
+        return new
+        {
+            description = partial ? "Partial audio stream" : "Audio stream",
+            headers,
+            content = new Dictionary<string, object>
+            {
+                ["audio/mpeg"] = binarySchema,
+                ["audio/mp4"] = binarySchema,
+                ["audio/flac"] = binarySchema,
+                ["audio/ogg"] = binarySchema,
+                ["audio/wav"] = binarySchema,
+                ["application/ogg"] = binarySchema,
+                ["application/octet-stream"] = binarySchema
+            }
+        };
+    }
+    private static object Header(string description, string example) => new { description, schema = new { type = "string", example } };
+    private static object IntegerHeader(string description) => new { description, schema = new { type = "integer", format = "int64", minimum = 0 } };
+    private static object DateTimeHeader(string description) => new { description, schema = new { type = "string", format = "date-time" } };
     private static object ArtworkResponse() => new { description = "Artwork bytes", content = new Dictionary<string, object> { ["image/jpeg"] = new { schema = new { type = "string", format = "binary" } }, ["image/png"] = new { schema = new { type = "string", format = "binary" } }, ["image/webp"] = new { schema = new { type = "string", format = "binary" } } } };
     private static object[] IdParameter() => [new { name = "id", @in = "path", required = true, schema = new { type = "string" } }];
     private static object[] IdAndLimitParameters() =>
