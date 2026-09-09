@@ -87,14 +87,17 @@ jobs:
       ACME_EMAIL: ops@example.com
       MUSIC_API_JWT_KEY: ci-only-placeholder-with-at-least-32-characters
       MUSIC_API_ADMIN_PASSWORD: ci-only-placeholder-with-at-least-32-characters
-      MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music
       ALERTMANAGER_CONFIG_PATH: ${{ github.workspace }}/deploy/observability/alertmanager.example.yml
     steps:
       - uses: actions/checkout@v7
       - name: 准备生产服务器扫描目录
+        env:
+          MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music
         run: mkdir -p "$MUSIC_SERVER_LIBRARY_PATH"
       - name: 校验生产与实机验收脚本
         shell: pwsh
+        env:
+          MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music
         run: |
           $hasParseErrors = $false
           foreach ($path in @(
@@ -348,6 +351,31 @@ jobs:
           }
           catch {
             if ($_.Exception.Message -notmatch "不能是文件系统根目录") {
+              throw
+            }
+          }
+          $linkTargetPath = Join-Path $env:RUNNER_TEMP "server-music-link-target"
+          $linkTargetChildPath = Join-Path $linkTargetPath "child"
+          $linkPath = Join-Path $env:RUNNER_TEMP "server-music-link"
+          $null = New-Item -ItemType Directory -Path $linkTargetChildPath
+          $null = New-Item -ItemType SymbolicLink -Path $linkPath -Target $linkTargetPath
+          $linkEnvironmentPath = Join-Path $env:RUNNER_TEMP "production-link-ci.env"
+          $linkedLibraryPath = Join-Path $linkPath "child"
+          $linkEnvironment = Get-Content -LiteralPath $environmentPath
+          $linkEnvironment = $linkEnvironment -replace '^MUSIC_SERVER_LIBRARY_PATH=.*$', "MUSIC_SERVER_LIBRARY_PATH=$linkedLibraryPath"
+          $linkEnvironment |
+            Set-Content -LiteralPath $linkEnvironmentPath -Encoding utf8
+          try {
+            $linkProductionArguments = @{
+              BaseUrl = "https://music.ci.internal"
+              EnvironmentFile = $linkEnvironmentPath
+              ConfigurationOnly = $true
+            }
+            ./tool/production_acceptance.ps1 @linkProductionArguments
+            throw "生产验收脚本未拒绝符号链接音乐目录。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "不能包含符号链接或目录联接") {
               throw
             }
           }

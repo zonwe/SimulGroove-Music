@@ -50,7 +50,7 @@
 
 上线前先让生产环境文件引用仓库外的真实 Alertmanager 配置。真实域名、ACME 邮箱、JWT 密钥和管理员密码不能保留示例值：
 
-生产环境文件还必须设置 `MUSIC_SERVER_LIBRARY_PATH`，指向后端主机上已存在且位于仓库外的专用音乐目录；不得填写 `/`、`C:\` 等文件系统根目录。Compose 会把它只读挂载到 API 容器的 `/music`，并把 `/music` 配置为唯一的 `Scanning:AllowedRoots`；管理员页填写的是容器内 `/music` 或其子目录，不能填写宿主路径。
+生产环境文件还必须设置 `MUSIC_SERVER_LIBRARY_PATH`，指向后端主机上已存在且位于仓库外的专用音乐目录；不得填写 `/`、`C:\` 等文件系统根目录，路径本身及其父级也不能是符号链接或目录联接。Compose 会把它只读挂载到 API 容器的 `/music`，并把 `/music` 配置为唯一的 `Scanning:AllowedRoots`；管理员页填写的是容器内 `/music` 或其子目录，不能填写宿主路径。
 
 ```powershell
 $buildRevision = git rev-parse HEAD
@@ -130,6 +130,6 @@ pwsh ./tool/production_acceptance.ps1 `
 - `PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE`：在线音乐启用时必填的仓库外 JSON 审批索引。
 - `PRODUCTION_RUNBOOK_URL`：执行 Fire 或 Resolve 时使用的真实 HTTPS 处置手册地址。
 
-`PRODUCTION_ENV_FILE` 指向的 `.env` 必须包含 `MUSIC_SERVER_LIBRARY_PATH`。验收会拒绝不存在、使用文件系统根、位于仓库内、非 bind、非只读或没有与容器 `/music` 允许根严格对应的挂载。
+`PRODUCTION_ENV_FILE` 指向的 `.env` 必须包含 `MUSIC_SERVER_LIBRARY_PATH`。验收会拒绝不存在、使用文件系统根、包含符号链接或目录联接、位于仓库内、非 bind、非只读或没有与容器 `/music` 允许根严格对应的挂载。
 
 工作流按 `Configuration`、`Runtime`、`Fire`、`Resolve`、`Finalize` 五个阶段运行，并自动把当前 `GITHUB_SHA` 写入证据。三个告警场景必须在同一提交上分别使用相同测试编号完成 Fire 与 Resolve，最后再运行 Finalize；默认分支若在演练期间更新，应从新提交重新执行整套阶段。工作流摘要只显示阶段和状态，完整证据保留在自托管执行器的外部证据目录，不上传到 GitHub；输入的通知回执编号也必须是不含秘密或个人信息的审计引用。

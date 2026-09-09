@@ -122,6 +122,24 @@ function Test-IsInsideRepository {
         -not $relative.StartsWith("..$([IO.Path]::DirectorySeparatorChar)")
 }
 
+function Test-ContainsDirectoryReparsePoint {
+    param([string]$Path)
+
+    $directory = [IO.DirectoryInfo]::new([IO.Path]::GetFullPath($Path))
+    try {
+        while ($null -ne $directory) {
+            if ($directory.Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) {
+                return $true
+            }
+            $directory = $directory.Parent
+        }
+    }
+    catch {
+        return $true
+    }
+    return $false
+}
+
 function Read-DotEnv {
     param([string]$Path)
 
@@ -346,6 +364,9 @@ $serverLibraryPath = Resolve-RequiredDirectory $serverLibraryValue $environmentD
 Assert-Condition (
     $null -ne ([IO.DirectoryInfo]::new($serverLibraryPath).Parent)
 ) "MUSIC_SERVER_LIBRARY_PATH 不能是文件系统根目录。"
+Assert-Condition (
+    -not (Test-ContainsDirectoryReparsePoint $serverLibraryPath)
+) "MUSIC_SERVER_LIBRARY_PATH 不能包含符号链接或目录联接。"
 Assert-Condition (-not (Test-IsInsideRepository $serverLibraryPath)) "服务器音乐目录必须位于仓库外。"
 
 $alertmanagerConfigPath = Resolve-RequiredPath $alertmanagerConfigValue $environmentDirectory "Alertmanager 配置"
