@@ -99,6 +99,7 @@ jobs:
         env:
           MUSIC_SERVER_LIBRARY_PATH: ${{ runner.temp }}/simulgroove-ci-server-music
         run: |
+          $ciServerLibraryPath = [string]$env:MUSIC_SERVER_LIBRARY_PATH
           $hasParseErrors = $false
           foreach ($path in @(
             "tool/production_acceptance.ps1",
@@ -429,7 +430,7 @@ jobs:
             "ACME_EMAIL=ops@ci.internal"
             "MUSIC_API_JWT_KEY=$ciJwtKey"
             "MUSIC_API_ADMIN_PASSWORD=$ciAdminPassword"
-            "MUSIC_SERVER_LIBRARY_PATH=$($env:MUSIC_SERVER_LIBRARY_PATH)"
+            "MUSIC_SERVER_LIBRARY_PATH=$ciServerLibraryPath"
             "ONLINE_MUSIC_ENABLED=true"
             "ONLINE_MUSIC_SOURCE_0=ci-source"
             "ONLINE_MUSIC_SOURCE_1="
@@ -437,7 +438,7 @@ jobs:
             "ALERTMANAGER_CONFIG_PATH=$alertConfigPath"
           ) | Set-Content -LiteralPath $environmentPath -Encoding utf8
           $rootEnvironmentPath = Join-Path $env:RUNNER_TEMP "production-root-ci.env"
-          $rootLibraryPath = [IO.Path]::GetPathRoot($env:MUSIC_SERVER_LIBRARY_PATH)
+          $rootLibraryPath = [IO.Path]::GetPathRoot($ciServerLibraryPath)
           $rootEnvironment = Get-Content -LiteralPath $environmentPath
           $rootEnvironment = $rootEnvironment -replace '^MUSIC_SERVER_LIBRARY_PATH=.*$', "MUSIC_SERVER_LIBRARY_PATH=$rootLibraryPath"
           $rootEnvironment |
