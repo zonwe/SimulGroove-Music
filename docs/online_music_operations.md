@@ -109,7 +109,7 @@ pwsh ./tool/production_acceptance.ps1 `
   -AlertAction Finalize
 ```
 
-最终汇总要求七天内三个场景的 `scenario_complete` 证据都早于本次 Finalize 开始时间，并与当前仓库提交、域名、在线音乐启用状态和来源白名单一致。证据的 `checked_at_utc` 在该阶段全部检查成功后写入，不再表示阶段开始时间。只有汇总证据状态才是 `complete`。提供 `-BuildRevision` 时，脚本会验证它等于当前检出的 Git HEAD，并要求工作区不存在未提交、未跟踪或子模块改动，避免把脏检出的配置和脚本错误归属给该提交；Fire、Resolve 或 Finalize 缺少该参数时也会直接拒绝执行，避免伪造、未来时间或跨提交拼接验收证据。
+最终汇总要求七天内三个场景的 `scenario_complete` 证据都早于本次 Finalize 开始时间，并与当前仓库提交、域名、在线音乐启用状态和来源白名单一致。证据的 `checked_at_utc` 在该阶段全部检查成功后写入，不再表示阶段开始时间。只有汇总证据状态才是 `complete`。提供 `-BuildRevision` 时，脚本会验证它等于当前检出的 Git HEAD，并要求工作区不存在实际的未提交、已暂存、未跟踪或子模块改动，避免把脏检出的配置和脚本错误归属给该提交；仅以相同内容重写生成文件时不会被文件时间或 Git 文件系统监控状态误判。Fire、Resolve 或 Finalize 缺少该参数时也会直接拒绝执行，避免伪造、未来时间或跨提交拼接验收证据。
 
 本地生产验收应从干净 worktree 或 clone 执行；若当前开发目录保留个人文档或其他未提交内容，不要为了通过门禁删除仍需保留的工作。
 

@@ -39,7 +39,7 @@ pwsh ./tool/android_device_acceptance.ps1 `
 - 目标是已授权的真实设备，主 ABI 为 `arm64-v8a`。
 - APK 能覆盖安装，包名为 `top.zonwe.simul_groove_player`。
 - `MainActivity` 返回成功启动状态，应用进程在启动后仍存活。
-- 当前传入的完整提交修订等于检出仓库的 Git HEAD，且工作区不存在未提交或未跟踪的非忽略文件，避免把脏工作区构建错误归属给该提交。
+- 当前传入的完整提交修订等于检出仓库的 Git HEAD，且工作区不存在实际的未提交、已暂存或未跟踪非忽略内容，避免把脏工作区构建错误归属给该提交；构建工具仅以相同内容重写生成文件时不会被文件时间或 Git 文件系统监控状态误判。
 - 记录 APK SHA-256、签名身份、设备型号、Android 版本和已安装版本。
 
 当前开发回归包使用 Android Debug 证书签名，因此可用于真机功能验收，但不能证明应用商店签名准备完成。正式发布签名就绪后增加 `-RequireProductionSignature`，脚本会拒绝 Debug 证书。

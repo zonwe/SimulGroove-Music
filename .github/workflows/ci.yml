@@ -240,6 +240,46 @@ jobs:
               throw
             }
           }
+          git -C $androidGitProbeDirectory add tracked.txt
+          try {
+            Assert-AcceptanceGitState `
+              -RepositoryRoot $androidGitProbeDirectory `
+              -RequiredBuildRevision $androidGitProbeRevision `
+              -GitCommand (Get-Command git).Source `
+              -AcceptanceName "验收测试" | Out-Null
+            throw "Android Git 状态门禁未拒绝暂存差异。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "要求干净检出") {
+              throw
+            }
+          }
+          git -C $androidGitProbeDirectory commit -m "advance fixture" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "无法提交 Android Git 状态测试差异。"
+          }
+          $androidGitProbeRevision = (git -C $androidGitProbeDirectory rev-parse HEAD).Trim().ToLowerInvariant()
+          $trackedPath = Join-Path $androidGitProbeDirectory "tracked.txt"
+          [IO.File]::WriteAllBytes($trackedPath, [IO.File]::ReadAllBytes($trackedPath))
+          Assert-AcceptanceGitState `
+            -RepositoryRoot $androidGitProbeDirectory `
+            -RequiredBuildRevision $androidGitProbeRevision `
+            -GitCommand (Get-Command git).Source `
+            -AcceptanceName "验收测试" | Out-Null
+          Set-Content -LiteralPath (Join-Path $androidGitProbeDirectory "untracked.txt") -Value "untracked" -Encoding utf8
+          try {
+            Assert-AcceptanceGitState `
+              -RepositoryRoot $androidGitProbeDirectory `
+              -RequiredBuildRevision $androidGitProbeRevision `
+              -GitCommand (Get-Command git).Source `
+              -AcceptanceName "验收测试" | Out-Null
+            throw "Android Git 状态门禁未拒绝未跟踪文件。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "要求干净检出") {
+              throw
+            }
+          }
           $androidEvidenceDirectory = Join-Path $env:RUNNER_TEMP "android-evidence-ci"
           $null = New-Item -ItemType Directory -Path $androidEvidenceDirectory -Force
           $androidEvidencePath = Join-Path $androidEvidenceDirectory "android-ci-device-preflight.json"

@@ -27,14 +27,31 @@ function Assert-AcceptanceGitState {
         throw "BuildRevision 与当前检出提交不一致。"
     }
 
-    $statusOutput = @(
-        & $GitCommand -C $RepositoryRoot status --porcelain=v1 --untracked-files=all --ignore-submodules=none 2>&1
+    $worktreeOutput = @(
+        & $GitCommand -C $RepositoryRoot diff --quiet --ignore-submodules=none -- 2>&1
+    )
+    $worktreeExitCode = $LASTEXITCODE
+    if ($worktreeExitCode -notin @(0, 1)) {
+        throw "检查当前工作树差异失败。$([Environment]::NewLine)$($worktreeOutput -join [Environment]::NewLine)"
+    }
+
+    $stagedOutput = @(
+        & $GitCommand -C $RepositoryRoot diff --cached --quiet --ignore-submodules=none -- 2>&1
+    )
+    $stagedExitCode = $LASTEXITCODE
+    if ($stagedExitCode -notin @(0, 1)) {
+        throw "检查当前暂存区差异失败。$([Environment]::NewLine)$($stagedOutput -join [Environment]::NewLine)"
+    }
+
+    $untrackedOutput = @(
+        & $GitCommand -C $RepositoryRoot ls-files --others --exclude-standard 2>&1
     )
     if ($LASTEXITCODE -ne 0) {
-        throw "检查当前工作区状态失败。$([Environment]::NewLine)$($statusOutput -join [Environment]::NewLine)"
+        throw "检查当前未跟踪文件失败。$([Environment]::NewLine)$($untrackedOutput -join [Environment]::NewLine)"
     }
-    if ($statusOutput.Count -gt 0) {
-        throw "${AcceptanceName}要求干净检出；当前工作区存在未提交或未跟踪文件。"
+
+    if ($worktreeExitCode -eq 1 -or $stagedExitCode -eq 1 -or $untrackedOutput.Count -gt 0) {
+        throw "${AcceptanceName}要求干净检出；当前工作区存在未提交、已暂存或未跟踪文件。"
     }
 }
 
