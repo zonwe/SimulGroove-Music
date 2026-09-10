@@ -12,14 +12,14 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 - Windows：递归扫描本地目录、读取音频元数据、桌面快捷键、系统托盘、自绘标题栏和紧凑悬浮播放器。
 - Linux：递归扫描本地目录、读取音频元数据、media_kit 播放、MPRIS 媒体控制、桌面快捷键、原生标题栏和紧凑悬浮播放器。
 - Web：响应式界面、Drift Web 数据库、真实后端账号和在线搜索；不支持本地目录扫描与本地音乐播放。
-- 通用功能：歌曲/专辑/艺术家视图、搜索、封面、歌词、播放队列、歌单、喜欢、主题外观和设置持久化。
-- 实验性后端：`backend/Music.Api` 提供 ASP.NET Core + SQLite 的认证、歌单同步、服务器目录扫描、在线音乐 BFF 和审计日志接口；在线音乐链路已具备存活/就绪检查、关联 ID、低基数指标和进程内熔断。
+- 通用功能：歌曲/专辑/艺术家视图、搜索、封面、歌词、播放队列、歌单、喜欢、10 段均衡器、扫描通知、主题外观和设置持久化。
+- 实验性后端：`backend/Music.Api` 提供 ASP.NET Core + SQLite 的认证、歌单/喜欢/均衡器预设与删除墓碑同步、服务器目录扫描、在线音乐 BFF 和审计日志接口；在线音乐链路已具备存活/就绪检查、关联 ID、低基数指标和进程内熔断。
 
 以下内容尚未视为完整产品能力：
 
-- Flutter 账号页通过 `HttpBackendGateway` 连接真实后端，令牌由安全存储保存；修改认证时必须继续保持刷新轮换和 401 单次重试。
-- 服务器扫描管理位于 `backend/Music.Api/Pages/Admin/` Razor Pages，不放入 Flutter 客户端；扫描的是后端机器目录，结果目前只供查看，尚不能直接播放。
-- 在线搜索、歌词/封面与 Windows/Linux/Android 在线播放已通过 `Music.Api` 接入受控 sidecar 契约；播放使用账号绑定短期票据与 Range 代理，Web 因认证请求头限制暂不开放在线播放。仓库提供非 root API 镜像与单机 Compose 编排模板，但生产指标导出、告警和 HTTPS 入口仍由部署环境提供；听歌识曲仍是占位页。
+- Flutter 账号页通过 `HttpBackendGateway` 连接真实后端，运行时服务器地址保存在 `AppSettings`，令牌由安全存储保存；修改认证时必须继续保持刷新轮换和 401 单次重试。
+- 服务器扫描管理位于 `backend/Music.Api/Pages/Admin/` Razor Pages，不放入 Flutter 客户端；扫描的是后端机器目录，已索引曲目可在管理页试听，也可通过账号隔离且支持 Range 的 API 播放。
+- 在线搜索、歌词/封面、下载与 Windows/Linux/Android 在线播放已通过 `Music.Api` 接入受控 sidecar 契约；播放使用账号绑定短期票据与 Range 代理，Web 因认证请求头限制暂不开放在线播放和下载。仓库提供非 root API 镜像与单机 Compose 编排模板，但生产指标导出、告警和 HTTPS 入口仍由部署环境提供；听歌识曲仍是占位页。
 - Web 本地文件扫描和播放未实现。
 - `ios/`、`macos/` 保留 Flutter 平台脚手架，但不是 README 声明的主要交付目标。涉及这些平台时必须单独验证，不能根据 Android/Windows/Linux 的结果推断可用。
 
@@ -39,17 +39,19 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 | `lib/app/` | `MaterialApp`、主题和全局 Riverpod Provider | `databaseProvider`、`audioHandlerProvider` 必须由根部覆盖 |
 | `lib/core/database/` | Drift 表定义、迁移、查询和持久化操作 | 修改表结构后更新版本、迁移并重新生成代码 |
 | `lib/core/library/` | 本地音乐扫描抽象、Android/Windows/Linux 实现和扫描模型 | 保持 Web/不支持平台的 stub 可编译 |
-| `lib/core/player/` | `just_audio`/`audio_service` 播放器、队列、平台音源和封面缓存 | 不要让 Widget 直接持有第二个 `AudioPlayer` |
+| `lib/core/player/` | `just_audio`/`audio_service` 播放器、队列、平台音源、均衡器、音量状态和封面缓存 | 不要让 Widget 直接持有第二个 `AudioPlayer` |
+| `lib/core/notifications/` | 本地扫描通知抽象、IO 实现和不支持平台 stub | 通知失败应降级并记录，不能阻断扫描 |
+| `lib/core/online_music/` | 在线搜索、播放票据、封面、歌词、下载与本地持久化边界 | 只经 `Music.Api`，不得保存 sidecar 私有字段 |
 | `lib/core/lyrics/` | LRC 解析 | 适合优先写纯 Dart 单元测试 |
 | `lib/core/theme/` | 外观设置模型 | 设置最终保存在 Drift `AppSettings` 表中 |
 | `lib/core/window/` | Windows 窗口、托盘和拖动区域，含平台 stub | Web 构建依赖条件导出隔离 `dart:io` |
 | `lib/core/shortcuts/` | Windows 全局快捷键注册和持久化 | 注意快捷键冲突、生命周期和非 Windows 分支 |
-| `lib/core/auth/` | HTTP 认证、令牌安全存储和歌单/喜欢同步边界 | 保持 Access/Refresh Token 轮换、单次刷新重试和退出清理 |
+| `lib/core/auth/` | HTTP 认证、令牌安全存储和歌单/喜欢/均衡器预设/删除墓碑同步边界 | 保持 Access/Refresh Token 轮换、单次刷新重试和退出清理 |
 | `lib/features/shell/` | 响应式应用壳、一级导航、播放队列停靠区 | 宽屏阈值当前为 900；返回行为统一回到歌单 |
 | `lib/features/library/` | 音乐库、喜欢、专辑/艺术家集合和封面组件 | `library_page.dart` 较大，新增逻辑时优先抽取可测试单元 |
 | `lib/features/player/` | 迷你播放器、正在播放页、队列、音量和歌曲信息 | UI 状态来自 `MusicAudioHandler` 的流和值流 |
 | `lib/features/playlists/` | 歌单列表和详情 | 写操作经 `AppDatabase`，不要在页面内维护另一份事实源 |
-| `lib/features/account/` | 真实登录和歌单/喜欢同步 UI | 页面不直接持有 Token 或 HTTP 客户端 |
+| `lib/features/account/` | 服务器地址、真实登录和资料库同步 UI | 页面不直接持有 Token 或 HTTP 客户端 |
 | `lib/features/placeholders/` | 听歌识曲占位页 | 识曲功能仍未实现，不应主动调用麦克风 |
 | `lib/features/settings/` | 实际设置页：外观、播放界面、音效、扫描、在线音乐、托盘与快捷键区块 | 各区块独立成文件；新增设置优先加区块而不是往 `settings_page.dart` 堆叠 |
 | `lib/features/online_search/` | 在线音乐搜索状态、页面和结果项 | 只调用 `Music.Api`；不得直连 sidecar 或保存第三方 URL/Cookie |
@@ -152,7 +154,7 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 
 ## 7. Drift 数据库约定
 
-数据库位于 `lib/core/database/app_database.dart`，当前 schema 版本为 2，包含：
+数据库位于 `lib/core/database/app_database.dart`，当前 schema 版本为 4，包含：
 
 - `Accounts`：本地账号快照。
 - `Tracks`：歌曲、来源、文件 URI/路径、标签、封面、歌词和同步字段。
@@ -162,6 +164,8 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 - `AppSettings`：字符串键值设置。
 - `PlaybackSnapshots`：为恢复播放状态预留的数据结构。
 - `LikedTracks`：喜欢歌曲关系。
+- `EqualizerPresets`：可同步的自定义均衡器预设。
+- `SyncTombstones`：按账号保存歌单、喜欢歌曲和均衡器预设的删除墓碑。
 
 数据库修改规则：
 
@@ -206,6 +210,8 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 ## 9. 播放器约定
 
 `MusicAudioHandler` 封装唯一的 `just_audio.AudioPlayer`，并通过 `audio_service` 暴露系统媒体状态。
+
+`EqualizerController` 负责均衡器状态与平台效果链，`volume_state.dart` 与 `playback_queue_logic.dart` 保存可独立测试的纯状态转换；`MusicAudioHandler` 保留播放器编排和兼容的公开委托 API。
 
 - `playTracks` 把 Drift `Track` 转成 `MediaItem` 和平台音源，设置队列和初始索引后播放。
 - `queue`、`mediaItem`、`playbackState` 是 UI 与系统控制共同使用的状态。
@@ -343,7 +349,7 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 - App 启动时恢复会话。
 - 401、离线、超时和服务端错误映射。
 - 账号页文案和 `isMock` 字段语义。
-- 歌单冲突、喜欢歌曲同步和删除传播规则。
+- 歌单、喜欢歌曲、均衡器预设的时间戳合并、删除墓碑传播和跨设备曲目匹配规则。
 - Android Emulator 的 `10.0.2.2`、真机局域网地址和 Web CORS。
 
 ## 14. 代码风格
@@ -422,7 +428,7 @@ docker compose --env-file .env -f compose.online-music.yml build
 | 音乐库 | 空库、扫描、搜索、三种视图、重扫、删除来源 |
 | 播放 | 首次播放、暂停/继续、切歌、拖动进度、队列、循环/随机 |
 | 歌词 | 无歌词、内嵌歌词、同名 LRC、时间同步、长歌词滚动 |
-| 歌单/喜欢 | 新建、删除、加入、移除、空歌单、级联删除 |
+| 歌单/喜欢/均衡器 | 新建、删除、加入、移除、空状态、级联删除、同步墓碑和较新修改恢复 |
 | 主题/设置 | 浅色、深色、跟随系统、重启后持久化 |
 | Windows | 标题栏、拖动、最小化托盘、紧凑窗、快捷键 |
 | Linux | 目录选择、递归扫描、本地/在线播放、MPRIS 媒体键、原生标题栏、紧凑窗、快捷键 |
@@ -443,7 +449,11 @@ docker compose --env-file .env -f compose.online-music.yml build
 - `test/lrc_parser_test.dart`：LRC 时间标签解析和排序。
 - `test/app_appearance_test.dart`：设置值到 `ThemeMode`/主题色的映射。
 - `test/playlists_page_test.dart`：歌单页面的 loading/error/empty 等 Widget 状态。
-- `backend/Music.Api.Tests/`：认证、账号隔离、在线音乐搜索/播放/歌词/封面、关联 ID、健康检查、指标和熔断测试。
+- `test/playback_queue_logic_test.dart`、`test/equalizer_test.dart`、`test/equalizer_controller_test.dart`：播放器队列与均衡器纯逻辑。
+- `test/auth_sync_test.dart`、`test/http_backend_gateway_test.dart`：同步合并、删除墓碑、刷新重试与 HTTP 契约。
+- `test/online_*_test.dart`、`test/http_online_music_gateway_test.dart`：在线搜索、菜单、批量操作、下载与网关契约。
+- `test/linux_library_scanner_test.dart`、`test/scan_notification_service_test.dart`：Linux 扫描与通知降级边界。
+- `backend/Music.Api.Tests/`：认证、账号隔离、同步墓碑、在线音乐搜索/播放/下载/歌词/封面、关联 ID、健康检查、指标和熔断测试。
 
 新测试建议：
 

@@ -1,8 +1,9 @@
 # 音乐服务 API 调研与 SimulGroove Music 接入评估
 
 > 调研日期：2026-07-31  
-> 目标项目：SimulGroove Music（Android、Windows、Web）
+> 目标项目：SimulGroove Music（Android、Windows、Linux、Web）
 > 结论基于各服务在调研日期公开的官方文档；价格、额度、开放范围和条款都可能变化，正式上线前必须重新确认。本文是工程评估，不是法律意见。
+> 状态说明（2026-09-06）：本文保留接入前的服务比较与合规风险分析，不代表仓库当前实现清单；项目后来采用 `Music.Api -> go-music-dl sidecar` 的实验性受控链路，现状见 [`go_music_dl_online_search_integration.md`](go_music_dl_online_search_integration.md) 与 [`api.md`](api.md)。
 
 ## 1. 结论先行
 
@@ -212,7 +213,9 @@ PlaybackCoordinator
 - Riverpod 已有全局 Provider 集中入口，适合注入网络客户端和服务 Repository。
 - 实验性 ASP.NET 后端可以保护服务密钥、签发短期 URL、代理 CORS、做限流和识曲音频上传。
 
-### 7.2 当前缺口
+### 7.2 调研时缺口（历史记录）
+
+以下条目记录 2026-07-31 评估时的仓库状态。在线搜索 Repository、播放票据、歌词/封面代理、下载和 Flutter 页面此后已经落地；服务器扫描文件也已支持账号隔离的 Range 流式播放，Web 仍受认证媒体请求头限制。
 
 - `pubspec.yaml` 已启用 `http`，账号、同步与服务器扫描复用现有 HTTP 边界；在线音乐服务仍需独立 Repository 和契约。
 - 在线搜索页仍是占位页，没有网络状态、分页、服务选择、错误恢复或结果模型。

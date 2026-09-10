@@ -12,11 +12,13 @@
 - Riverpod 依赖注入与响应式状态。
 - Drift/SQLite 本地数据库。
 - `just_audio` 与 `audio_service` 音频播放。
+- 10 段均衡器、播放器队列和可独立测试的音量/循环状态逻辑。
 - Android Kotlin 原生 MediaStore/Document Tree 桥接。
 - Windows 文件系统、窗口、托盘、快捷键和 media_kit 音频后端。
 - Linux 文件系统、原生窗口、MPRIS 媒体控制、快捷键和 media_kit 音频后端。
 - Web 的 SQLite WASM/Worker。
-- ASP.NET Core + SQLite 实验性后端。
+- `Music.Api` 与私有 sidecar 组成的受控在线搜索、播放、歌词、封面和下载链路。
+- ASP.NET Core + SQLite 实验性后端及歌单、喜欢、均衡器预设、删除墓碑同步。
 
 不要试图第一天读完每个文件。最有效的路线是先掌握一条完整、稳定的数据流，再逐步增加平台和后端知识。
 
@@ -165,10 +167,16 @@ Android Emulator 访问电脑后端时，`localhost` 指向模拟器自己；通
 | 导航、宽窄屏和页面切换 | `lib/features/shell/app_shell.dart` |
 | 数据库表和查询 | `lib/core/database/app_database.dart` |
 | 本地音乐扫描 | `lib/core/library/` |
+| 扫描系统通知 | `lib/core/notifications/` |
 | 音频播放 | `lib/core/player/music_audio_handler.dart` |
+| 均衡器和音量状态 | `lib/core/player/equalizer_controller.dart`、`volume_state.dart` |
+| 账号、会话与同步 | `lib/core/auth/` |
+| 在线音乐网关与下载 | `lib/core/online_music/` |
 | 音乐库 UI | `lib/features/library/library_page.dart` |
 | 歌单 UI | `lib/features/playlists/` |
 | 播放 UI | `lib/features/player/` |
+| 在线搜索 UI | `lib/features/online_search/` |
+| 设置页 | `lib/features/settings/` |
 | Android 原生扫描 | `android/app/src/main/kotlin/.../MainActivity.kt` |
 | Windows 窗口/托盘 | `lib/core/window/` |
 | 后端 | `backend/Music.Api/` |
@@ -274,11 +282,13 @@ Tracks ─────< PlaylistEntries >───── Playlists
    └────────< LikedTracks
 
 ScanSources  描述 Tracks 的本地来源
-Accounts     可关联同步后的 Playlists/Tracks
-AppSettings  保存主题、托盘、快捷键等键值
+Accounts     可关联同步后的 Playlists/Tracks/EqualizerPresets
+EqualizerPresets  保存可同步的自定义均衡器预设
+SyncTombstones    保存按账号传播的删除记录
+AppSettings  保存主题、托盘、快捷键、服务器地址等键值
 ```
 
-`PlaylistEntries` 的主键是 `(playlistId, trackId)`，所以同一首歌不能重复加入同一歌单。外键配置级联删除，删除歌单或歌曲时关系行会一起清理。
+当前数据库 schema 版本为 4。`PlaylistEntries` 的主键是 `(playlistId, trackId)`，所以同一首歌不能重复加入同一歌单。外键配置级联删除，删除歌单或歌曲时关系行会一起清理。
 
 ### 7.2 `watch` 与 `Future` 的区别
 
@@ -314,7 +324,7 @@ Future<List<Track>> allTracks()
 3. `lib/core/library/scanned_track.dart`
 4. `lib/core/library/library_scanner_stub.dart`
 5. `lib/core/library/library_scanner_io.dart`
-6. `lib/features/library/library_page.dart` 中 `_scan`、`_rescanAll`、`_toCompanion`
+6. `lib/features/library/library_scan_settings_section.dart` 中 `_scan`、`_rescanAll`、`_toCompanion`
 7. Android 学习者再读 `MainActivity.kt`
 
 ### 8.1 先理解接口，不急着看 300 行实现
@@ -495,10 +505,12 @@ Windows 本地歌曲优先从 `filePath` 构造 `Uri.file`。Android 更常播�
 
 - `lib/core/theme/app_appearance.dart`
 - `lib/app/music_app.dart`
-- `lib/features/placeholders/settings_page.dart`
+- `lib/features/settings/settings_page.dart`
 - `test/app_appearance_test.dart`
 
 设置以字符串键值保存在 `AppSettings`。`appearanceProvider` 监听整张设置表，再映射成类型安全的 `AppAppearance`。`MusicApp` watch 它，因此切换主题会立即重建主题。
+
+设置页已经按外观、播放布局、均衡器、扫描位置、在线音乐、托盘和快捷键拆成独立区块。自定义均衡器预设保存在 `EqualizerPresets`，登录后与歌单、喜欢歌曲一起同步，而不是塞进普通字符串设置。
 
 适合第一个独立任务：新增一个纯 UI 设置项，完成“定义 key → 读取默认值 → 页面修改 → 数据库保存 → 重启仍生效 → 单元测试映射”的闭环。
 
@@ -518,7 +530,7 @@ Windows 本地歌曲优先从 `filePath` 构造 `Uri.file`。Android 更常播�
 
 `HttpBackendGateway` 负责 JSON/HTTP 契约，`BackendAuthRepository` 负责会话生命周期和本地同步，`SecureAuthTokenStore` 通过平台安全存储保存 Access Token、Refresh Token 和过期时间。页面只调用 Repository，不直接读写令牌。
 
-Access Token 即将到期或请求返回 401 时，Repository 会执行一次 Refresh Token 轮换；刷新失败会清理本地登录状态。后端地址由 `MUSIC_API_URL` 编译期变量配置。
+Access Token 即将到期或请求返回 401 时，Repository 会执行一次 Refresh Token 轮换；刷新失败会清理本地登录状态。后端地址优先使用账号页保存到 `backend.base_url` 的运行时设置，`MUSIC_API_URL` 只作为可选的编译期兜底。
 
 ### 11.2 ASP.NET Core 后端
 
@@ -560,7 +572,7 @@ Invoke-RestMethod http://localhost:5080/health
 | 使用目录选择器/MediaStore | 使用后端配置的绝对路径 |
 | 不需要 HTTP | 需要认证 HTTP API |
 
-`lib/core/scanning/remote_scan_repository.dart` 与 `lib/features/scanning/remote_scan_page.dart` 已经接入认证会话、Provider 和“服务器扫描”一级导航。扫描结果目前只用于查看服务端索引，不等于客户端已经能流式播放服务器文件。
+Flutter 客户端没有“服务器扫描”一级导航。管理入口由 `backend/Music.Api/Pages/Admin/` 的 Razor Pages 提供，地址是 `/admin/scanning`；管理页可试听索引曲目，Bearer API 也支持 Range 流式读取，但 Flutter 客户端尚未提供服务器曲目浏览入口。
 
 ### 11.4 学习真实认证时要关注什么
 
@@ -822,9 +834,13 @@ flutter build apk --debug
 
 - `lrc_parser_test.dart`：最简单的纯 Dart 输入/输出测试。
 - `app_appearance_test.dart`：设置 Map 到领域模型的映射测试。
+- `playback_queue_logic_test.dart` 与 `equalizer_controller_test.dart`：把播放器状态拆成纯逻辑后如何覆盖边界。
 - `playlists_page_test.dart`：Riverpod Provider override 与 Widget 状态测试。
+- `auth_sync_test.dart`：时间戳合并、跨设备曲目匹配和删除墓碑测试。
+- `online_search_*_test.dart`：Controller、Widget、右键菜单和批量操作的分层测试。
+- `linux_library_scanner_test.dart` 与 `scan_notification_service_test.dart`：平台边界和失败降级测试。
 
-推荐按这个顺序读测试，正好对应从纯逻辑到 Provider/Widget 的难度增长。
+推荐先读纯函数测试，再读 Provider/Widget 测试，最后读带数据库、HTTP 或平台替身的集成边界测试。
 
 ### 16.3 如何描述验证结果
 
@@ -970,6 +986,9 @@ flutter build apk --debug
 | Companion | Drift 用于插入或部分更新的对象 |
 | HTTP Backend | 仓库内 ASP.NET Core 账号、同步和服务器扫描服务 |
 | Audio Handler | 对播放器队列、状态和系统控制的统一封装 |
+| EqualizerPreset | Drift 中可本地编辑并参与账号同步的均衡器预设 |
+| SyncTombstone | 记录实体删除时间、用于把删除传播到其他设备的同步数据 |
+| Sidecar | 只允许 Music.Api 访问的在线音乐私有辅助进程 |
 | Stub | 不支持平台上的安全替代实现，用来保持编译通过 |
 | Vendored dependency | 复制到仓库并由项目直接维护/覆盖的第三方依赖 |
 
