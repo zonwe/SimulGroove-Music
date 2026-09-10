@@ -9,6 +9,8 @@ using Music.Api.Services;
 using Music.Api.Services.Administration;
 using Music.Api.Services.OnlineMusic;
 using Music.Api.Services.Scanning;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,10 +25,40 @@ builder.Services.Configure<AdministrationOptions>(
 builder.Services.Configure<OnlineMusicOptions>(
 	builder.Configuration.GetSection(OnlineMusicOptions.SectionName));
 
+var otlpEndpointValue = builder.Configuration["Observability:OtlpEndpoint"];
+if (!string.IsNullOrWhiteSpace(otlpEndpointValue))
+{
+	if (!Uri.TryCreate(otlpEndpointValue, UriKind.Absolute, out var otlpEndpoint) ||
+		otlpEndpoint.Scheme is not ("http" or "https"))
+	{
+		throw new InvalidOperationException(
+			"Observability:OtlpEndpoint must be an absolute HTTP or HTTPS URI.");
+	}
+
+	var observabilityServiceName =
+		builder.Configuration["Observability:ServiceName"]?.Trim();
+	if (string.IsNullOrWhiteSpace(observabilityServiceName))
+	{
+		observabilityServiceName = "music-api";
+	}
+
+	builder.Services
+		.AddOpenTelemetry()
+		.ConfigureResource(resource => resource.AddService(observabilityServiceName))
+		.WithMetrics(metrics => metrics
+			.AddMeter(OnlineMusicTelemetry.MeterName)
+			.AddAspNetCoreInstrumentation()
+			.AddOtlpExporter(options => options.Endpoint = otlpEndpoint));
+}
+
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
 
-builder.Services.AddSingleton<IAuthService, AuthService>();
+builder.Services.AddSingleton<IRefreshTokenStore, SqliteRefreshTokenStore>();
+builder.Services.AddSingleton<IAuthService>(sp => new AuthService(
+	sp.GetRequiredService<IConfiguration>(),
+	sp.GetRequiredService<IHostEnvironment>(),
+	sp.GetRequiredService<IRefreshTokenStore>()));
 builder.Services.AddSingleton<IAdminCredentialService, AdminCredentialService>();
 builder.Services.AddSingleton<IPlaylistStore, SqliteStore>();
 builder.Services.AddSingleton<IScanSourceStore, SqliteScanSourceStore>();
@@ -72,15 +104,9 @@ builder.Services.AddAuthorization(options =>
 		AdminAuthorization.PolicyName,
 		policy => policy.RequireRole(AdminAuthorization.RoleName)));
 builder.Services.AddRazorPages();
+var corsAllowedOrigins = CorsOriginPolicy.GetAllowedOrigins(builder.Configuration);
 builder.Services.AddCors(options =>
-	options.AddDefaultPolicy(policy =>
-		policy
-			.SetIsOriginAllowed(_ => true)
-			.AllowAnyHeader()
-			.AllowAnyMethod()
-			.AllowCredentials()
-			.WithExposedHeaders("*")
-	)
+	options.AddDefaultPolicy(policy => CorsOriginPolicy.Configure(policy, corsAllowedOrigins))
 );
 
 var app = builder.Build();

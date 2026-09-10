@@ -33,6 +33,7 @@ class Tracks extends Table {
   TextColumn get lyrics => text().nullable()();
   IntColumn get fileSize => integer().nullable()();
   DateTimeColumn get modifiedAt => dateTime().nullable()();
+  TextColumn get contentFingerprint => text().nullable()();
   BoolColumn get isAvailable => boolean().withDefault(const Constant(true))();
   TextColumn get syncState => text().withDefault(const Constant('local'))();
   DateTimeColumn get updatedAt => dateTime()();
@@ -179,7 +180,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -188,6 +189,7 @@ class AppDatabase extends _$AppDatabase {
       if (from < 2) await m.createTable(likedTracks);
       if (from < 3) await m.createTable(equalizerPresets);
       if (from < 4) await m.createTable(syncTombstones);
+      if (from < 5) await m.addColumn(tracks, tracks.contentFingerprint);
     },
   );
 
@@ -199,6 +201,14 @@ class AppDatabase extends _$AppDatabase {
 
   Future<List<Track>> allTracks() =>
       (select(tracks)..orderBy([(row) => OrderingTerm.asc(row.title)])).get();
+
+  Future<List<Track>> tracksForSync(String accountId) =>
+      (select(tracks)
+            ..where(
+              (row) => row.accountId.isNull() | row.accountId.equals(accountId),
+            )
+            ..orderBy([(row) => OrderingTerm.asc(row.title)]))
+          .get();
 
   Future<Track?> findTrackByUri(String uri) =>
       (select(tracks)..where((row) => row.uri.equals(uri))).getSingleOrNull();
@@ -289,6 +299,13 @@ class AppDatabase extends _$AppDatabase {
   Future<void> saveAccount(AccountsCompanion value) =>
       into(accounts).insertOnConflictUpdate(value);
 
+  Future<void> replaceCurrentAccount(AccountsCompanion value) async {
+    await transaction(() async {
+      await delete(accounts).go();
+      await into(accounts).insert(value);
+    });
+  }
+
   Future<void> clearAccounts() => delete(accounts).go();
 
   Future<Account?> _currentAccountOnce() {
@@ -355,6 +372,14 @@ class AppDatabase extends _$AppDatabase {
   Stream<List<Playlist>> watchPlaylists() => (select(
     playlists,
   )..orderBy([(row) => OrderingTerm.asc(row.name)])).watch();
+
+  Future<List<Playlist>> playlistsForSync(String accountId) =>
+      (select(playlists)
+            ..where(
+              (row) => row.accountId.isNull() | row.accountId.equals(accountId),
+            )
+            ..orderBy([(row) => OrderingTerm.asc(row.name)]))
+          .get();
 
   Future<void> createPlaylist(PlaylistsCompanion value) =>
       into(playlists).insert(value);
@@ -524,6 +549,46 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
+  /// 批量把已在库中的曲目加入歌单。
+  ///
+  /// 与逐条调用 [addTrackToPlaylist] 相比，整批共用一个事务和一次歌单
+  /// 时间戳更新，页面层多选加入歌单时避免 N+1 写入。
+  Future<void> addExistingTracksToPlaylist(
+    String playlistId,
+    Iterable<String> trackIds,
+  ) async {
+    final ids = trackIds.toSet().toList(growable: false);
+    if (ids.isEmpty) return;
+    await transaction(() async {
+      final maximumPosition = playlistEntries.position.max();
+      final positionQuery = selectOnly(playlistEntries)
+        ..addColumns([maximumPosition])
+        ..where(playlistEntries.playlistId.equals(playlistId));
+      var position =
+          (await positionQuery
+                  .map((row) => row.read(maximumPosition))
+                  .getSingle() ??
+              -1) +
+          1;
+      final addedAt = DateTime.now();
+      await batch((batch) {
+        // 注意：不能用 batch.replaceAll——它只 UPDATE 已存在的行，
+        // 不会插入不存在的歌单条目；insertAllOnConflictUpdate 与
+        // addTrackToPlaylist 的 upsert（存在则移到末尾）语义一致。
+        batch.insertAllOnConflictUpdate(playlistEntries, [
+          for (final id in ids)
+            PlaylistEntriesCompanion.insert(
+              playlistId: playlistId,
+              trackId: id,
+              position: position++,
+              addedAt: addedAt,
+            ),
+        ]);
+      });
+      await _markPlaylistLocal(playlistId);
+    });
+  }
+
   Future<void> addTracksToPlaylist(
     String playlistId,
     Iterable<TracksCompanion> trackValues,
@@ -589,10 +654,17 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
-  Future<List<LikedTrackSyncData>> allLikedTracksForSync() async {
+  Future<List<LikedTrackSyncData>> allLikedTracksForSync({
+    String? accountId,
+  }) async {
     final query = select(
       tracks,
     ).join([innerJoin(likedTracks, likedTracks.trackId.equalsExp(tracks.id))]);
+    if (accountId != null) {
+      query.where(
+        tracks.accountId.isNull() | tracks.accountId.equals(accountId),
+      );
+    }
     final rows = await query.get();
     return rows
         .map(
@@ -662,6 +734,14 @@ class AppDatabase extends _$AppDatabase {
   Future<List<EqualizerPresetData>> allEqualizerPresets() => (select(
     equalizerPresets,
   )..orderBy([(row) => OrderingTerm.asc(row.name)])).get();
+
+  Future<List<EqualizerPresetData>> equalizerPresetsForSync(String accountId) =>
+      (select(equalizerPresets)
+            ..where(
+              (row) => row.accountId.isNull() | row.accountId.equals(accountId),
+            )
+            ..orderBy([(row) => OrderingTerm.asc(row.name)]))
+          .get();
 
   Future<void> saveEqualizerPreset(EqualizerPresetsCompanion value) =>
       into(equalizerPresets).insertOnConflictUpdate(value);

@@ -1,0 +1,785 @@
+name: CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_linux:
+        description: 运行暂缓的 Linux Release 构建
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches: [main, "codex/**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-lint:
+    name: GitHub Actions 静态检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.24.x
+          cache: false
+      - name: 校验工作流
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+  flutter:
+    name: Flutter 分析与测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: 安装依赖
+        run: flutter pub get
+      - name: 检查格式
+        run: dart format --output=none --set-exit-if-changed lib test
+      - name: 静态分析
+        run: flutter analyze
+      - name: 单元测试
+        run: flutter test
+      # Web stub 可编译是项目硬要求（条件导出必须隔离 dart:io）。
+      - name: Web 构建冒烟验证
+        run: flutter build web
+
+  backend:
+    name: 后端构建与测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: 还原依赖
+        run: dotnet restore backend/Music.Api.Tests/Music.Api.Tests.csproj --configfile backend/NuGet.Config
+      - name: 构建 API
+        run: dotnet build backend/Music.Api/Music.Api.csproj --no-restore
+      - name: 运行测试
+        run: dotnet test backend/Music.Api.Tests/Music.Api.Tests.csproj --no-restore -c Release
+
+  android:
+    name: Android Debug 构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: 安装依赖
+        run: flutter pub get
+      - name: 构建 Android Debug APK
+        run: flutter build apk --debug
+
+  deployment-config:
+    name: 生产部署配置校验
+    runs-on: ubuntu-latest
+    env:
+      MUSIC_DOMAIN: music.example.com
+      ACME_EMAIL: ops@example.com
+      MUSIC_API_JWT_KEY: ci-only-placeholder-with-at-least-32-characters
+      MUSIC_API_ADMIN_PASSWORD: ci-only-placeholder-with-at-least-32-characters
+      ALERTMANAGER_CONFIG_PATH: ${{ github.workspace }}/deploy/observability/alertmanager.example.yml
+      MUSIC_SERVER_LIBRARY_PATH: /tmp/simulgroove-ci-server-music
+    steps:
+      - uses: actions/checkout@v7
+      - name: 准备生产服务器扫描目录
+        run: mkdir -p "$MUSIC_SERVER_LIBRARY_PATH"
+      - name: 校验生产与实机验收脚本
+        shell: pwsh
+        run: |
+          $ciServerLibraryPath = [string]$env:MUSIC_SERVER_LIBRARY_PATH
+          $hasParseErrors = $false
+          foreach ($path in @(
+            "tool/production_acceptance.ps1",
+            "tool/production_acceptance_evidence.ps1",
+            "tool/prometheus_acceptance.ps1",
+            "tool/container_image_acceptance.ps1",
+            "tool/acceptance_git_state.ps1",
+            "tool/android_acceptance_evidence.ps1",
+            "tool/android_device_acceptance.ps1"
+          )) {
+            $parseErrors = $null
+            [Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path),
+              [ref]$null,
+              [ref]$parseErrors
+            ) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | Format-List
+              $hasParseErrors = $true
+            }
+          }
+          if ($hasParseErrors) {
+            throw "验收脚本存在 PowerShell 语法错误。"
+          }
+          ./tool/android_device_acceptance.ps1 -ListChecks | Out-Null
+          $invalidConfirmationReferenceRejected = $false
+          try {
+            ./tool/android_device_acceptance.ps1 `
+              -ListChecks `
+              -ConfirmationReference "invalid reference" | Out-Null
+          }
+          catch {
+            if ($_.FullyQualifiedErrorId -notlike "ParameterArgumentValidationError,*") {
+              throw
+            }
+            $invalidConfirmationReferenceRejected = $true
+          }
+          if (-not $invalidConfirmationReferenceRejected) {
+            throw "Android 验收脚本未拒绝无效的人工确认批次编号。"
+          }
+          try {
+            ./tool/android_device_acceptance.ps1
+            throw "Android 验收脚本未拒绝缺少提交修订的实际验收。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "必须提供 -BuildRevision") {
+              throw
+            }
+          }
+          try {
+            $androidRevisionArguments = @{
+              BuildRevision = "1111111111111111111111111111111111111111"
+            }
+            ./tool/android_device_acceptance.ps1 @androidRevisionArguments
+            throw "Android 验收脚本未拒绝与当前检出不一致的提交修订。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "与当前检出提交不一致") {
+              throw
+            }
+          }
+          . ./tool/acceptance_git_state.ps1
+          . ./tool/android_acceptance_evidence.ps1
+          $externalPathProbeDirectory = Join-Path $env:RUNNER_TEMP "acceptance-external-path-$([guid]::NewGuid().ToString('N'))"
+          $externalPathTarget = Join-Path $externalPathProbeDirectory "target"
+          $externalPathChild = Join-Path $externalPathTarget "child"
+          $null = New-Item -ItemType Directory -Path $externalPathChild -Force
+          $resolvedExternalPath = Resolve-AcceptanceExternalPath `
+            -RepositoryRoot $env:GITHUB_WORKSPACE `
+            -Path $externalPathChild `
+            -Name "验收路径测试" `
+            -PathType Container `
+            -MustExist
+          if ($resolvedExternalPath -ne [IO.Path]::GetFullPath($externalPathChild)) {
+            throw "共享外部路径校验未返回规范化路径。"
+          }
+          $externalPathCases = [ordered]@{
+            root = [IO.Path]::GetPathRoot($env:RUNNER_TEMP)
+            repository = $env:GITHUB_WORKSPACE
+          }
+          foreach ($entry in $externalPathCases.GetEnumerator()) {
+            try {
+              Resolve-AcceptanceExternalPath `
+                -RepositoryRoot $env:GITHUB_WORKSPACE `
+                -Path $entry.Value `
+                -Name "验收路径测试" | Out-Null
+              throw "共享外部路径校验未拒绝 $($entry.Key) 路径。"
+            }
+            catch {
+              if ($_.Exception.Message -notmatch "文件系统根目录|仓库工作区之外") {
+                throw
+              }
+            }
+          }
+          $externalPathLink = Join-Path $externalPathProbeDirectory "link"
+          $null = New-Item -ItemType SymbolicLink -Path $externalPathLink -Target $externalPathTarget
+          try {
+            Resolve-AcceptanceExternalPath `
+              -RepositoryRoot $env:GITHUB_WORKSPACE `
+              -Path (Join-Path $externalPathLink "child") `
+              -Name "验收路径测试" `
+              -PathType Container `
+              -MustExist | Out-Null
+            throw "共享外部路径校验未拒绝符号链接。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "符号链接或目录联接") {
+              throw
+            }
+          }
+          $androidGitProbeDirectory = Join-Path $env:RUNNER_TEMP "android-git-state-$([guid]::NewGuid().ToString('N'))"
+          $null = New-Item -ItemType Directory -Path $androidGitProbeDirectory
+          git -C $androidGitProbeDirectory init | Out-Null
+          git -C $androidGitProbeDirectory config user.email "ci@simulgroove.invalid"
+          git -C $androidGitProbeDirectory config user.name "SimulGroove CI"
+          Set-Content -LiteralPath (Join-Path $androidGitProbeDirectory "tracked.txt") -Value "clean" -Encoding utf8
+          git -C $androidGitProbeDirectory add tracked.txt
+          git -C $androidGitProbeDirectory commit -m "test fixture" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "无法创建 Android Git 状态测试仓库。"
+          }
+          $androidGitProbeRevision = (git -C $androidGitProbeDirectory rev-parse HEAD).Trim().ToLowerInvariant()
+          Assert-AcceptanceGitState `
+            -RepositoryRoot $androidGitProbeDirectory `
+            -RequiredBuildRevision $androidGitProbeRevision `
+            -GitCommand (Get-Command git).Source `
+            -AcceptanceName "验收测试" | Out-Null
+          Add-Content -LiteralPath (Join-Path $androidGitProbeDirectory "tracked.txt") -Value "dirty"
+          try {
+            Assert-AcceptanceGitState `
+              -RepositoryRoot $androidGitProbeDirectory `
+              -RequiredBuildRevision $androidGitProbeRevision `
+              -GitCommand (Get-Command git).Source `
+              -AcceptanceName "验收测试" | Out-Null
+            throw "Android Git 状态门禁未拒绝脏工作区。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "要求干净检出") {
+              throw
+            }
+          }
+          git -C $androidGitProbeDirectory add tracked.txt
+          try {
+            Assert-AcceptanceGitState `
+              -RepositoryRoot $androidGitProbeDirectory `
+              -RequiredBuildRevision $androidGitProbeRevision `
+              -GitCommand (Get-Command git).Source `
+              -AcceptanceName "验收测试" | Out-Null
+            throw "Android Git 状态门禁未拒绝暂存差异。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "要求干净检出") {
+              throw
+            }
+          }
+          git -C $androidGitProbeDirectory commit -m "advance fixture" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "无法提交 Android Git 状态测试差异。"
+          }
+          $androidGitProbeRevision = (git -C $androidGitProbeDirectory rev-parse HEAD).Trim().ToLowerInvariant()
+          $trackedPath = Join-Path $androidGitProbeDirectory "tracked.txt"
+          [IO.File]::WriteAllBytes($trackedPath, [IO.File]::ReadAllBytes($trackedPath))
+          Assert-AcceptanceGitState `
+            -RepositoryRoot $androidGitProbeDirectory `
+            -RequiredBuildRevision $androidGitProbeRevision `
+            -GitCommand (Get-Command git).Source `
+            -AcceptanceName "验收测试" | Out-Null
+          Set-Content -LiteralPath (Join-Path $androidGitProbeDirectory "untracked.txt") -Value "untracked" -Encoding utf8
+          try {
+            Assert-AcceptanceGitState `
+              -RepositoryRoot $androidGitProbeDirectory `
+              -RequiredBuildRevision $androidGitProbeRevision `
+              -GitCommand (Get-Command git).Source `
+              -AcceptanceName "验收测试" | Out-Null
+            throw "Android Git 状态门禁未拒绝未跟踪文件。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "要求干净检出") {
+              throw
+            }
+          }
+          $androidEvidenceDirectory = Join-Path $env:RUNNER_TEMP "android-evidence-ci"
+          $null = New-Item -ItemType Directory -Path $androidEvidenceDirectory -Force
+          $androidEvidencePath = Join-Path $androidEvidenceDirectory "android-ci-device-preflight.json"
+          $androidApkHash = ("A" * 64) -join ""
+          $androidEvidence = [ordered]@{
+            schema_version = 2
+            checked_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
+            status = "manual_checks_pending"
+            build_revision = $env:GITHUB_SHA.ToLowerInvariant()
+            apk = [ordered]@{ sha256 = $androidApkHash }
+            device = [ordered]@{ serial_fingerprint = "ci-device" }
+            installed_app = [ordered]@{
+              apk_sha256 = $androidApkHash
+              install_skipped = $false
+            }
+          }
+          $androidEvidence |
+            ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath $androidEvidencePath -Encoding utf8
+          $androidEvidenceArguments = @{
+            EvidenceDirectory = $androidEvidenceDirectory
+            DeviceEvidenceId = "ci-device"
+            RequiredBuildRevision = $env:GITHUB_SHA.ToLowerInvariant()
+            RequiredApkHash = $androidApkHash
+          }
+          if ($null -eq (Find-AndroidPreflightEvidence @androidEvidenceArguments)) {
+            throw "Android Preflight 证据筛选器拒绝了有效证据。"
+          }
+          foreach ($invalidCase in @("schema", "revision", "install", "expired", "future")) {
+            $candidate = $androidEvidence |
+              ConvertTo-Json -Depth 5 |
+              ConvertFrom-Json
+            switch ($invalidCase) {
+              "schema" { $candidate.schema_version = 1 }
+              "revision" { $candidate.build_revision = ("2" * 40) -join "" }
+              "install" { $candidate.installed_app.install_skipped = $true }
+              "expired" {
+                $candidate.checked_at_utc = [DateTimeOffset]::UtcNow.AddDays(-8).ToString("O")
+              }
+              "future" {
+                $candidate.checked_at_utc = [DateTimeOffset]::UtcNow.AddMinutes(6).ToString("O")
+              }
+            }
+            $candidate |
+              ConvertTo-Json -Depth 5 |
+              Set-Content -LiteralPath $androidEvidencePath -Encoding utf8
+            if ($null -ne (Find-AndroidPreflightEvidence @androidEvidenceArguments)) {
+              throw "Android Preflight 证据筛选器未拒绝 $invalidCase 证据。"
+            }
+          }
+          . ./tool/production_acceptance_evidence.ps1
+          $productionEvidenceFilterDirectory = Join-Path $env:RUNNER_TEMP "production-evidence-filter-ci"
+          $null = New-Item -ItemType Directory -Path $productionEvidenceFilterDirectory -Force
+          $productionEvidenceFilterPath = Join-Path $productionEvidenceFilterDirectory "production-ci.json"
+          $productionImageDigest = "sha256:" + (("3" * 64) -join "")
+          $productionEvidenceCheckedAt = [DateTimeOffset]::UtcNow
+          $productionEvidence = [ordered]@{
+            schema_version = 2
+            checked_at_utc = $productionEvidenceCheckedAt.ToString("O")
+            status = "scenario_complete"
+            build_revision = $env:GITHUB_SHA.ToLowerInvariant()
+            base_url = "https://music.ci.internal"
+            online_music_enabled = $true
+            configured_sources = @("ci-source")
+            approved_sources = @("ci-source")
+            sidecar_image = [ordered]@{ image_digest = $productionImageDigest }
+            alert_test = [ordered]@{
+              scenario = "FailureWarning"
+              test_id = "ci-production-evidence"
+            }
+          }
+          $productionEvidence |
+            ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath $productionEvidenceFilterPath -Encoding utf8
+          $productionEvidenceFilterArguments = @{
+            EvidenceDirectory = $productionEvidenceFilterDirectory
+            RequiredStatus = "scenario_complete"
+            RequiredScenario = "FailureWarning"
+            RequiredTestId = "ci-production-evidence"
+            RequiredBaseUrl = "https://music.ci.internal"
+            RequiredBuildRevision = $env:GITHUB_SHA.ToLowerInvariant()
+            MatchDeployment = $true
+            RequiredOnlineMusicEnabled = $true
+            RequiredConfiguredSources = @("ci-source")
+            RequiredApprovedSources = @("ci-source")
+            RequiredSidecarImageDigest = $productionImageDigest
+            CheckedAtNotAfterUtc = $productionEvidenceCheckedAt.AddSeconds(1)
+          }
+          if ($null -eq (Find-ProductionAcceptanceEvidence @productionEvidenceFilterArguments)) {
+            throw "生产验收证据筛选器拒绝了有效证据。"
+          }
+          foreach ($invalidCase in @("schema", "revision", "future", "after-cutoff", "configured-source", "approved-source", "image")) {
+            $candidate = $productionEvidence |
+              ConvertTo-Json -Depth 5 |
+              ConvertFrom-Json
+            switch ($invalidCase) {
+              "schema" { $candidate.schema_version = 1 }
+              "revision" { $candidate.build_revision = ("2" * 40) -join "" }
+              "future" {
+                $candidate.checked_at_utc = [DateTimeOffset]::UtcNow.AddMinutes(6).ToString("O")
+              }
+              "after-cutoff" {
+                $candidate.checked_at_utc = $productionEvidenceCheckedAt.AddSeconds(2).ToString("O")
+              }
+              "configured-source" { $candidate.configured_sources = @("other-source") }
+              "approved-source" { $candidate.approved_sources = @("other-source") }
+              "image" {
+                $candidate.sidecar_image.image_digest =
+                  "sha256:" + (("4" * 64) -join "")
+              }
+            }
+            $candidate |
+              ConvertTo-Json -Depth 5 |
+              Set-Content -LiteralPath $productionEvidenceFilterPath -Encoding utf8
+            if ($null -ne (Find-ProductionAcceptanceEvidence @productionEvidenceFilterArguments)) {
+              throw "生产验收证据筛选器未拒绝 $invalidCase 证据。"
+            }
+          }
+          try {
+            $productionArguments = @{
+              BaseUrl = "https://music.example.com"
+              EnvironmentFile = ".env.example"
+              ConfigurationOnly = $true
+            }
+            ./tool/production_acceptance.ps1 @productionArguments
+            throw "生产验收脚本未拒绝示例配置。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "占位值") {
+              throw
+            }
+          }
+          $alertConfigPath = Join-Path $env:RUNNER_TEMP "alertmanager-ci.yml"
+          @(
+            "route:"
+            "  receiver: ci-smoke"
+            "receivers:"
+            "  - name: ci-smoke"
+            "    webhook_configs:"
+            "      - url: https://alerts.ci.internal/simulgroove"
+          ) | Set-Content -LiteralPath $alertConfigPath -Encoding utf8
+          $environmentPath = Join-Path $env:RUNNER_TEMP "production-ci.env"
+          $ciJwtKey = "$(New-Guid)$(New-Guid)"
+          $ciAdminPassword = "$(New-Guid)"
+          @(
+            "MUSIC_DOMAIN=music.ci.internal"
+            "ACME_EMAIL=ops@ci.internal"
+            "MUSIC_API_JWT_KEY=$ciJwtKey"
+            "MUSIC_API_ADMIN_PASSWORD=$ciAdminPassword"
+            "MUSIC_SERVER_LIBRARY_PATH=$ciServerLibraryPath"
+            "ONLINE_MUSIC_ENABLED=true"
+            "ONLINE_MUSIC_SOURCE_0=ci-source"
+            "ONLINE_MUSIC_SOURCE_1="
+            "ONLINE_MUSIC_SOURCE_2="
+            "ALERTMANAGER_CONFIG_PATH=$alertConfigPath"
+          ) | Set-Content -LiteralPath $environmentPath -Encoding utf8
+          $rootEnvironmentPath = Join-Path $env:RUNNER_TEMP "production-root-ci.env"
+          $rootLibraryPath = [IO.Path]::GetPathRoot($ciServerLibraryPath)
+          $rootEnvironment = Get-Content -LiteralPath $environmentPath
+          $rootEnvironment = $rootEnvironment -replace '^MUSIC_SERVER_LIBRARY_PATH=.*$', "MUSIC_SERVER_LIBRARY_PATH=$rootLibraryPath"
+          $rootEnvironment |
+            Set-Content -LiteralPath $rootEnvironmentPath -Encoding utf8
+          try {
+            $rootProductionArguments = @{
+              BaseUrl = "https://music.ci.internal"
+              EnvironmentFile = $rootEnvironmentPath
+              ConfigurationOnly = $true
+            }
+            ./tool/production_acceptance.ps1 @rootProductionArguments
+            throw "生产验收脚本未拒绝文件系统根目录。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "不能是文件系统根目录") {
+              throw
+            }
+          }
+          $linkTargetPath = Join-Path $env:RUNNER_TEMP "server-music-link-target"
+          $linkTargetChildPath = Join-Path $linkTargetPath "child"
+          $linkPath = Join-Path $env:RUNNER_TEMP "server-music-link"
+          $null = New-Item -ItemType Directory -Path $linkTargetChildPath
+          $null = New-Item -ItemType SymbolicLink -Path $linkPath -Target $linkTargetPath
+          $linkEnvironmentPath = Join-Path $env:RUNNER_TEMP "production-link-ci.env"
+          $linkedLibraryPath = Join-Path $linkPath "child"
+          $linkEnvironment = Get-Content -LiteralPath $environmentPath
+          $linkEnvironment = $linkEnvironment -replace '^MUSIC_SERVER_LIBRARY_PATH=.*$', "MUSIC_SERVER_LIBRARY_PATH=$linkedLibraryPath"
+          $linkEnvironment |
+            Set-Content -LiteralPath $linkEnvironmentPath -Encoding utf8
+          try {
+            $linkProductionArguments = @{
+              BaseUrl = "https://music.ci.internal"
+              EnvironmentFile = $linkEnvironmentPath
+              ConfigurationOnly = $true
+            }
+            ./tool/production_acceptance.ps1 @linkProductionArguments
+            throw "生产验收脚本未拒绝符号链接音乐目录。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "不能包含符号链接或目录联接") {
+              throw
+            }
+          }
+          $approvalPath = Join-Path $env:RUNNER_TEMP "source-approval-ci.json"
+          [ordered]@{
+            schema_version = 1
+            change_ticket = "CHG-CI-SOURCE-GATE"
+            sources = @(
+              [ordered]@{
+                source_id = "ci-source"
+                decision = "approved"
+                effective_at_utc = "2020-01-01T00:00:00Z"
+                expires_at_utc = "2099-01-01T00:00:00Z"
+                regions = @("CI")
+                allowed_capabilities = @(
+                  "search", "metadata", "cover", "lyrics",
+                  "playback", "range", "download"
+                )
+                policy_urls = @(
+                  "https://terms.ci.internal/service",
+                  "https://terms.ci.internal/copyright",
+                  "https://terms.ci.internal/privacy"
+                )
+                access_method = "synthetic_ci_contract"
+                business_approver = "ci-business-reviewer"
+                security_approver = "ci-security-reviewer"
+                compliance_approver = "ci-compliance-reviewer"
+                upstream_commit = "1111111111111111111111111111111111111111"
+                fork_commit = "2222222222222222222222222222222222222222"
+                image_digest = "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+                corresponding_source_url = "https://source.ci.internal/simulgroove"
+              }
+            )
+          } | ConvertTo-Json -Depth 6 |
+            Set-Content -LiteralPath $approvalPath -Encoding utf8
+          $evidenceDirectory = Join-Path $env:RUNNER_TEMP "production-acceptance"
+          $productionArguments = @{
+            BaseUrl = "https://music.ci.internal"
+            EnvironmentFile = $environmentPath
+            ConfigurationOnly = $true
+            EvidenceDirectory = $evidenceDirectory
+            BuildRevision = $env:GITHUB_SHA
+            ApprovedSourceId = @("ci-source")
+            SourceApprovalEvidencePath = $approvalPath
+          }
+          ./tool/production_acceptance.ps1 @productionArguments
+          $evidencePath = Get-ChildItem $evidenceDirectory -Filter "production-*.json" |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+          $evidence = Get-Content -LiteralPath $evidencePath.FullName -Raw |
+            ConvertFrom-Json
+          if ($evidence.status -ne "configuration_valid") {
+            throw "生产配置验收证据状态不正确。"
+          }
+          if ($evidence.schema_version -ne 2 -or
+              $evidence.build_revision -ne $env:GITHUB_SHA.ToLowerInvariant()) {
+            throw "生产配置验收证据未绑定当前提交。"
+          }
+          try {
+            $missingRevisionArguments = $productionArguments.Clone()
+            $missingRevisionArguments.Remove("BuildRevision")
+            $missingRevisionArguments.Remove("ConfigurationOnly")
+            $missingRevisionArguments.AlertAction = "Fire"
+            $missingRevisionArguments.AlertScenario = "FailureWarning"
+            $missingRevisionArguments.AlertTestId = "ci-missing-revision"
+            $missingRevisionArguments.RunbookUrl = "https://runbooks.ci.internal/online-music"
+            ./tool/production_acceptance.ps1 @missingRevisionArguments
+            throw "生产验收脚本未拒绝缺少提交修订的 Fire 阶段。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "必须提供 -BuildRevision") {
+              throw
+            }
+          }
+
+          $badEnvironmentPath = Join-Path $env:RUNNER_TEMP "production-mismatched-image-ci.env"
+          Get-Content -LiteralPath $environmentPath |
+            ForEach-Object {
+              if ($_ -eq "ONLINE_MUSIC_SOURCE_1=") {
+                "ONLINE_MUSIC_SOURCE_1=ci-source-2"
+              }
+              else {
+                $_
+              }
+            } |
+            Set-Content -LiteralPath $badEnvironmentPath -Encoding utf8
+          $badApprovalPath = Join-Path $env:RUNNER_TEMP "source-approval-mismatched-image-ci.json"
+          $badApproval = Get-Content -LiteralPath $approvalPath -Raw | ConvertFrom-Json
+          $secondSource = $badApproval.sources[0] |
+            ConvertTo-Json -Depth 6 |
+            ConvertFrom-Json
+          $secondSource.source_id = "ci-source-2"
+          $secondSource.image_digest = "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+          $badApproval.sources = @($badApproval.sources[0], $secondSource)
+          $badApproval |
+            ConvertTo-Json -Depth 6 |
+            Set-Content -LiteralPath $badApprovalPath -Encoding utf8
+          try {
+            $badProductionArguments = @{
+              BaseUrl = "https://music.ci.internal"
+              EnvironmentFile = $badEnvironmentPath
+              ConfigurationOnly = $true
+              EvidenceDirectory = $evidenceDirectory
+              BuildRevision = $env:GITHUB_SHA
+              ApprovedSourceId = @("ci-source", "ci-source-2")
+              SourceApprovalEvidencePath = $badApprovalPath
+            }
+            ./tool/production_acceptance.ps1 @badProductionArguments
+            throw "生产验收脚本未拒绝多个来源绑定不同镜像摘要。"
+          }
+          catch {
+            if ($_.Exception.Message -notmatch "同一个生产 sidecar 镜像摘要") {
+              throw
+            }
+          }
+      - name: 校验 Compose 合并与变量
+        run: docker compose -f compose.online-music.production.yml config --quiet
+      - name: 校验 Caddy HTTPS 配置
+        run: >-
+          docker run --rm
+          --env MUSIC_DOMAIN --env ACME_EMAIL
+          --volume "$PWD/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro"
+          --entrypoint caddy
+          caddy:2.11.4-alpine
+          validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: 校验 OpenTelemetry Collector 配置
+        run: >-
+          docker run --rm
+          --volume "$PWD/deploy/observability/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro"
+          --entrypoint /otelcol-contrib
+          otel/opentelemetry-collector-contrib:0.160.0
+          validate --config=/etc/otelcol-contrib/config.yml
+      - name: 校验 Prometheus 配置与告警规则
+        run: >-
+          docker run --rm
+          --volume "$PWD/deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+          --volume "$PWD/deploy/observability/online_music_alerts.yml:/etc/prometheus/rules/online_music_alerts.yml:ro"
+          --entrypoint /bin/promtool
+          prom/prometheus:v3.14.0
+          check config /etc/prometheus/prometheus.yml
+      - name: 测试告警阈值、持续时间与恢复
+        run: >-
+          docker run --rm
+          --workdir /etc/prometheus/rules
+          --volume "$PWD/deploy/observability/online_music_alerts.yml:/etc/prometheus/rules/online_music_alerts.yml:ro"
+          --volume "$PWD/deploy/observability/online_music_alerts_test.yml:/etc/prometheus/rules/online_music_alerts_test.yml:ro"
+          --entrypoint /bin/promtool
+          prom/prometheus:v3.14.0
+          test rules online_music_alerts_test.yml
+      - name: 校验 Alertmanager 配置结构
+        run: >-
+          docker run --rm
+          --volume "$PWD/deploy/observability/alertmanager.example.yml:/etc/alertmanager/alertmanager.yml:ro"
+          --entrypoint /bin/amtool
+          prom/alertmanager:v0.34.0
+          check-config /etc/alertmanager/alertmanager.yml
+      - name: 构建并冒烟运行非 root API 镜像
+        run: |
+          image_name=simulgroove-music-api:ci
+          container_name=simulgroove-music-api-smoke
+          docker build --file backend/Music.Api/Dockerfile --tag "$image_name" .
+          test "$(docker image inspect --format '{{.Config.User}}' "$image_name")" = "music-api"
+          docker run --detach \
+            --name "$container_name" \
+            --publish 127.0.0.1:18080:8080 \
+            --env Auth__JwtKey="$MUSIC_API_JWT_KEY" \
+            --env Administration__Password="$MUSIC_API_ADMIN_PASSWORD" \
+            "$image_name"
+          image_id=$(docker inspect --type container --format '{{.Image}}' "$container_name")
+          pwsh ./tool/container_image_acceptance.ps1 \
+            -ContainerId "$container_name" \
+            -ApprovedDigest "$image_id" >/dev/null
+          if pwsh ./tool/container_image_acceptance.ps1 \
+            -ContainerId "$container_name" \
+            -ApprovedDigest "sha256:1111111111111111111111111111111111111111111111111111111111111111" \
+            >/dev/null 2>&1; then
+            echo "容器镜像验收器未拒绝不匹配的摘要。"
+            exit 1
+          fi
+          # shellcheck disable=SC2317
+          cleanup() {
+            docker rm --force "$container_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for _ in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18080/health/ready >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs "$container_name"
+          exit 1
+      - name: 端到端校验 OTLP 指标与敏感字段
+        run: |
+          image_name=simulgroove-music-api:ci
+          network_name=simulgroove-observability-smoke
+          collector_name=simulgroove-otel-collector-smoke
+          prometheus_name=simulgroove-prometheus-smoke
+          api_name=simulgroove-music-api-telemetry-smoke
+          # shellcheck disable=SC2317
+          cleanup() {
+            docker rm --force "$api_name" "$prometheus_name" "$collector_name" >/dev/null 2>&1 || true
+            docker network rm "$network_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker network create "$network_name"
+          docker run --detach \
+            --name "$collector_name" \
+            --network "$network_name" \
+            --network-alias otel-collector \
+            --publish 127.0.0.1:19464:9464 \
+            --volume "$PWD/deploy/observability/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro" \
+            otel/opentelemetry-collector-contrib:0.160.0 \
+            --config=/etc/otelcol-contrib/config.yml
+          docker run --detach \
+            --name "$prometheus_name" \
+            --network "$network_name" \
+            --network-alias prometheus \
+            --volume "$PWD/deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            --volume "$PWD/deploy/observability/online_music_alerts.yml:/etc/prometheus/rules/online_music_alerts.yml:ro" \
+            prom/prometheus:v3.14.0 \
+            --config.file=/etc/prometheus/prometheus.yml
+          docker run --detach \
+            --name "$api_name" \
+            --network "$network_name" \
+            --publish 127.0.0.1:18081:8080 \
+            --env Auth__JwtKey="$MUSIC_API_JWT_KEY" \
+            --env Administration__Password="$MUSIC_API_ADMIN_PASSWORD" \
+            --env Observability__OtlpEndpoint="http://$collector_name:4317" \
+            --env OTEL_METRIC_EXPORT_INTERVAL=1000 \
+            --env OnlineMusic__Enabled=true \
+            --env OnlineMusic__AllowedSources__0=ci \
+            --env OnlineMusic__SidecarBaseUrl=http://missing-sidecar:8080 \
+            --env OnlineMusic__RequestTimeoutSeconds=1 \
+            --env OnlineMusic__CircuitBreakerFailureThreshold=2 \
+            --env OnlineMusic__CircuitBreakerBreakSeconds=300 \
+            "$image_name"
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18081/health >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              docker logs "$api_name"
+              exit 1
+            fi
+            sleep 2
+          done
+          login_response=$(curl --fail --silent \
+            --header 'Content-Type: application/json' \
+            --data '{"username":"ci-telemetry","password":"ci-telemetry-password"}' \
+            http://127.0.0.1:18081/api/auth/login)
+          access_token=$(jq --exit-status --raw-output '.token' <<<"$login_response")
+          for attempt in 1 2 3; do
+            status_code=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --header "Authorization: Bearer $access_token" \
+              --header 'Content-Type: application/json' \
+              --data '{"query":"metric-smoke-query","sources":["ci"],"limit":1}' \
+              http://127.0.0.1:18081/api/online-music/search)
+            test "$status_code" = 503
+          done
+          for attempt in {1..45}; do
+            metrics=$(curl --fail --silent http://127.0.0.1:19464/metrics || true)
+            if grep --quiet '^flutter_music_online_music_sidecar_requests_total' <<<"$metrics" && \
+              grep --quiet '^flutter_music_online_music_sidecar_failures_total' <<<"$metrics" && \
+              grep --quiet '^flutter_music_online_music_sidecar_circuit_rejections_total' <<<"$metrics"; then
+              if grep --fixed-strings --quiet 'metric-smoke-query' <<<"$metrics" || \
+                grep --fixed-strings --quiet 'ci-telemetry' <<<"$metrics" || \
+                grep --fixed-strings --quiet "$access_token" <<<"$metrics"; then
+                echo "指标意外包含敏感或高基数字段。"
+                exit 1
+              fi
+              pwsh ./tool/prometheus_acceptance.ps1 \
+                -DockerNetwork "$network_name" \
+                -RequireOnlineMusicSeries \
+                -LookbackDays 1 \
+                -TimeoutSeconds 60
+              exit 0
+            fi
+            sleep 2
+          done
+          grep '^flutter_music_online_music' <<<"$metrics" || true
+          docker logs "$collector_name"
+          exit 1
+
+  linux:
+    name: Linux Release 构建
+    if: github.event_name == 'workflow_dispatch' && inputs.run_linux == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: 安装 Linux 桌面依赖
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install --yes
+          clang cmake ninja-build pkg-config
+          libgtk-3-dev liblzma-dev libmpv-dev mpv libnotify-dev
+          libayatana-appindicator3-dev libkeybinder-3.0-dev libsecret-1-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: 启用 Linux 桌面
+        run: flutter config --enable-linux-desktop
+      - name: 安装依赖
+        run: flutter pub get
+      - name: 构建 Linux Release
+        run: flutter build linux --release

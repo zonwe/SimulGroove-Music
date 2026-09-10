@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "change_ticket": "REPLACE-WITH-CHANGE-TICKET",
+  "sources": [
+    {
+      "source_id": "replace-with-source-id",
+      "decision": "approved",
+      "effective_at_utc": "2026-01-01T00:00:00Z",
+      "expires_at_utc": "2027-01-01T00:00:00Z",
+      "regions": [
+        "replace-with-approved-region"
+      ],
+      "allowed_capabilities": [
+        "search",
+        "metadata",
+        "cover",
+        "lyrics",
+        "playback",
+        "range",
+        "download"
+      ],
+      "policy_urls": [
+        "https://terms.example.invalid/service",
+        "https://terms.example.invalid/copyright",
+        "https://terms.example.invalid/privacy"
+      ],
+      "access_method": "replace-with-approved-access-method-without-secrets",
+      "business_approver": "replace-with-internal-identity",
+      "security_approver": "replace-with-internal-identity",
+      "compliance_approver": "replace-with-internal-identity",
+      "upstream_commit": "0000000000000000000000000000000000000000",
+      "fork_commit": "0000000000000000000000000000000000000000",
+      "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "corresponding_source_url": "https://source.example.invalid/simulgroove"
+    }
+  ]
+}

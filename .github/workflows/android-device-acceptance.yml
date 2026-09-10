@@ -1,0 +1,210 @@
+name: Android 真机验收
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: 先运行 Preflight，人工回归后再运行 Complete
+        required: true
+        default: Preflight
+        type: choice
+        options:
+          - Preflight
+          - Complete
+      confirmation_reference:
+        description: Complete 使用的不含秘密或个人信息的验收批次编号
+        required: false
+        type: string
+      require_production_signature:
+        description: 要求正式发布签名并拒绝 Android Debug 证书
+        required: true
+        default: false
+        type: boolean
+      permission_flow:
+        description: 已验证权限拒绝与允许
+        required: true
+        default: false
+        type: boolean
+      folder_scan:
+        description: 已验证真实目录扫描、封面、歌词与重扫
+        required: true
+        default: false
+        type: boolean
+      device_scan:
+        description: 已验证全设备扫描、重复与损坏文件
+        required: true
+        default: false
+        type: boolean
+      scan_notification:
+        description: 已验证前后台扫描通知
+        required: true
+        default: false
+        type: boolean
+      local_playback:
+        description: 已验证本地播放、队列、循环与随机
+        required: true
+        default: false
+        type: boolean
+      media_controls:
+        description: 已验证通知栏、锁屏、媒体键与音频焦点
+        required: true
+        default: false
+        type: boolean
+      account_sync:
+        description: 已验证真实后端登录恢复与资料同步
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-k80-device-acceptance
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: 执行 Redmi K80 Ultra 真机验收
+    if: github.ref_name == github.event.repository.default_branch
+    environment: android-k80-acceptance
+    runs-on: [self-hosted, windows, x64, simulgroove-android-device]
+    timeout-minutes: 45
+    env:
+      ANDROID_DEVICE_SERIAL: ${{ secrets.ANDROID_DEVICE_SERIAL }}
+      ANDROID_EXPECTED_MODEL_PATTERN: ${{ vars.ANDROID_EXPECTED_MODEL_PATTERN }}
+      ANDROID_ACCEPTANCE_EVIDENCE_DIR: ${{ vars.ANDROID_ACCEPTANCE_EVIDENCE_DIR }}
+      ACCEPTANCE_PHASE: ${{ inputs.phase }}
+      CONFIRMATION_REFERENCE: ${{ inputs.confirmation_reference }}
+      REQUIRE_PRODUCTION_SIGNATURE: ${{ inputs.require_production_signature }}
+      CHECK_PERMISSION_FLOW: ${{ inputs.permission_flow }}
+      CHECK_FOLDER_SCAN: ${{ inputs.folder_scan }}
+      CHECK_DEVICE_SCAN: ${{ inputs.device_scan }}
+      CHECK_SCAN_NOTIFICATION: ${{ inputs.scan_notification }}
+      CHECK_LOCAL_PLAYBACK: ${{ inputs.local_playback }}
+      CHECK_MEDIA_CONTROLS: ${{ inputs.media_controls }}
+      CHECK_ACCOUNT_SYNC: ${{ inputs.account_sync }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        if: inputs.phase == 'Preflight'
+        with:
+          channel: stable
+          cache: true
+
+      - name: 安装依赖
+        if: inputs.phase == 'Preflight'
+        run: flutter pub get
+
+      - name: 构建 ARM64 Release APK
+        if: inputs.phase == 'Preflight'
+        run: flutter build apk --release --target-platform android-arm64 --split-per-abi
+
+      - name: 执行真机预检或完成验收
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          . ./tool/acceptance_git_state.ps1
+          if ([string]::IsNullOrWhiteSpace($env:ANDROID_ACCEPTANCE_EVIDENCE_DIR)) {
+            throw "android-k80-acceptance Environment 未配置 ANDROID_ACCEPTANCE_EVIDENCE_DIR。"
+          }
+
+          $workspace = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
+          $evidenceDirectory = Resolve-AcceptanceExternalPath `
+            -RepositoryRoot $workspace `
+            -Path $env:ANDROID_ACCEPTANCE_EVIDENCE_DIR `
+            -Name "ANDROID_ACCEPTANCE_EVIDENCE_DIR"
+          $null = New-Item -ItemType Directory -Path $evidenceDirectory -Force
+
+          $candidateApk = Join-Path $evidenceDirectory "android-candidate-$($env:GITHUB_SHA).apk"
+          if ($env:ACCEPTANCE_PHASE -eq "Preflight") {
+            $builtApk = Join-Path $workspace "build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
+            if (-not (Test-Path -LiteralPath $builtApk -PathType Leaf)) {
+              throw "ARM64 Release APK 未生成。"
+            }
+            Copy-Item -LiteralPath $builtApk -Destination $candidateApk -Force
+          }
+          elseif (-not (Test-Path -LiteralPath $candidateApk -PathType Leaf)) {
+            throw "未找到当前提交的 Preflight 候选 APK，请先对同一提交运行 Preflight。"
+          }
+
+          $arguments = @{
+            ApkPath = $candidateApk
+            EvidenceDirectory = $evidenceDirectory
+            BuildRevision = $env:GITHUB_SHA
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:ANDROID_DEVICE_SERIAL)) {
+            $arguments.Serial = $env:ANDROID_DEVICE_SERIAL
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:ANDROID_EXPECTED_MODEL_PATTERN)) {
+            $arguments.ExpectedModelPattern = $env:ANDROID_EXPECTED_MODEL_PATTERN
+          }
+          if ($env:REQUIRE_PRODUCTION_SIGNATURE -eq "true") {
+            $arguments.RequireProductionSignature = $true
+          }
+
+          if ($env:ACCEPTANCE_PHASE -eq "Complete") {
+            $checkInputs = [ordered]@{
+              "permission-flow" = $env:CHECK_PERMISSION_FLOW
+              "folder-scan" = $env:CHECK_FOLDER_SCAN
+              "device-scan" = $env:CHECK_DEVICE_SCAN
+              "scan-notification" = $env:CHECK_SCAN_NOTIFICATION
+              "local-playback" = $env:CHECK_LOCAL_PLAYBACK
+              "media-controls" = $env:CHECK_MEDIA_CONTROLS
+              "account-sync" = $env:CHECK_ACCOUNT_SYNC
+            }
+            $missingChecks = @(
+              $checkInputs.GetEnumerator() |
+                Where-Object { $_.Value -ne "true" } |
+                ForEach-Object { $_.Key }
+            )
+            if ($missingChecks.Count -gt 0) {
+              throw "Complete 阶段必须确认全部人工检查：$($missingChecks -join ', ')"
+            }
+            if ($env:CONFIRMATION_REFERENCE -notmatch "^[A-Za-z0-9._-]{1,64}$") {
+              throw "confirmation_reference 必须为 1 到 64 位字母、数字、点、下划线或连字符。"
+            }
+            $arguments.SkipInstall = $true
+            $arguments.ConfirmedCheck = @($checkInputs.Keys)
+            $arguments.ConfirmationReference = $env:CONFIRMATION_REFERENCE
+            $expectedStatus = "complete"
+          }
+          elseif ($env:ACCEPTANCE_PHASE -eq "Preflight") {
+            $expectedStatus = "manual_checks_pending"
+          }
+          else {
+            throw "未知验收阶段：$($env:ACCEPTANCE_PHASE)"
+          }
+
+          $evidenceFilesBefore = @{}
+          Get-ChildItem -LiteralPath $evidenceDirectory -Filter "android-*.json" -File |
+            ForEach-Object { $evidenceFilesBefore[$_.FullName] = $true }
+          ./tool/android_device_acceptance.ps1 @arguments
+
+          $newEvidenceFiles = @(
+            Get-ChildItem -LiteralPath $evidenceDirectory -Filter "android-*.json" -File |
+              Where-Object { -not $evidenceFilesBefore.ContainsKey($_.FullName) }
+          )
+          if ($newEvidenceFiles.Count -ne 1) {
+            throw "Android 真机验收必须恰好生成一个新证据文件；实际为 $($newEvidenceFiles.Count) 个。"
+          }
+          $evidenceFile = $newEvidenceFiles[0]
+          $evidence = Get-Content -LiteralPath $evidenceFile.FullName -Raw | ConvertFrom-Json
+          if ($evidence.status -ne $expectedStatus) {
+            throw "Android 真机验收状态不正确，预期 $expectedStatus，实际 $($evidence.status)。"
+          }
+          if ($evidence.schema_version -ne 2 -or
+              $evidence.build_revision -ne $env:GITHUB_SHA.ToLowerInvariant()) {
+            throw "Android 真机验收证据未绑定当前提交。"
+          }
+          if ($env:ACCEPTANCE_PHASE -eq "Complete" -and
+              [string]::IsNullOrWhiteSpace($evidence.prerequisite_evidence_file)) {
+            throw "Android Complete 证据未关联 Preflight 证据。"
+          }
+
+          "### Android 真机验收" >> $env:GITHUB_STEP_SUMMARY
+          "- 阶段：$($env:ACCEPTANCE_PHASE)" >> $env:GITHUB_STEP_SUMMARY
+          "- 状态：$($evidence.status)" >> $env:GITHUB_STEP_SUMMARY
+          "- 设备：$($evidence.device.manufacturer) $($evidence.device.model)" >> $env:GITHUB_STEP_SUMMARY
+          "- Android：$($evidence.device.android_version)，ABI：$($evidence.device.abi)" >> $env:GITHUB_STEP_SUMMARY
+          "- 完整证据保留在受保护执行器的外部证据目录，未上传到 GitHub。" >> $env:GITHUB_STEP_SUMMARY

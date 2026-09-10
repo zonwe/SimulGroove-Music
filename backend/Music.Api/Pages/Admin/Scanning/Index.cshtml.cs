@@ -32,6 +32,20 @@ public sealed class IndexModel(IMusicScanService scanner, IAuditLogStore audit) 
 
     public void OnGet(string? tracksFor = null) => LoadPage(tracksFor);
 
+    public IActionResult OnGetStream(string sourceId, string trackId)
+    {
+        var track = scanner.OpenTrackFile(Username, sourceId, trackId);
+        if (track is null) return NotFound();
+
+        Response.Headers.CacheControl = "private, no-store";
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return new FileStreamResult(track.Content, track.ContentType)
+        {
+            EnableRangeProcessing = true,
+            LastModified = track.ModifiedAt
+        };
+    }
+
     public async Task<IActionResult> OnPostCreateAsync(CancellationToken cancellationToken)
     {
         if (!ModelState.IsValid)

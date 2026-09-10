@@ -60,6 +60,16 @@ public sealed class LibrarySyncTests
     }
 
     [TestMethod]
+    public void TrackMatchTokenValidatorRejectsMalformedValues()
+    {
+        Assert.IsTrue(TrackMatchTokens.IsValidOrEmpty(null));
+        Assert.IsTrue(TrackMatchTokens.IsValidOrEmpty(MatchToken('a')));
+        Assert.IsFalse(TrackMatchTokens.IsValidOrEmpty("sha256:" + new string('a', 64)));
+        Assert.IsFalse(TrackMatchTokens.IsValidOrEmpty(
+            TrackMatchTokens.Prefix + new string('A', 64)));
+    }
+
+    [TestMethod]
     public void SyncLibraryRepairsEmptyPlaylistFromRicherEqualTimestampClient()
     {
         var store = CreateStore();
@@ -127,6 +137,108 @@ public sealed class LibrarySyncTests
         Assert.AreEqual(1, resurrected.EqualizerPresets.Count);
         Assert.AreEqual(0, resurrected.Deletions.Count);
     }
+
+    [TestMethod]
+    public void MatchTokenLinksLikedTrackAcrossDeviceUrisAndSupportsDeletion()
+    {
+        var store = CreateStore();
+        var addedAt = DateTimeOffset.Parse("2026-08-24T08:00:00Z");
+        var deletedAt = addedAt.AddMinutes(1);
+        var token = MatchToken('a');
+        var windows = new TrackRequest(
+            "file:///C:/Music/song.mp3",
+            "Song",
+            "Artist",
+            "Album",
+            120000,
+            addedAt,
+            token);
+        var android = windows with
+        {
+            Uri = "content://media/external/audio/media/42",
+            UpdatedAt = addedAt.AddSeconds(1)
+        };
+
+        store.SyncLibrary("user@example.com", [], [windows], []);
+        var synced = store.SyncLibrary("user@example.com", [], [android], []);
+
+        Assert.AreEqual(1, synced.LikedTracks.Count);
+        Assert.AreEqual(android.Uri, synced.LikedTracks.Single().Uri);
+        Assert.AreEqual(token, synced.LikedTracks.Single().MatchToken);
+
+        var deleted = store.SyncLibrary(
+            "user@example.com",
+            [],
+            [],
+            [],
+            [new SyncDeletionRequest(SyncEntityTypes.LikedTrack, token, deletedAt)]);
+        Assert.AreEqual(0, deleted.LikedTracks.Count);
+        Assert.AreEqual(token, deleted.Deletions.Single().RemoteKey);
+    }
+
+    [TestMethod]
+    public void MatchTokensAndTombstonesRemainAccountScoped()
+    {
+        var store = CreateStore();
+        var addedAt = DateTimeOffset.Parse("2026-08-24T08:00:00Z");
+        var token = MatchToken('b');
+        var track = new TrackRequest(
+            "file:///music/song.mp3",
+            "Song",
+            "Artist",
+            "Album",
+            120000,
+            addedAt,
+            token);
+
+        store.SyncLibrary("alice@example.com", [], [track], []);
+        store.SyncLibrary("bob@example.com", [], [track], []);
+        store.SyncLibrary(
+            "alice@example.com",
+            [],
+            [],
+            [],
+            [new SyncDeletionRequest(
+                SyncEntityTypes.LikedTrack,
+                token,
+                addedAt.AddMinutes(1))]);
+
+        Assert.AreEqual(
+            0,
+            store.SyncLibrary("alice@example.com", [], [], []).LikedTracks.Count);
+        Assert.AreEqual(
+            1,
+            store.SyncLibrary("bob@example.com", [], [], []).LikedTracks.Count);
+    }
+
+    [TestMethod]
+    public void PlaylistRoundTripPreservesMatchToken()
+    {
+        var store = CreateStore();
+        var updatedAt = DateTimeOffset.Parse("2026-08-24T08:00:00Z");
+        var token = MatchToken('c');
+        var track = new TrackRequest(
+            "file:///music/song.mp3",
+            "Song",
+            "Artist",
+            "Album",
+            120000,
+            updatedAt,
+            token);
+
+        var response = store.SyncLibrary(
+            "user@example.com",
+            [new PlaylistRequest("playlist-1", "Playlist", updatedAt, [track])],
+            [],
+            []);
+
+        Assert.AreEqual(
+            token,
+            response.Playlists.Single().Tracks.Single().MatchToken);
+    }
+
+    private static string MatchToken(char value) =>
+        $"{TrackMatchTokens.Prefix}{new string(value, 64)}";
 
     private static PlaylistRequest Playlist(string id, string name, DateTimeOffset updatedAt) =>
         new(id, name, updatedAt, []);

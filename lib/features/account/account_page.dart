@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../core/auth/backend_gateway.dart';
 
 class AccountPage extends ConsumerStatefulWidget {
   const AccountPage({super.key});
@@ -11,15 +12,30 @@ class AccountPage extends ConsumerStatefulWidget {
 }
 
 class _AccountPageState extends ConsumerState<AccountPage> {
+  final _serverAddress = TextEditingController();
   final _username = TextEditingController();
   final _password = TextEditingController();
+  bool _addressEdited = false;
   bool _busy = false;
   bool _syncing = false;
   String? _error;
   String? _syncMessage;
 
   @override
+  void initState() {
+    super.initState();
+    // 把已保存的地址同步进输入框（含初始值）；用户一旦手动编辑就不再覆盖。
+    ref.listenManual(backendBaseUrlProvider, (previous, next) {
+      if (_addressEdited) return;
+      final value = next.value;
+      if (value == null || _serverAddress.text == value) return;
+      _serverAddress.text = value;
+    }, fireImmediately: true);
+  }
+
+  @override
   void dispose() {
+    _serverAddress.dispose();
     _username.dispose();
     _password.dispose();
     super.dispose();
@@ -28,6 +44,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
   @override
   Widget build(BuildContext context) {
     final account = ref.watch(accountProvider);
+    final savedAddress = ref.watch(backendBaseUrlProvider).value ?? '';
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -40,8 +57,13 @@ class _AccountPageState extends ConsumerState<AccountPage> {
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (error, _) => Text('账号读取失败：$error'),
                 data: (value) => value == null
-                    ? _loginForm(context)
-                    : _profile(context, value.displayName, value.username),
+                    ? _loginForm(context, savedAddress)
+                    : _profile(
+                        context,
+                        value.displayName,
+                        value.username,
+                        savedAddress,
+                      ),
               ),
             ),
           ),
@@ -50,7 +72,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
     );
   }
 
-  Widget _loginForm(BuildContext context) => Column(
+  Widget _loginForm(BuildContext context, String savedAddress) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       const Icon(Icons.account_circle_outlined, size: 58),
@@ -66,6 +88,27 @@ class _AccountPageState extends ConsumerState<AccountPage> {
         textAlign: TextAlign.center,
       ),
       const SizedBox(height: 22),
+      TextField(
+        controller: _serverAddress,
+        keyboardType: TextInputType.url,
+        autocorrect: false,
+        enabled: !_busy,
+        decoration: const InputDecoration(
+          labelText: '服务器地址',
+          hintText: 'http://192.168.1.10:5080',
+          helperText: '后端 Music.Api 的地址，保存后立即生效',
+        ),
+        onChanged: (_) => _addressEdited = true,
+      ),
+      if (savedAddress.isEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            '请填写服务器地址后登录',
+            style: TextStyle(color: Theme.of(context).colorScheme.primary),
+          ),
+        ),
+      const SizedBox(height: 12),
       TextField(
         controller: _username,
         decoration: const InputDecoration(labelText: '账号或邮箱'),
@@ -93,58 +136,84 @@ class _AccountPageState extends ConsumerState<AccountPage> {
     ],
   );
 
-  Widget _profile(BuildContext context, String displayName, String username) =>
-      Column(
-        children: [
-          const CircleAvatar(radius: 38, child: Icon(Icons.person, size: 38)),
-          const SizedBox(height: 14),
-          Text(displayName, style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 4),
-          Text(username),
-          const SizedBox(height: 12),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _syncing ? null : _sync,
-            icon: _syncing
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.sync),
-            label: Text(_syncing ? '同步中…' : '立即同步音乐库'),
+  Widget _profile(
+    BuildContext context,
+    String displayName,
+    String username,
+    String savedAddress,
+  ) => Column(
+    children: [
+      const CircleAvatar(radius: 38, child: Icon(Icons.person, size: 38)),
+      const SizedBox(height: 14),
+      Text(displayName, style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 4),
+      Text(username),
+      if (savedAddress.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            '服务器：$savedAddress',
+            style: Theme.of(context).textTheme.bodySmall,
           ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _busy || _syncing ? null : _signOut,
-            icon: const Icon(Icons.logout),
-            label: const Text('退出登录'),
-          ),
-          if (_syncMessage != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              _syncMessage!,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Theme.of(context).colorScheme.primary),
-            ),
-          ],
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _error!,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ],
-        ],
-      );
+        ),
+      const SizedBox(height: 12),
+      const SizedBox(height: 16),
+      FilledButton.icon(
+        onPressed: _syncing ? null : _sync,
+        icon: _syncing
+            ? const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.sync),
+        label: Text(_syncing ? '同步中…' : '立即同步音乐库'),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: _busy || _syncing ? null : _signOut,
+        icon: const Icon(Icons.logout),
+        label: const Text('退出登录'),
+      ),
+      if (_syncMessage != null) ...[
+        const SizedBox(height: 10),
+        Text(
+          _syncMessage!,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Theme.of(context).colorScheme.primary),
+        ),
+      ],
+      if (_error != null) ...[
+        const SizedBox(height: 8),
+        Text(
+          _error!,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
+      ],
+    ],
+  );
 
   Future<void> _signIn() async {
+    final address = normalizeBackendBaseUrl(_serverAddress.text);
+    final parsed = Uri.tryParse(address);
+    if (address.isEmpty || parsed == null || parsed.host.isEmpty) {
+      setState(() => _error = '请填写服务器地址，例如 http://192.168.1.10:5080。');
+      return;
+    }
+    if (parsed.scheme != 'http' && parsed.scheme != 'https') {
+      setState(() => _error = '服务器地址需要以 http:// 或 https:// 开头。');
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
       _syncMessage = null;
     });
     try {
+      // 先持久化地址；网关每次请求都会读取该设置，下一次登录立即生效。
+      await ref
+          .read(databaseProvider)
+          .setSetting(backendBaseUrlSettingKey, address);
       await ref
           .read(authRepositoryProvider)
           .signIn(username: _username.text, password: _password.text);

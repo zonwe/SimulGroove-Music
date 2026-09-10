@@ -9,7 +9,14 @@ import 'package:uuid/uuid.dart';
 
 import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
+import '../../core/player/equalizer_controller.dart';
 import '../../core/player/equalizer_models.dart';
+import 'equalizer_band_slider.dart';
+import 'equalizer_curve_painter.dart';
+import 'equalizer_preamp_control.dart';
+import 'equalizer_preset_selector.dart';
+
+export 'equalizer_curve_painter.dart' show EqualizerCurvePainter;
 
 class EqualizerView extends ConsumerStatefulWidget {
   const EqualizerView({super.key});
@@ -68,30 +75,14 @@ class _EqualizerViewState extends ConsumerState<EqualizerView> {
   Future<void> _loadInitialState() async {
     final db = ref.read(databaseProvider);
     final settings = await db.watchSettings().first;
-
-    final enabled = settings['audio.equalizer.enabled'] != 'false';
-    final presetId = settings['audio.equalizer.preset'] ?? 'flat';
-    final gainsJson = settings['audio.equalizer.gains'];
-    final preampStr = settings['audio.equalizer.preamp'];
-
-    var gains = EqualizerPreset.parseGains(gainsJson);
-    var preamp = preampStr != null ? (double.tryParse(preampStr) ?? 0.0) : 0.0;
-
-    // If gains were empty and preset is a default preset, load default preset gains
-    if (gainsJson == null || gainsJson.isEmpty) {
-      final defaultPreset = findDefaultEqualizerPreset(presetId);
-      if (defaultPreset != null) {
-        gains = List<double>.from(defaultPreset.gains);
-        preamp = defaultPreset.preampDb;
-      }
-    }
+    final config = parseEqualizerSettings(settings);
 
     if (mounted) {
       setState(() {
-        _enabled = enabled;
-        _selectedPresetId = presetId;
-        _gains = List<double>.from(gains);
-        _preampDb = preamp;
+        _enabled = config.enabled;
+        _selectedPresetId = config.presetId;
+        _gains = List<double>.from(config.gains);
+        _preampDb = config.preampDb;
         _initialized = true;
       });
     }
@@ -100,10 +91,10 @@ class _EqualizerViewState extends ConsumerState<EqualizerView> {
     ref
         .read(audioHandlerProvider)
         .applyEqualizer(
-          enabled: enabled,
-          gains: _gains,
-          preampDb: _preampDb,
-          presetId: _selectedPresetId,
+          enabled: config.enabled,
+          gains: config.gains,
+          preampDb: config.preampDb,
+          presetId: config.presetId,
         );
   }
 
@@ -279,20 +270,39 @@ class _EqualizerViewState extends ConsumerState<EqualizerView> {
     }
   }
 
+  void _onPresetAction(EqualizerPresetAction action) {
+    final currentCustomPreset = _currentCustomPreset();
+    switch (action) {
+      case EqualizerPresetAction.saveNew:
+        _saveAsNewPreset();
+      case EqualizerPresetAction.updateCurrent:
+        if (currentCustomPreset != null) {
+          _updateCurrentCustomPreset(currentCustomPreset);
+        }
+      case EqualizerPresetAction.deleteCurrent:
+        if (currentCustomPreset != null) {
+          _deleteCustomPreset(currentCustomPreset);
+        }
+      case EqualizerPresetAction.resetFlat:
+        _resetToFlat();
+    }
+  }
+
+  EqualizerPreset? _currentCustomPreset() {
+    final customPresets = ref.read(customEqualizerPresetsProvider).value;
+    if (customPresets == null) return null;
+    for (final p in customPresets) {
+      if (p.id == _selectedPresetId) return p;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final customPresetsAsync = ref.watch(customEqualizerPresetsProvider);
-    final customPresets = customPresetsAsync.value ?? const [];
-
-    EqualizerPreset? currentCustomPreset;
-    for (final p in customPresets) {
-      if (p.id == _selectedPresetId) {
-        currentCustomPreset = p;
-        break;
-      }
-    }
+    final customPresets =
+        ref.watch(customEqualizerPresetsProvider).value ?? const [];
 
     // Check potential clipping (max gain + preamp > 0)
     final maxGain = _gains.fold<double>(0.0, (m, g) => math.max(m, g));
@@ -379,11 +389,12 @@ class _EqualizerViewState extends ConsumerState<EqualizerView> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // Preset Selector Row
-                            _buildPresetRow(
-                              colorScheme,
-                              customPresets,
-                              currentCustomPreset,
+                            EqualizerPresetSelector(
+                              selectedPresetId: _selectedPresetId,
+                              customPresets: customPresets,
+                              currentCustomPreset: _currentCustomPreset(),
+                              onSelect: _selectPreset,
+                              onAction: _onPresetAction,
                             ),
 
                             const SizedBox(height: 16),
@@ -436,11 +447,18 @@ class _EqualizerViewState extends ConsumerState<EqualizerView> {
                                     MainAxisAlignment.spaceEvenly,
                                 children: [
                                   for (var i = 0; i < 10; i++)
-                                    _buildBandSlider(
-                                      index: i,
+                                    EqualizerBandSlider(
                                       freqLabel: equalizerFrequencyLabels[i],
                                       gain: _gains[i],
-                                      colorScheme: colorScheme,
+                                      enabled: _enabled,
+                                      onGainChanged: (val) {
+                                        setState(() => _gains[i] = val);
+                                        _onGainsChanged();
+                                      },
+                                      onReset: () {
+                                        setState(() => _gains[i] = 0.0);
+                                        _onGainsChanged();
+                                      },
                                     ),
                                 ],
                               ),
@@ -449,7 +467,15 @@ class _EqualizerViewState extends ConsumerState<EqualizerView> {
                             const SizedBox(height: 14),
 
                             // Preamp & Clipping Alert
-                            _buildPreampSection(colorScheme, hasClippingRisk),
+                            EqualizerPreampControl(
+                              preampDb: _preampDb,
+                              enabled: _enabled,
+                              hasClippingRisk: hasClippingRisk,
+                              onChanged: (val) {
+                                setState(() => _preampDb = val);
+                                _onGainsChanged();
+                              },
+                            ),
                           ],
                         ),
                       ),
@@ -459,406 +485,5 @@ class _EqualizerViewState extends ConsumerState<EqualizerView> {
         ),
       ),
     );
-  }
-
-  Widget _buildPresetRow(
-    ColorScheme colorScheme,
-    List<EqualizerPreset> customPresets,
-    EqualizerPreset? currentCustomPreset,
-  ) {
-    final allPresets = <EqualizerPreset>[
-      ...defaultEqualizerPresets,
-      ...customPresets,
-    ];
-
-    return Row(
-      children: [
-        // Dropdown
-        Expanded(
-          child: DropdownButtonFormField<String>(
-            key: ValueKey(_selectedPresetId),
-            initialValue: allPresets.any((p) => p.id == _selectedPresetId)
-                ? _selectedPresetId
-                : 'flat',
-            decoration: InputDecoration(
-              labelText: '预设配置',
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 8,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              prefixIcon: const Icon(Icons.tune_rounded, size: 20),
-            ),
-
-            items: [
-              const DropdownMenuItem(
-                enabled: false,
-                child: Text(
-                  '—— 默认预设 ——',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ),
-              for (final p in defaultEqualizerPresets)
-                DropdownMenuItem(value: p.id, child: Text(p.name)),
-              if (customPresets.isNotEmpty) ...[
-                const DropdownMenuItem(
-                  enabled: false,
-                  child: Text(
-                    '—— 我的自定义预设 ——',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ),
-                for (final p in customPresets)
-                  DropdownMenuItem(value: p.id, child: Text('★ ${p.name}')),
-              ],
-            ],
-            onChanged: (val) {
-              if (val == null) return;
-              final found = allPresets.firstWhere(
-                (p) => p.id == val,
-                orElse: () => defaultEqualizerPresets.first,
-              );
-              _selectPreset(found);
-            },
-          ),
-        ),
-
-        const SizedBox(width: 8),
-
-        // Action menu / Save button
-        PopupMenuButton<String>(
-          tooltip: '预设操作',
-          icon: const Icon(Icons.more_vert_rounded),
-          onSelected: (action) {
-            switch (action) {
-              case 'save_new':
-                _saveAsNewPreset();
-                break;
-              case 'update_current':
-                if (currentCustomPreset != null) {
-                  _updateCurrentCustomPreset(currentCustomPreset);
-                }
-                break;
-              case 'delete_current':
-                if (currentCustomPreset != null) {
-                  _deleteCustomPreset(currentCustomPreset);
-                }
-                break;
-              case 'reset_flat':
-                _resetToFlat();
-                break;
-            }
-          },
-          itemBuilder: (ctx) => [
-            const PopupMenuItem(
-              value: 'save_new',
-              child: ListTile(
-                leading: Icon(Icons.add_circle_outline_rounded),
-                title: Text('保存为新预设'),
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-            if (currentCustomPreset != null) ...[
-              const PopupMenuItem(
-                value: 'update_current',
-                child: ListTile(
-                  leading: Icon(Icons.save_outlined),
-                  title: Text('覆盖更新当前预设'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'delete_current',
-                child: ListTile(
-                  leading: Icon(
-                    Icons.delete_outline_rounded,
-                    color: Colors.red,
-                  ),
-                  title: Text('删除此自定义预设', style: TextStyle(color: Colors.red)),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-            ],
-            const PopupMenuItem(
-              value: 'reset_flat',
-              child: ListTile(
-                leading: Icon(Icons.restart_alt_rounded),
-                title: Text('归零重置 (平直)'),
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBandSlider({
-    required int index,
-    required String freqLabel,
-    required double gain,
-    required ColorScheme colorScheme,
-  }) {
-    final gainText = gain > 0
-        ? '+${gain.toStringAsFixed(1)}'
-        : gain.toStringAsFixed(1);
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Gain value badge
-        GestureDetector(
-          onTap: () {
-            // Quick reset to 0dB
-            setState(() => _gains[index] = 0.0);
-            _onGainsChanged();
-          },
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            decoration: BoxDecoration(
-              color: gain != 0.0 && _enabled
-                  ? colorScheme.primaryContainer
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              gainText,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: gain != 0.0 && _enabled
-                    ? colorScheme.onPrimaryContainer
-                    : colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 4),
-
-        // Vertical Slider
-        SizedBox(
-          height: 170,
-          width: 32,
-          child: RotatedBox(
-            quarterTurns: 3,
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 3,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                activeTrackColor: _enabled
-                    ? colorScheme.primary
-                    : colorScheme.outline,
-                inactiveTrackColor: colorScheme.outlineVariant.withValues(
-                  alpha: 0.4,
-                ),
-                thumbColor: _enabled
-                    ? colorScheme.primary
-                    : colorScheme.outline,
-              ),
-              child: Slider(
-                value: gain.clamp(-12.0, 12.0),
-                min: -12.0,
-                max: 12.0,
-                divisions: 48,
-                onChanged: _enabled
-                    ? (val) {
-                        setState(() {
-                          _gains[index] = val;
-                        });
-                        _onGainsChanged();
-                      }
-                    : null,
-              ),
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 4),
-
-        // Frequency Label
-        Text(
-          freqLabel,
-          style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPreampSection(ColorScheme colorScheme, bool hasClippingRisk) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.volume_down_rounded, size: 18),
-              const SizedBox(width: 8),
-              Text(
-                '前级增益 (Preamp)',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurface,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '${_preampDb > 0 ? '+' : ''}${_preampDb.toStringAsFixed(1)} dB',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: colorScheme.primary,
-                ),
-              ),
-            ],
-          ),
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-            ),
-            child: Slider(
-              value: _preampDb.clamp(-12.0, 0.0),
-              min: -12.0,
-              max: 0.0,
-              divisions: 24,
-              onChanged: _enabled
-                  ? (val) {
-                      setState(() => _preampDb = val);
-                      _onGainsChanged();
-                    }
-                  : null,
-            ),
-          ),
-          if (hasClippingRisk)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.info_outline_rounded,
-                    size: 14,
-                    color: colorScheme.error,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      '提示：低频/高频提升较多，适当调低前级增益可防止数字削波破音。',
-                      style: TextStyle(fontSize: 11, color: colorScheme.error),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class EqualizerCurvePainter extends CustomPainter {
-  EqualizerCurvePainter({
-    required this.gains,
-    required this.enabled,
-    required this.primaryColor,
-    required this.gridColor,
-  });
-
-  final List<double> gains;
-  final bool enabled;
-  final Color primaryColor;
-  final Color gridColor;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final width = size.width;
-    final height = size.height;
-    final midY = height / 2;
-
-    final dashPaint = Paint()
-      ..color = gridColor.withValues(alpha: 0.7)
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
-
-    // 0dB Center line
-    canvas.drawLine(Offset(0, midY), Offset(width, midY), dashPaint);
-
-    if (gains.isEmpty) return;
-
-    // Convert gains to canvas points
-    final points = <Offset>[];
-    final step = width / (gains.length - 1);
-
-    for (var i = 0; i < gains.length; i++) {
-      final x = i * step;
-      // Map gain [-12, +12] to y [height - 8, 8]
-      final g = enabled ? gains[i].clamp(-12.0, 12.0) : 0.0;
-      final y = midY - (g / 12.0) * (midY - 12);
-      points.add(Offset(x, y));
-    }
-
-    // Build smooth cubic bezier curve
-    final path = Path();
-    path.moveTo(points[0].dx, points[0].dy);
-
-    for (var i = 0; i < points.length - 1; i++) {
-      final p0 = points[i];
-      final p1 = points[i + 1];
-      final controlX = (p0.dx + p1.dx) / 2;
-      path.cubicTo(controlX, p0.dy, controlX, p1.dy, p1.dx, p1.dy);
-    }
-
-    // Fill area under curve with gradient
-    final fillPath = Path.from(path)
-      ..lineTo(width, height)
-      ..lineTo(0, height)
-      ..close();
-
-    final fillPaint = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          (enabled ? primaryColor : Colors.grey).withValues(alpha: 0.35),
-          (enabled ? primaryColor : Colors.grey).withValues(alpha: 0.02),
-        ],
-      ).createShader(Rect.fromLTWH(0, 0, width, height));
-
-    canvas.drawPath(fillPath, fillPaint);
-
-    // Stroke line
-    final linePaint = Paint()
-      ..color = enabled ? primaryColor : Colors.grey
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawPath(path, linePaint);
-
-    // Draw dots at control points
-    final dotPaint = Paint()
-      ..color = enabled ? primaryColor : Colors.grey
-      ..style = PaintingStyle.fill;
-
-    for (final point in points) {
-      canvas.drawCircle(point, 3.5, dotPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant EqualizerCurvePainter oldDelegate) {
-    return oldDelegate.enabled != enabled ||
-        oldDelegate.primaryColor != primaryColor ||
-        oldDelegate.gains != gains;
   }
 }

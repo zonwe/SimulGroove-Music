@@ -5,9 +5,17 @@ namespace Music.Api.Services.Scanning;
 
 public sealed class MusicScanService : IMusicScanService
 {
-    private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly IReadOnlyDictionary<string, string> SupportedContentTypes =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        ".mp3", ".flac", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".wma"
+        [".mp3"] = "audio/mpeg",
+        [".flac"] = "audio/flac",
+        [".m4a"] = "audio/mp4",
+        [".aac"] = "audio/aac",
+        [".wav"] = "audio/wav",
+        [".ogg"] = "audio/ogg",
+        [".opus"] = "audio/ogg",
+        [".wma"] = "audio/x-ms-wma"
     };
 
     private readonly IScanSourceStore _store;
@@ -27,6 +35,62 @@ public sealed class MusicScanService : IMusicScanService
 
     public IReadOnlyList<ScannedTrackResponse> GetTracks(string username, string sourceId, int limit) =>
         _store.GetTracks(username, sourceId, limit);
+
+    public ScannedTrackFile? OpenTrackFile(string username, string sourceId, string trackId)
+    {
+        var source = _store.Get(username, sourceId);
+        var track = _store.GetTrack(username, sourceId, trackId);
+        if (source is null || track is null) return null;
+
+        FileStream? content = null;
+        try
+        {
+            var sourceRoot = Path.TrimEndingDirectorySeparator(ValidatePath(source.Path));
+            var filePath = Path.GetFullPath(track.FilePath);
+            if (!IsWithinRoot(filePath, sourceRoot) || HasNestedReparsePoint(filePath, sourceRoot)) return null;
+
+            var file = new FileInfo(filePath);
+            if (!file.Exists || file.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+                !SupportedContentTypes.TryGetValue(file.Extension, out var contentType)) return null;
+
+            content = new FileStream(file.FullName, new FileStreamOptions
+            {
+                Mode = FileMode.Open,
+                Access = FileAccess.Read,
+                Share = FileShare.Read,
+                BufferSize = 64 * 1024,
+                Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+            });
+
+            // Revalidate after opening so the response owns this exact file handle
+            // instead of resolving the path again after the security checks.
+            file.Refresh();
+            if (!file.Exists || file.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+                HasNestedReparsePoint(file.FullName, sourceRoot))
+            {
+                content.Dispose();
+                return null;
+            }
+
+            var result = new ScannedTrackFile(
+                content,
+                contentType,
+                content.Length,
+                new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero));
+            content = null;
+            return result;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            content?.Dispose();
+            _logger.LogDebug(
+                exception,
+                "Indexed track validation failed for source {SourceId} and track {TrackId}.",
+                sourceId,
+                trackId);
+            return null;
+        }
+    }
 
     public ScanSourceResponse CreateSource(string username, CreateScanSourceRequest request)
     {
@@ -55,7 +119,8 @@ public sealed class MusicScanService : IMusicScanService
         var runId = Guid.NewGuid().ToString("N");
         try
         {
-            var discovered = await Task.Run(() => Discover(source.Path, cancellationToken), cancellationToken);
+            var sourcePath = ValidatePath(source.Path);
+            var discovered = await Task.Run(() => Discover(sourcePath, cancellationToken), cancellationToken);
             var completedAt = DateTimeOffset.UtcNow;
             _store.CompleteScan(id, runId, discovered, completedAt);
         }
@@ -102,7 +167,7 @@ public sealed class MusicScanService : IMusicScanService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var extension = Path.GetExtension(filePath);
-            if (!SupportedExtensions.Contains(extension)) continue;
+            if (!SupportedContentTypes.ContainsKey(extension)) continue;
             try
             {
                 var file = new FileInfo(filePath);
@@ -128,23 +193,79 @@ public sealed class MusicScanService : IMusicScanService
     private string ValidatePath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("path is required.");
-        var fullPath = Path.GetFullPath(path.Trim().Trim('"'));
+        var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim().Trim('"')));
         if (!Directory.Exists(fullPath)) throw new ArgumentException("The directory does not exist or is not accessible.");
-        if (_allowedRoots.Length == 0) return fullPath;
+        if (_allowedRoots.Length == 0)
+        {
+            if (HasDirectoryReparsePoint(fullPath, fullPath))
+            {
+                throw new ArgumentException("The scanning directory cannot be a symbolic link or reparse point.");
+            }
+            return fullPath;
+        }
 
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var allowed = _allowedRoots.Any(root =>
+        var isInsideConfiguredRoot = false;
+        foreach (var root in _allowedRoots)
         {
-            var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return fullPath.Equals(fullRoot, comparison) || fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, comparison);
-        });
-        if (!allowed) throw new ArgumentException("The directory is outside the configured scanning roots.");
-        return fullPath;
+            var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+            var isInsideRoot = fullPath.Equals(fullRoot, comparison) ||
+                IsWithinRoot(fullPath, fullRoot);
+            if (!isInsideRoot) continue;
+
+            isInsideConfiguredRoot = true;
+            if (!HasDirectoryReparsePoint(fullPath, fullRoot)) return fullPath;
+        }
+
+        if (isInsideConfiguredRoot)
+        {
+            throw new ArgumentException("The scanning directory path contains a symbolic link or reparse point.");
+        }
+        throw new ArgumentException("The directory is outside the configured scanning roots.");
     }
 
     private static int ValidateInterval(int value)
     {
         if (value is < 1 or > 10_080) throw new ArgumentException("intervalMinutes must be between 1 and 10080.");
         return value;
+    }
+
+    private static bool IsWithinRoot(string path, string root)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var rootPrefix = Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
+        return path.StartsWith(rootPrefix, comparison);
+    }
+
+    private static bool HasNestedReparsePoint(string filePath, string sourceRoot)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var directory = Directory.GetParent(filePath);
+        while (directory is not null && !directory.FullName.Equals(sourceRoot, comparison))
+        {
+            if (directory.Attributes.HasFlag(FileAttributes.ReparsePoint)) return true;
+            directory = directory.Parent;
+        }
+        return directory is null;
+    }
+
+    private static bool HasDirectoryReparsePoint(string directoryPath, string root)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        DirectoryInfo? directory = new(directoryPath);
+        try
+        {
+            while (directory is not null)
+            {
+                if (directory.Attributes.HasFlag(FileAttributes.ReparsePoint)) return true;
+                if (directory.FullName.Equals(root, comparison)) return false;
+                directory = directory.Parent;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+        return true;
     }
 }

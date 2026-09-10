@@ -350,6 +350,7 @@ code { font-family: ui-monospace, "Cascadia Code", monospace; color: #c7d2fe; }
 .track-main { min-width: 0; }
 .track-main strong, .track-main span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .track-main span { color: var(--text-muted); font-size: 13px; }
+.track-actions { display: flex; align-items: center; gap: 10px; }
 .track-format { color: #a5b4fc; font-family: ui-monospace, "Cascadia Code", monospace; font-size: 12px; }
 .tracks-panel { margin-top: 24px; padding: clamp(20px, 4vw, 30px); box-shadow: none; }
 

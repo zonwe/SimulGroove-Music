@@ -1,9 +1,22 @@
 import '../database/app_database.dart';
+import 'track_match_token.dart';
 
+/// 编译期注入的后端地址兜底值。仓库内不再包含任何真实内网 IP，
+/// 运行时地址优先读取 AppSettings（backend.base_url，账号页可配置）。
 const defaultBackendBaseUrl = String.fromEnvironment(
   'MUSIC_API_URL',
-  defaultValue: 'http://192.168.0.95:5080',
+  defaultValue: '',
 );
+
+/// AppSettings 中保存后端服务器地址的键。
+const backendBaseUrlSettingKey = 'backend.base_url';
+
+/// 规范化用户输入或存储的服务器地址：去空白并去掉结尾多余的斜杠。
+String normalizeBackendBaseUrl(String value) =>
+    value.trim().replaceFirst(RegExp(r'/+$'), '');
+
+/// 每次请求前读取运行时配置的后端地址（AppSettings）。
+typedef BackendBaseUrlReader = Future<String?> Function();
 
 class BackendAccount {
   const BackendAccount({
@@ -32,12 +45,18 @@ class BackendSession {
     required this.refreshToken,
     required this.expiresAt,
     required this.account,
+    this.trackMatchSalt,
+    this.trackMatchKey,
   });
 
   final String token;
   final String refreshToken;
   final DateTime expiresAt;
   final BackendAccount account;
+  final String? trackMatchSalt;
+
+  /// 仅保存在本机安全存储中，绝不发送给后端。
+  final String? trackMatchKey;
 
   bool get shouldRefresh => expiresAt.isBefore(
     DateTime.now().toUtc().add(const Duration(seconds: 30)),
@@ -50,6 +69,16 @@ class BackendSession {
     account: BackendAccount.fromJson(
       (json['account'] as Map).cast<String, dynamic>(),
     ),
+    trackMatchSalt: json['trackMatchSalt'] as String?,
+  );
+
+  BackendSession withTrackMatchKey(String? value) => BackendSession(
+    token: token,
+    refreshToken: refreshToken,
+    expiresAt: expiresAt,
+    account: account,
+    trackMatchSalt: trackMatchSalt,
+    trackMatchKey: value,
   );
 }
 
@@ -95,6 +124,7 @@ class BackendTrack {
     required this.album,
     this.durationMs,
     this.updatedAt,
+    this.matchToken,
   });
 
   final String uri;
@@ -103,16 +133,24 @@ class BackendTrack {
   final String album;
   final int? durationMs;
   final DateTime? updatedAt;
+  final String? matchToken;
 
-  factory BackendTrack.fromLocal(Track track, {DateTime? updatedAt}) =>
-      BackendTrack(
-        uri: track.uri,
-        title: track.title,
-        artist: track.artist,
-        album: track.album,
-        durationMs: track.durationMs,
-        updatedAt: updatedAt,
-      );
+  factory BackendTrack.fromLocal(
+    Track track, {
+    DateTime? updatedAt,
+    String? trackMatchKey,
+  }) => BackendTrack(
+    uri: track.uri,
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    durationMs: track.durationMs,
+    updatedAt: updatedAt,
+    matchToken: createTrackMatchToken(
+      contentFingerprint: track.contentFingerprint,
+      trackMatchKey: trackMatchKey,
+    ),
+  );
 
   factory BackendTrack.fromJson(Map<String, dynamic> json) => BackendTrack(
     uri: json['uri'] as String,
@@ -123,6 +161,7 @@ class BackendTrack {
     updatedAt: json['updatedAt'] is String
         ? DateTime.parse(json['updatedAt'] as String).toLocal()
         : null,
+    matchToken: json['matchToken'] as String?,
   );
 
   Map<String, dynamic> toJson() => {
@@ -133,6 +172,7 @@ class BackendTrack {
     'durationMs': durationMs,
     if (updatedAt case final value?)
       'updatedAt': value.toUtc().toIso8601String(),
+    'matchToken': matchToken,
   };
 }
 

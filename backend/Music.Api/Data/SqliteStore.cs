@@ -58,6 +58,7 @@ public sealed class SqliteStore : IPlaylistStore
                 artist TEXT NOT NULL,
                 album TEXT NOT NULL,
                 duration_ms INTEGER NULL,
+                match_token TEXT NULL,
                 PRIMARY KEY (username, remote_id, uri),
                 FOREIGN KEY (username, remote_id) REFERENCES playlists(username, remote_id) ON DELETE CASCADE
             );
@@ -69,6 +70,7 @@ public sealed class SqliteStore : IPlaylistStore
                 album TEXT NOT NULL,
                 duration_ms INTEGER NULL,
                 added_at TEXT NOT NULL,
+                match_token TEXT NULL,
                 PRIMARY KEY (username, uri)
             );
             CREATE TABLE IF NOT EXISTS equalizer_presets (
@@ -89,6 +91,39 @@ public sealed class SqliteStore : IPlaylistStore
             );
             """;
         command.ExecuteNonQuery();
+        EnsureColumn(connection, "playlist_tracks", "match_token", "TEXT NULL");
+        EnsureColumn(connection, "liked_tracks", "match_token", "TEXT NULL");
+        using var index = connection.CreateCommand();
+        index.CommandText = """
+            CREATE INDEX IF NOT EXISTS ix_playlist_tracks_match_token
+                ON playlist_tracks(username, match_token);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_liked_tracks_match_token
+                ON liked_tracks(username, match_token)
+                WHERE match_token IS NOT NULL;
+            """;
+        index.ExecuteNonQuery();
+    }
+
+    private static void EnsureColumn(
+        SqliteConnection connection,
+        string table,
+        string column,
+        string definition)
+    {
+        using var check = connection.CreateCommand();
+        check.CommandText = $"PRAGMA table_info({table})";
+        using var reader = check.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(
+                    reader.GetString(1),
+                    column,
+                    StringComparison.OrdinalIgnoreCase)) return;
+        }
+        reader.Close();
+        using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
+        alter.ExecuteNonQuery();
     }
 
     private void EnsureAccount(SqliteConnection connection, SqliteTransaction? transaction, string username)
@@ -156,7 +191,7 @@ public sealed class SqliteStore : IPlaylistStore
                 {
                     using var trackCommand = connection.CreateCommand();
                     trackCommand.Transaction = transaction;
-                    trackCommand.CommandText = "INSERT INTO playlist_tracks(username, remote_id, uri, title, artist, album, duration_ms) VALUES ($username, $remoteId, $uri, $title, $artist, $album, $durationMs)";
+                    trackCommand.CommandText = "INSERT INTO playlist_tracks(username, remote_id, uri, title, artist, album, duration_ms, match_token) VALUES ($username, $remoteId, $uri, $title, $artist, $album, $durationMs, $matchToken)";
                     trackCommand.Parameters.AddWithValue("$username", username);
                     trackCommand.Parameters.AddWithValue("$remoteId", playlist.RemoteId!);
                     trackCommand.Parameters.AddWithValue("$uri", track.Uri ?? string.Empty);
@@ -164,6 +199,7 @@ public sealed class SqliteStore : IPlaylistStore
                     trackCommand.Parameters.AddWithValue("$artist", track.Artist ?? string.Empty);
                     trackCommand.Parameters.AddWithValue("$album", track.Album ?? string.Empty);
                     trackCommand.Parameters.AddWithValue("$durationMs", (object?)track.DurationMs ?? DBNull.Value);
+                    trackCommand.Parameters.AddWithValue("$matchToken", (object?)track.MatchToken ?? DBNull.Value);
                     trackCommand.ExecuteNonQuery();
                 }
             }
@@ -173,19 +209,48 @@ public sealed class SqliteStore : IPlaylistStore
                 using var likedCommand = connection.CreateCommand();
                 likedCommand.Transaction = transaction;
                 var updatedAt = track.UpdatedAt ?? DateTimeOffset.UtcNow;
+                var matchToken = string.IsNullOrEmpty(track.MatchToken)
+                    ? null
+                    : track.MatchToken;
+                var remoteKey = matchToken ?? track.Uri;
                 if (!ShouldAcceptChange(connection, transaction, username,
-                        SyncEntityTypes.LikedTrack, track.Uri, updatedAt,
-                        "liked_tracks", "uri", "added_at")) continue;
+                        SyncEntityTypes.LikedTrack, remoteKey, updatedAt,
+                        "liked_tracks",
+                        matchToken is null ? "uri" : "match_token",
+                        "added_at")) continue;
+
+                if (matchToken is not null)
+                {
+                    using var removeDuplicate = connection.CreateCommand();
+                    removeDuplicate.Transaction = transaction;
+                    removeDuplicate.CommandText = """
+                        DELETE FROM liked_tracks
+                        WHERE username = $username
+                          AND match_token = $matchToken
+                          AND uri <> $uri;
+                        """;
+                    removeDuplicate.Parameters.AddWithValue("$username", username);
+                    removeDuplicate.Parameters.AddWithValue("$matchToken", matchToken);
+                    removeDuplicate.Parameters.AddWithValue("$uri", track.Uri);
+                    removeDuplicate.ExecuteNonQuery();
+                }
 
                 likedCommand.CommandText = """
-                    INSERT INTO liked_tracks(username, uri, title, artist, album, duration_ms, added_at)
-                    VALUES ($username, $uri, $title, $artist, $album, $durationMs, $addedAt)
+                    INSERT INTO liked_tracks(
+                        username, uri, title, artist, album, duration_ms,
+                        added_at, match_token)
+                    VALUES (
+                        $username, $uri, $title, $artist, $album, $durationMs,
+                        $addedAt, $matchToken)
                     ON CONFLICT(username, uri) DO UPDATE SET
                         title = excluded.title,
                         artist = excluded.artist,
                         album = excluded.album,
                         duration_ms = excluded.duration_ms,
-                        added_at = excluded.added_at;
+                        added_at = excluded.added_at,
+                        match_token = COALESCE(
+                            excluded.match_token,
+                            liked_tracks.match_token);
                     """;
                 likedCommand.Parameters.AddWithValue("$username", username);
                 likedCommand.Parameters.AddWithValue("$uri", track.Uri);
@@ -194,6 +259,7 @@ public sealed class SqliteStore : IPlaylistStore
                 likedCommand.Parameters.AddWithValue("$album", track.Album ?? string.Empty);
                 likedCommand.Parameters.AddWithValue("$durationMs", (object?)track.DurationMs ?? DBNull.Value);
                 likedCommand.Parameters.AddWithValue("$addedAt", FormatTimestamp(updatedAt));
+                likedCommand.Parameters.AddWithValue("$matchToken", (object?)matchToken ?? DBNull.Value);
                 likedCommand.ExecuteNonQuery();
             }
             foreach (var preset in incomingEqualizerPresets)
@@ -237,7 +303,7 @@ public sealed class SqliteStore : IPlaylistStore
                 playlists.Add(new PlaylistResponse(remoteId, reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), ReadTracks(connection, username, remoteId)));
             }
             using var likedQuery = connection.CreateCommand();
-            likedQuery.CommandText = "SELECT uri, title, artist, album, duration_ms, added_at FROM liked_tracks WHERE username = $username ORDER BY added_at DESC";
+            likedQuery.CommandText = "SELECT uri, title, artist, album, duration_ms, added_at, match_token FROM liked_tracks WHERE username = $username ORDER BY added_at DESC";
             likedQuery.Parameters.AddWithValue("$username", username);
             using var likedReader = likedQuery.ExecuteReader();
             var likedTracks = new List<TrackResponse>();
@@ -249,7 +315,8 @@ public sealed class SqliteStore : IPlaylistStore
                     likedReader.GetString(2),
                     likedReader.GetString(3),
                     likedReader.IsDBNull(4) ? null : likedReader.GetInt32(4),
-                    ParseTimestamp(likedReader.GetString(5))));
+                    ParseTimestamp(likedReader.GetString(5)),
+                    likedReader.IsDBNull(6) ? null : likedReader.GetString(6)));
             }
             using var presetQuery = connection.CreateCommand();
             presetQuery.CommandText = "SELECT remote_id, name, gains_json, preamp_db, updated_at FROM equalizer_presets WHERE username = $username ORDER BY remote_id";
@@ -394,10 +461,58 @@ public sealed class SqliteStore : IPlaylistStore
     {
         ApplyTombstonesForEntity(connection, transaction, username,
             SyncEntityTypes.Playlist, "playlists", "remote_id", "updated_at");
-        ApplyTombstonesForEntity(connection, transaction, username,
-            SyncEntityTypes.LikedTrack, "liked_tracks", "uri", "added_at");
+        ApplyLikedTrackTombstones(connection, transaction, username);
         ApplyTombstonesForEntity(connection, transaction, username,
             SyncEntityTypes.EqualizerPreset, "equalizer_presets", "remote_id", "updated_at");
+    }
+
+    private static void ApplyLikedTrackTombstones(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string username)
+    {
+        using var discardStaleTombstones = connection.CreateCommand();
+        discardStaleTombstones.Transaction = transaction;
+        discardStaleTombstones.CommandText = """
+            DELETE FROM sync_tombstones
+            WHERE username = $username AND entity_type = $entityType
+              AND EXISTS (
+                SELECT 1 FROM liked_tracks
+                WHERE liked_tracks.username = sync_tombstones.username
+                  AND (
+                    liked_tracks.uri = sync_tombstones.remote_key OR
+                    liked_tracks.match_token = sync_tombstones.remote_key
+                  )
+                  AND liked_tracks.added_at > sync_tombstones.deleted_at
+              );
+            """;
+        discardStaleTombstones.Parameters.AddWithValue("$username", username);
+        discardStaleTombstones.Parameters.AddWithValue(
+            "$entityType",
+            SyncEntityTypes.LikedTrack);
+        discardStaleTombstones.ExecuteNonQuery();
+
+        using var deleteEntities = connection.CreateCommand();
+        deleteEntities.Transaction = transaction;
+        deleteEntities.CommandText = """
+            DELETE FROM liked_tracks
+            WHERE username = $username
+              AND EXISTS (
+                SELECT 1 FROM sync_tombstones
+                WHERE sync_tombstones.username = liked_tracks.username
+                  AND sync_tombstones.entity_type = $entityType
+                  AND (
+                    sync_tombstones.remote_key = liked_tracks.uri OR
+                    sync_tombstones.remote_key = liked_tracks.match_token
+                  )
+                  AND sync_tombstones.deleted_at >= liked_tracks.added_at
+              );
+            """;
+        deleteEntities.Parameters.AddWithValue("$username", username);
+        deleteEntities.Parameters.AddWithValue(
+            "$entityType",
+            SyncEntityTypes.LikedTrack);
+        deleteEntities.ExecuteNonQuery();
     }
 
     private static void ApplyTombstonesForEntity(
@@ -446,14 +561,20 @@ public sealed class SqliteStore : IPlaylistStore
     private static IReadOnlyList<TrackResponse> ReadTracks(SqliteConnection connection, string username, string remoteId)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT uri, title, artist, album, duration_ms FROM playlist_tracks WHERE username = $username AND remote_id = $remoteId ORDER BY rowid";
+        command.CommandText = "SELECT uri, title, artist, album, duration_ms, match_token FROM playlist_tracks WHERE username = $username AND remote_id = $remoteId ORDER BY rowid";
         command.Parameters.AddWithValue("$username", username);
         command.Parameters.AddWithValue("$remoteId", remoteId);
         using var reader = command.ExecuteReader();
         var tracks = new List<TrackResponse>();
         while (reader.Read())
         {
-            tracks.Add(new TrackResponse(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetInt32(4)));
+            tracks.Add(new TrackResponse(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetInt32(4),
+                MatchToken: reader.IsDBNull(5) ? null : reader.GetString(5)));
         }
         return tracks;
     }

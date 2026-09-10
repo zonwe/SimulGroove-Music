@@ -15,6 +15,7 @@ class ScannedTrack {
     this.lyrics,
     this.fileSize,
     this.modifiedAt,
+    this.contentFingerprint,
   });
 
   final String id;
@@ -30,6 +31,7 @@ class ScannedTrack {
   final String? lyrics;
   final int? fileSize;
   final DateTime? modifiedAt;
+  final String? contentFingerprint;
 }
 
 class ScanResult {

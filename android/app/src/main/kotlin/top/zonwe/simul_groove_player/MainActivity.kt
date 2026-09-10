@@ -22,6 +22,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.util.ArrayDeque
 import java.util.concurrent.Executors
 import kotlin.math.min
@@ -460,6 +461,7 @@ class MainActivity : AudioServiceActivity() {
                         "duration" to duration,
                         "size" to entry.size,
                         "dateModifiedMs" to entry.modifiedAt,
+                        "contentFingerprint" to contentFingerprint(entry.uri),
                         "artwork" to compactArtwork(retriever.embeddedPicture),
                         "lyrics" to lyrics[sidecarKey(entry)]?.let(::readText),
                     )
@@ -623,12 +625,33 @@ class MainActivity : AudioServiceActivity() {
                         "size" to cursor.getLong(sizeColumn),
                         "dateModified" to cursor.getLong(modifiedColumn),
                         "path" to cursor.getString(dataColumn),
+                        "contentFingerprint" to contentFingerprint(uri),
                         "artwork" to artwork,
                     ),
                 )
             }
         }
         return songs
+    }
+
+    private fun contentFingerprint(uri: Uri): String? {
+        return try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            val buffer = ByteArray(64 * 1024)
+            val stream = contentResolver.openInputStream(uri) ?: return null
+            stream.use { input ->
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (count > 0) digest.update(buffer, 0, count)
+                }
+            }
+            "sha256:" + digest.digest().joinToString("") { byte ->
+                "%02x".format(byte.toInt() and 0xff)
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun compactArtwork(bytes: ByteArray?): ByteArray? {

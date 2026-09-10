@@ -47,6 +47,31 @@ void main() {
       );
     },
   );
+
+  test(
+    'batch-adding tracks keeps move-to-end semantics and deduplicates',
+    () async {
+      await database.addTrackToPlaylist('playlist', 'first');
+      await database.addExistingTracksToPlaylist('playlist', [
+        'second',
+        'first',
+        'second',
+      ]);
+
+      expect(
+        (await database.watchPlaylistTracks('playlist').first).map(
+          (track) => track.id,
+        ),
+        ['second', 'first'],
+      );
+    },
+  );
+
+  test('batch-adding an empty selection is a no-op', () async {
+    await database.addExistingTracksToPlaylist('playlist', const []);
+
+    expect(await database.watchPlaylistTracks('playlist').first, isEmpty);
+  });
 }
 
 TracksCompanion _track(String id) => TracksCompanion.insert(

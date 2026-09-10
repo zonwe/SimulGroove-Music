@@ -258,8 +258,7 @@ class _PlaylistHeaderDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   double get maxExtent =>
-      (compact ? 240 : 284) +
-      math.max(0, textScale - 1) * (compact ? 128 : 80);
+      (compact ? 240 : 284) + math.max(0, textScale - 1) * (compact ? 128 : 80);
 
   @override
   Widget build(

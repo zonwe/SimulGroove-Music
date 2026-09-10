@@ -83,6 +83,33 @@ public static class ScanSourceEndpoints
                 : Results.Ok(scanner.GetTracks(account.Username, id, limit ?? 200));
         });
 
+        group.MapGet("/{id}/tracks/{trackId}/stream", (
+            string id,
+            string trackId,
+            HttpContext httpContext,
+            IAuthService auth,
+            IMusicScanService scanner) =>
+        {
+            var account = Authenticate(httpContext.Request, auth);
+            if (account is null) return Results.Unauthorized();
+
+            var track = scanner.OpenTrackFile(account.Username, id, trackId);
+            if (track is null)
+            {
+                return Results.Json(
+                    new ProblemResponse("server_track_not_found", "The indexed track is unavailable."),
+                    statusCode: StatusCodes.Status404NotFound);
+            }
+
+            httpContext.Response.Headers.CacheControl = "private, no-store";
+            httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            return Results.File(
+                track.Content,
+                track.ContentType,
+                lastModified: track.ModifiedAt,
+                enableRangeProcessing: true);
+        });
+
         return endpoints;
     }
 

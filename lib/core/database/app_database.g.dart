@@ -681,6 +681,17 @@ class $TracksTable extends Tracks with TableInfo<$TracksTable, Track> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _contentFingerprintMeta =
+      const VerificationMeta('contentFingerprint');
+  @override
+  late final GeneratedColumn<String> contentFingerprint =
+      GeneratedColumn<String>(
+        'content_fingerprint',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _isAvailableMeta = const VerificationMeta(
     'isAvailable',
   );
@@ -736,6 +747,7 @@ class $TracksTable extends Tracks with TableInfo<$TracksTable, Track> {
     lyrics,
     fileSize,
     modifiedAt,
+    contentFingerprint,
     isAvailable,
     syncState,
     updatedAt,
@@ -849,6 +861,15 @@ class $TracksTable extends Tracks with TableInfo<$TracksTable, Track> {
         modifiedAt.isAcceptableOrUnknown(data['modified_at']!, _modifiedAtMeta),
       );
     }
+    if (data.containsKey('content_fingerprint')) {
+      context.handle(
+        _contentFingerprintMeta,
+        contentFingerprint.isAcceptableOrUnknown(
+          data['content_fingerprint']!,
+          _contentFingerprintMeta,
+        ),
+      );
+    }
     if (data.containsKey('is_available')) {
       context.handle(
         _isAvailableMeta,
@@ -941,6 +962,10 @@ class $TracksTable extends Tracks with TableInfo<$TracksTable, Track> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}modified_at'],
       ),
+      contentFingerprint: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}content_fingerprint'],
+      ),
       isAvailable: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}is_available'],
@@ -978,6 +1003,7 @@ class Track extends DataClass implements Insertable<Track> {
   final String? lyrics;
   final int? fileSize;
   final DateTime? modifiedAt;
+  final String? contentFingerprint;
   final bool isAvailable;
   final String syncState;
   final DateTime updatedAt;
@@ -997,6 +1023,7 @@ class Track extends DataClass implements Insertable<Track> {
     this.lyrics,
     this.fileSize,
     this.modifiedAt,
+    this.contentFingerprint,
     required this.isAvailable,
     required this.syncState,
     required this.updatedAt,
@@ -1034,6 +1061,9 @@ class Track extends DataClass implements Insertable<Track> {
     }
     if (!nullToAbsent || modifiedAt != null) {
       map['modified_at'] = Variable<DateTime>(modifiedAt);
+    }
+    if (!nullToAbsent || contentFingerprint != null) {
+      map['content_fingerprint'] = Variable<String>(contentFingerprint);
     }
     map['is_available'] = Variable<bool>(isAvailable);
     map['sync_state'] = Variable<String>(syncState);
@@ -1074,6 +1104,9 @@ class Track extends DataClass implements Insertable<Track> {
       modifiedAt: modifiedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(modifiedAt),
+      contentFingerprint: contentFingerprint == null && nullToAbsent
+          ? const Value.absent()
+          : Value(contentFingerprint),
       isAvailable: Value(isAvailable),
       syncState: Value(syncState),
       updatedAt: Value(updatedAt),
@@ -1101,6 +1134,9 @@ class Track extends DataClass implements Insertable<Track> {
       lyrics: serializer.fromJson<String?>(json['lyrics']),
       fileSize: serializer.fromJson<int?>(json['fileSize']),
       modifiedAt: serializer.fromJson<DateTime?>(json['modifiedAt']),
+      contentFingerprint: serializer.fromJson<String?>(
+        json['contentFingerprint'],
+      ),
       isAvailable: serializer.fromJson<bool>(json['isAvailable']),
       syncState: serializer.fromJson<String>(json['syncState']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -1125,6 +1161,7 @@ class Track extends DataClass implements Insertable<Track> {
       'lyrics': serializer.toJson<String?>(lyrics),
       'fileSize': serializer.toJson<int?>(fileSize),
       'modifiedAt': serializer.toJson<DateTime?>(modifiedAt),
+      'contentFingerprint': serializer.toJson<String?>(contentFingerprint),
       'isAvailable': serializer.toJson<bool>(isAvailable),
       'syncState': serializer.toJson<String>(syncState),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -1147,6 +1184,7 @@ class Track extends DataClass implements Insertable<Track> {
     Value<String?> lyrics = const Value.absent(),
     Value<int?> fileSize = const Value.absent(),
     Value<DateTime?> modifiedAt = const Value.absent(),
+    Value<String?> contentFingerprint = const Value.absent(),
     bool? isAvailable,
     String? syncState,
     DateTime? updatedAt,
@@ -1166,6 +1204,9 @@ class Track extends DataClass implements Insertable<Track> {
     lyrics: lyrics.present ? lyrics.value : this.lyrics,
     fileSize: fileSize.present ? fileSize.value : this.fileSize,
     modifiedAt: modifiedAt.present ? modifiedAt.value : this.modifiedAt,
+    contentFingerprint: contentFingerprint.present
+        ? contentFingerprint.value
+        : this.contentFingerprint,
     isAvailable: isAvailable ?? this.isAvailable,
     syncState: syncState ?? this.syncState,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -1193,6 +1234,9 @@ class Track extends DataClass implements Insertable<Track> {
       modifiedAt: data.modifiedAt.present
           ? data.modifiedAt.value
           : this.modifiedAt,
+      contentFingerprint: data.contentFingerprint.present
+          ? data.contentFingerprint.value
+          : this.contentFingerprint,
       isAvailable: data.isAvailable.present
           ? data.isAvailable.value
           : this.isAvailable,
@@ -1219,6 +1263,7 @@ class Track extends DataClass implements Insertable<Track> {
           ..write('lyrics: $lyrics, ')
           ..write('fileSize: $fileSize, ')
           ..write('modifiedAt: $modifiedAt, ')
+          ..write('contentFingerprint: $contentFingerprint, ')
           ..write('isAvailable: $isAvailable, ')
           ..write('syncState: $syncState, ')
           ..write('updatedAt: $updatedAt')
@@ -1243,6 +1288,7 @@ class Track extends DataClass implements Insertable<Track> {
     lyrics,
     fileSize,
     modifiedAt,
+    contentFingerprint,
     isAvailable,
     syncState,
     updatedAt,
@@ -1266,6 +1312,7 @@ class Track extends DataClass implements Insertable<Track> {
           other.lyrics == this.lyrics &&
           other.fileSize == this.fileSize &&
           other.modifiedAt == this.modifiedAt &&
+          other.contentFingerprint == this.contentFingerprint &&
           other.isAvailable == this.isAvailable &&
           other.syncState == this.syncState &&
           other.updatedAt == this.updatedAt);
@@ -1287,6 +1334,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
   final Value<String?> lyrics;
   final Value<int?> fileSize;
   final Value<DateTime?> modifiedAt;
+  final Value<String?> contentFingerprint;
   final Value<bool> isAvailable;
   final Value<String> syncState;
   final Value<DateTime> updatedAt;
@@ -1307,6 +1355,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
     this.lyrics = const Value.absent(),
     this.fileSize = const Value.absent(),
     this.modifiedAt = const Value.absent(),
+    this.contentFingerprint = const Value.absent(),
     this.isAvailable = const Value.absent(),
     this.syncState = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -1328,6 +1377,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
     this.lyrics = const Value.absent(),
     this.fileSize = const Value.absent(),
     this.modifiedAt = const Value.absent(),
+    this.contentFingerprint = const Value.absent(),
     this.isAvailable = const Value.absent(),
     this.syncState = const Value.absent(),
     required DateTime updatedAt,
@@ -1354,6 +1404,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
     Expression<String>? lyrics,
     Expression<int>? fileSize,
     Expression<DateTime>? modifiedAt,
+    Expression<String>? contentFingerprint,
     Expression<bool>? isAvailable,
     Expression<String>? syncState,
     Expression<DateTime>? updatedAt,
@@ -1375,6 +1426,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
       if (lyrics != null) 'lyrics': lyrics,
       if (fileSize != null) 'file_size': fileSize,
       if (modifiedAt != null) 'modified_at': modifiedAt,
+      if (contentFingerprint != null) 'content_fingerprint': contentFingerprint,
       if (isAvailable != null) 'is_available': isAvailable,
       if (syncState != null) 'sync_state': syncState,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -1398,6 +1450,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
     Value<String?>? lyrics,
     Value<int?>? fileSize,
     Value<DateTime?>? modifiedAt,
+    Value<String?>? contentFingerprint,
     Value<bool>? isAvailable,
     Value<String>? syncState,
     Value<DateTime>? updatedAt,
@@ -1419,6 +1472,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
       lyrics: lyrics ?? this.lyrics,
       fileSize: fileSize ?? this.fileSize,
       modifiedAt: modifiedAt ?? this.modifiedAt,
+      contentFingerprint: contentFingerprint ?? this.contentFingerprint,
       isAvailable: isAvailable ?? this.isAvailable,
       syncState: syncState ?? this.syncState,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -1474,6 +1528,9 @@ class TracksCompanion extends UpdateCompanion<Track> {
     if (modifiedAt.present) {
       map['modified_at'] = Variable<DateTime>(modifiedAt.value);
     }
+    if (contentFingerprint.present) {
+      map['content_fingerprint'] = Variable<String>(contentFingerprint.value);
+    }
     if (isAvailable.present) {
       map['is_available'] = Variable<bool>(isAvailable.value);
     }
@@ -1507,6 +1564,7 @@ class TracksCompanion extends UpdateCompanion<Track> {
           ..write('lyrics: $lyrics, ')
           ..write('fileSize: $fileSize, ')
           ..write('modifiedAt: $modifiedAt, ')
+          ..write('contentFingerprint: $contentFingerprint, ')
           ..write('isAvailable: $isAvailable, ')
           ..write('syncState: $syncState, ')
           ..write('updatedAt: $updatedAt, ')
@@ -4728,6 +4786,7 @@ typedef $$TracksTableCreateCompanionBuilder =
       Value<String?> lyrics,
       Value<int?> fileSize,
       Value<DateTime?> modifiedAt,
+      Value<String?> contentFingerprint,
       Value<bool> isAvailable,
       Value<String> syncState,
       required DateTime updatedAt,
@@ -4750,6 +4809,7 @@ typedef $$TracksTableUpdateCompanionBuilder =
       Value<String?> lyrics,
       Value<int?> fileSize,
       Value<DateTime?> modifiedAt,
+      Value<String?> contentFingerprint,
       Value<bool> isAvailable,
       Value<String> syncState,
       Value<DateTime> updatedAt,
@@ -4880,6 +4940,11 @@ class $$TracksTableFilterComposer
 
   ColumnFilters<DateTime> get modifiedAt => $composableBuilder(
     column: $table.modifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get contentFingerprint => $composableBuilder(
+    column: $table.contentFingerprint,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5033,6 +5098,11 @@ class $$TracksTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get contentFingerprint => $composableBuilder(
+    column: $table.contentFingerprint,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get isAvailable => $composableBuilder(
     column: $table.isAvailable,
     builder: (column) => ColumnOrderings(column),
@@ -5106,6 +5176,11 @@ class $$TracksTableAnnotationComposer
 
   GeneratedColumn<DateTime> get modifiedAt => $composableBuilder(
     column: $table.modifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get contentFingerprint => $composableBuilder(
+    column: $table.contentFingerprint,
     builder: (column) => column,
   );
 
@@ -5217,6 +5292,7 @@ class $$TracksTableTableManager
                 Value<String?> lyrics = const Value.absent(),
                 Value<int?> fileSize = const Value.absent(),
                 Value<DateTime?> modifiedAt = const Value.absent(),
+                Value<String?> contentFingerprint = const Value.absent(),
                 Value<bool> isAvailable = const Value.absent(),
                 Value<String> syncState = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -5237,6 +5313,7 @@ class $$TracksTableTableManager
                 lyrics: lyrics,
                 fileSize: fileSize,
                 modifiedAt: modifiedAt,
+                contentFingerprint: contentFingerprint,
                 isAvailable: isAvailable,
                 syncState: syncState,
                 updatedAt: updatedAt,
@@ -5259,6 +5336,7 @@ class $$TracksTableTableManager
                 Value<String?> lyrics = const Value.absent(),
                 Value<int?> fileSize = const Value.absent(),
                 Value<DateTime?> modifiedAt = const Value.absent(),
+                Value<String?> contentFingerprint = const Value.absent(),
                 Value<bool> isAvailable = const Value.absent(),
                 Value<String> syncState = const Value.absent(),
                 required DateTime updatedAt,
@@ -5279,6 +5357,7 @@ class $$TracksTableTableManager
                 lyrics: lyrics,
                 fileSize: fileSize,
                 modifiedAt: modifiedAt,
+                contentFingerprint: contentFingerprint,
                 isAvailable: isAvailable,
                 syncState: syncState,
                 updatedAt: updatedAt,

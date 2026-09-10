@@ -6,17 +6,30 @@ import 'package:http/http.dart' as http;
 import 'backend_gateway.dart';
 
 class HttpBackendGateway implements BackendGateway {
-  HttpBackendGateway({String? baseUrl, http.Client? client})
-    : _baseUrl = (baseUrl ?? defaultBackendBaseUrl).replaceFirst(
-        RegExp(r'/$'),
-        '',
-      ),
-      _client = client ?? http.Client();
+  HttpBackendGateway({
+    String? baseUrl,
+    http.Client? client,
+    BackendBaseUrlReader? readBaseUrl,
+  }) : _fixedBaseUrl = baseUrl == null
+           ? null
+           : normalizeBackendBaseUrl(baseUrl),
+       _client = client ?? http.Client(),
+       _baseUrlReader = readBaseUrl;
 
   static const _timeout = Duration(seconds: 15);
 
-  final String _baseUrl;
+  // 固定地址用于测试与编译期注入；生产路径优先读取 _baseUrlReader，
+  // 保证账号页保存地址后下一次请求立即生效，避免等待 Provider 重建。
+  final String? _fixedBaseUrl;
+  final BackendBaseUrlReader? _baseUrlReader;
   final http.Client _client;
+
+  Future<String> _resolveBaseUrl() async {
+    if (_fixedBaseUrl != null) return _fixedBaseUrl;
+    return normalizeBackendBaseUrl(
+      await _baseUrlReader?.call() ?? defaultBackendBaseUrl,
+    );
+  }
 
   @override
   Future<BackendSession> signIn({
@@ -117,6 +130,10 @@ class HttpBackendGateway implements BackendGateway {
     String? token,
     Map<String, dynamic>? body,
   }) async {
+    final baseUrl = await _resolveBaseUrl();
+    if (baseUrl.isEmpty) {
+      throw const BackendException('尚未配置服务器地址，请在账号页填写后端地址。');
+    }
     final headers = <String, String>{
       'Accept': 'application/json',
       'Content-Type': 'application/json',
@@ -126,7 +143,7 @@ class HttpBackendGateway implements BackendGateway {
     try {
       return await switch (method) {
         'POST' => _client.post(
-          Uri.parse('$_baseUrl$path'),
+          Uri.parse('$baseUrl$path'),
           headers: headers,
           body: encoded,
         ),

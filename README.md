@@ -60,11 +60,16 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 服务器扫描管理页地址为 `http://localhost:5080/admin/scanning`。管理员账号通过后端
 `Administration` 配置或同名环境变量设置，与 Flutter 普通账号相互独立。
 
-再启动 Windows 客户端；桌面默认后端地址就是 `http://localhost:5080`：
+再启动 Windows 客户端。客户端不再内置任何默认服务器地址，可通过以下两种方式指定：
+
+1. 运行时在「账号」页填写服务器地址（例如 `http://localhost:5080`），地址会持久化到本地数据库，改动立即生效；
+2. 编译期注入，适合开发调试或分发固定部署环境：
 
 ```powershell
 flutter run -d windows --dart-define=MUSIC_API_URL=http://localhost:5080
 ```
+
+两种方式同时存在时，账号页保存的地址优先。
 
 Linux 需要 Flutter Linux 桌面工具链、GTK 3 开发包、系统 `mpv` 运行库和 `libnotify` 开发包；Ubuntu/Debian 可安装 `libmpv-dev mpv libnotify-dev`。在 Linux 主机上运行：
 
@@ -73,6 +78,8 @@ flutter run -d linux --dart-define=MUSIC_API_URL=http://localhost:5080
 ```
 
 完整配置、Android/Web 地址差异、令牌策略和已知限制见 [`docs/flutter_backend_integration.md`](docs/flutter_backend_integration.md)。
+
+仓库配置了最小 CI（`.github/workflows/ci.yml`）：Flutter 侧执行格式检查、静态分析、单元测试和 Web 构建冒烟验证；后端侧执行 `dotnet build` 与 Release 测试。推送或提交 PR 时自动运行。
 
 后端回归测试：
 

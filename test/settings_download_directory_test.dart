@@ -6,7 +6,7 @@ import 'package:flutter_music/core/online_music/online_download_platform.dart';
 import 'package:flutter_music/core/online_music/online_search_settings.dart';
 import 'package:flutter_music/core/online_music/online_track.dart';
 import 'package:flutter_music/core/online_music/online_track_downloader.dart';
-import 'package:flutter_music/features/placeholders/settings_page.dart';
+import 'package:flutter_music/features/settings/settings_page.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 

@@ -1,0 +1,57 @@
+groups:
+  - name: simulgroove-online-music
+    interval: 30s
+    rules:
+      - alert: SimulGrooveOnlineMusicSidecarFailureRatioHigh
+        expr: |
+          (
+            sum(rate(flutter_music_online_music_sidecar_failures_total[10m]))
+            /
+            clamp_min(
+              sum(rate(flutter_music_online_music_sidecar_requests_total[10m])),
+              0.001
+            )
+          ) > 0.25
+          and
+          sum(increase(flutter_music_online_music_sidecar_requests_total[10m])) >= 20
+        for: 10m
+        labels:
+          severity: warning
+          component: online-music
+        annotations:
+          summary: Online music sidecar failure ratio is high
+          description: More than 25% of sidecar calls have failed for 10 minutes with at least 20 calls in the evaluation window.
+          runbook_url: docs/online_music_operations.md#sidecar-failure-ratio
+
+      - alert: SimulGrooveOnlineMusicSidecarFailureRatioCritical
+        expr: |
+          (
+            sum(rate(flutter_music_online_music_sidecar_failures_total[5m]))
+            /
+            clamp_min(
+              sum(rate(flutter_music_online_music_sidecar_requests_total[5m])),
+              0.001
+            )
+          ) > 0.50
+          and
+          sum(increase(flutter_music_online_music_sidecar_requests_total[5m])) >= 20
+        for: 5m
+        labels:
+          severity: critical
+          component: online-music
+        annotations:
+          summary: Online music sidecar failure ratio is critical
+          description: More than 50% of sidecar calls have failed for 5 minutes with at least 20 calls in the evaluation window.
+          runbook_url: docs/online_music_operations.md#sidecar-failure-ratio
+
+      - alert: SimulGrooveOnlineMusicCircuitRejectingRequests
+        expr: |
+          sum(increase(flutter_music_online_music_sidecar_circuit_rejections_total[5m])) > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: online-music
+        annotations:
+          summary: Online music circuit breaker is rejecting requests
+          description: The API has rejected sidecar calls while its circuit breaker is open during the last 5 minutes.
+          runbook_url: docs/online_music_operations.md#circuit-breaker-open

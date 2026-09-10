@@ -65,7 +65,8 @@ Content-Type: application/json
           "title": "Demo Song",
           "artist": "Demo Artist",
           "album": "Demo Album",
-          "durationMs": 180000
+          "durationMs": 180000,
+          "matchToken": "hmac-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ]
     }
@@ -77,7 +78,8 @@ Content-Type: application/json
       "artist": "Demo Artist",
       "album": "Demo Album",
       "durationMs": 180000,
-      "updatedAt": "2026-08-22T08:00:00Z"
+      "updatedAt": "2026-08-22T08:00:00Z",
+      "matchToken": "hmac-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
   ],
   "equalizerPresets": [
@@ -128,6 +130,15 @@ Accept: application/json
 GET {{baseUrl}}/api/scan-sources/{{scan_source_id}}/tracks?limit=200
 Authorization: Bearer {{access_token}}
 Accept: application/json
+
+> {%
+client.global.set("server_track_id", response.body[0].id);
+%}
+
+### Stream scanned track range
+GET {{baseUrl}}/api/scan-sources/{{scan_source_id}}/tracks/{{server_track_id}}/stream
+Authorization: Bearer {{access_token}}
+Range: bytes=0-1048575
 
 ### Update scan source
 PUT {{baseUrl}}/api/scan-sources/{{scan_source_id}}

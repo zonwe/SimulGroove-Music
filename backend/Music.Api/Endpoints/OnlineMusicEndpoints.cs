@@ -1,7 +1,6 @@
 using Music.Api.Models;
 using Music.Api.Services;
 using Music.Api.Services.OnlineMusic;
-using Music.Api.Tools;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Music.Api.Endpoints;

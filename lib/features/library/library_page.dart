@@ -268,44 +268,14 @@ class _SongList extends ConsumerWidget {
                 position: PopupMenuPosition.under,
                 offset: const Offset(-160, 4),
                 tooltip: '更多操作',
-                onSelected: (value) async {
-                  switch (value) {
-                    case 'playlist':
-                      await _showPlaylistPicker(context, ref, track);
-                    case 'artist':
-                      await openArtistCollectionPage(
-                        context,
-                        tracks,
-                        track.artist,
-                      );
-                    case 'album':
-                      openCollectionPage(
-                        context,
-                        tracks,
-                        CollectionKind.album,
-                        track.album,
-                      );
-                  }
-                },
-                itemBuilder: (_) => [
-                  PopupMenuItem(
-                    value: 'artist',
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.person_outline),
-                      title: Text('查看歌手：${track.artist}'),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'album',
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.album_outlined),
-                      title: Text('查看专辑：${track.album}'),
-                    ),
-                  ),
-                  PopupMenuItem(value: 'playlist', child: Text('添加到歌单')),
-                ],
+                onSelected: (value) => _handleTrackMenuSelection(
+                  context,
+                  ref,
+                  tracks,
+                  track,
+                  value,
+                ),
+                itemBuilder: (_) => _trackMenuItems(track),
               ),
             ],
           ),
@@ -434,6 +404,68 @@ String _duration(int? milliseconds) {
   return '$minutes:$seconds';
 }
 
+/// 歌曲操作菜单条目，供列表按钮与右键菜单复用，保证两处行为一致。
+List<PopupMenuEntry<String>> _trackMenuItems(Track track) => [
+  const PopupMenuItem(
+    value: 'playlist',
+    child: ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(Icons.playlist_add),
+      title: Text('添加到歌单'),
+    ),
+  ),
+  PopupMenuItem(
+    value: 'artist',
+    child: ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.person_outline),
+      title: Text('查看歌手：${track.artist}'),
+    ),
+  ),
+  PopupMenuItem(
+    value: 'album',
+    child: ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.album_outlined),
+      title: Text('查看专辑：${track.album}'),
+    ),
+  ),
+  if (_canOpenTrackDirectory(track))
+    const PopupMenuItem(
+      value: 'directory',
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(Icons.folder_open_outlined),
+        title: Text('打开所在目录'),
+      ),
+    ),
+];
+
+bool _canOpenTrackDirectory(Track track) =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux) &&
+    track.filePath != null;
+
+Future<void> _handleTrackMenuSelection(
+  BuildContext context,
+  WidgetRef ref,
+  List<Track> tracks,
+  Track track,
+  String value,
+) async {
+  switch (value) {
+    case 'playlist':
+      await _showPlaylistPicker(context, ref, track);
+    case 'artist':
+      await openArtistCollectionPage(context, tracks, track.artist);
+    case 'album':
+      openCollectionPage(context, tracks, CollectionKind.album, track.album);
+    case 'directory':
+      await openTrackDirectory(track.filePath);
+  }
+}
+
 Future<void> _showTrackContextMenu(
   BuildContext context,
   WidgetRef ref,
@@ -449,56 +481,10 @@ Future<void> _showTrackContextMenu(
       position.dx,
       position.dy,
     ),
-    items: [
-      const PopupMenuItem(
-        value: 'playlist',
-        child: ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: Icon(Icons.playlist_add),
-          title: Text('添加到歌单'),
-        ),
-      ),
-      PopupMenuItem(
-        value: 'artist',
-        child: ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.person_outline),
-          title: Text('查看歌手：${track.artist}'),
-        ),
-      ),
-      PopupMenuItem(
-        value: 'album',
-        child: ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.album_outlined),
-          title: Text('查看专辑：${track.album}'),
-        ),
-      ),
-      if (!kIsWeb &&
-          (defaultTargetPlatform == TargetPlatform.windows ||
-              defaultTargetPlatform == TargetPlatform.linux) &&
-          track.filePath != null)
-        const PopupMenuItem(
-          value: 'directory',
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.folder_open_outlined),
-            title: Text('打开所在目录'),
-          ),
-        ),
-    ],
+    items: _trackMenuItems(track),
   );
   if (!context.mounted || value == null) return;
-  switch (value) {
-    case 'playlist':
-      await _showPlaylistPicker(context, ref, track);
-    case 'artist':
-      await openArtistCollectionPage(context, tracks, track.artist);
-    case 'album':
-      openCollectionPage(context, tracks, CollectionKind.album, track.album);
-    case 'directory':
-      await openTrackDirectory(track.filePath);
-  }
+  await _handleTrackMenuSelection(context, ref, tracks, track, value);
 }
 
 Future<void> _showPlaylistPicker(
@@ -542,9 +528,12 @@ Future<void> _showPlaylistPickerForTracks(
     ),
   );
   if (selected == null) return;
-  for (final track in tracks) {
-    await ref.read(databaseProvider).addTrackToPlaylist(selected.id, track.id);
-  }
+  await ref
+      .read(databaseProvider)
+      .addExistingTracksToPlaylist(
+        selected.id,
+        tracks.map((track) => track.id),
+      );
   if (context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('已将 ${tracks.length} 首歌曲添加到“${selected.name}”')),

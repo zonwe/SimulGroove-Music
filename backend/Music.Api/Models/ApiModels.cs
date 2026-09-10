@@ -30,7 +30,27 @@ public sealed record TrackRequest(
     string? Artist,
     string? Album,
     int? DurationMs,
-    DateTimeOffset? UpdatedAt = null);
+    DateTimeOffset? UpdatedAt = null,
+    string? MatchToken = null);
+
+public static class TrackMatchTokens
+{
+    public const string Prefix = "hmac-sha256:";
+    public const int Length = 76;
+
+    public static bool IsValidOrEmpty(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return true;
+        if (value.Length != Length ||
+            !value.StartsWith(Prefix, StringComparison.Ordinal)) return false;
+        foreach (var character in value.AsSpan(Prefix.Length))
+        {
+            if (character is not (>= '0' and <= '9') and
+                not (>= 'a' and <= 'f')) return false;
+        }
+        return true;
+    }
+}
 
 public sealed record SyncDeletionRequest(
     string? EntityType,
@@ -67,7 +87,8 @@ public sealed record TrackResponse(
     string Artist,
     string Album,
     int? DurationMs,
-    DateTimeOffset? UpdatedAt = null);
+    DateTimeOffset? UpdatedAt = null,
+    string? MatchToken = null);
 
 public sealed record SyncDeletionResponse(
     string EntityType,

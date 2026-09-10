@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../database/app_database.dart';
 import 'auth_token_store.dart';
 import 'backend_gateway.dart';
+import 'track_match_token.dart';
 
 class SyncResult {
   const SyncResult({
@@ -56,10 +57,16 @@ class BackendAuthRepository implements AuthRepository {
     if (normalized.isEmpty || password.isEmpty) {
       throw const FormatException('请输入账号和密码。');
     }
-    final session = await _gateway.signIn(
+    var session = await _gateway.signIn(
       username: normalized,
       password: password,
     );
+    final matchSalt = session.trackMatchSalt;
+    if (matchSalt != null && matchSalt.isNotEmpty) {
+      session = session.withTrackMatchKey(
+        await deriveTrackMatchKey(password: password, salt: matchSalt),
+      );
+    }
     await _saveSession(session);
     await _database.setSetting(_legacySessionKey, '');
   }
@@ -88,6 +95,11 @@ class BackendAuthRepository implements AuthRepository {
         if (tokens != null || account != null) await _clearSession();
         return null;
       }
+      final accountRemoteId = account.remoteId ?? account.id;
+      if (tokens.accountRemoteId != accountRemoteId) {
+        await _clearSession();
+        return null;
+      }
       _session = BackendSession(
         token: tokens.token,
         refreshToken: tokens.refreshToken,
@@ -98,6 +110,7 @@ class BackendAuthRepository implements AuthRepository {
           displayName: account.displayName,
           avatarUri: account.avatarUri,
         ),
+        trackMatchKey: tokens.trackMatchKey,
       );
       if (!_session!.shouldRefresh) return _session;
     }
@@ -107,30 +120,57 @@ class BackendAuthRepository implements AuthRepository {
 
   @override
   Future<SyncResult> syncNow() async {
+    final session = await currentSession();
+    if (session == null) throw StateError('请先登录账号。');
     final account = await _database.watchCurrentAccount().first;
     if (account == null) throw StateError('请先登录账号。');
+    if ((account.remoteId ?? account.id) != session.account.remoteId) {
+      await _clearSession();
+      throw StateError('账号会话不一致，请重新登录。');
+    }
+    final expectedAccountRemoteId = session.account.remoteId;
+    final localTrackMatcher = _LocalTrackMatcher(
+      await _database.tracksForSync(account.id),
+      trackMatchKey: session.trackMatchKey,
+    );
 
-    final localPlaylists = await _database.watchPlaylists().first;
+    final localPlaylists = await _database.playlistsForSync(account.id);
     final playlists = <BackendPlaylist>[];
     for (final playlist in localPlaylists) {
-      final tracks = await _database.watchPlaylistTracks(playlist.id).first;
+      final tracks = (await _database.watchPlaylistTracks(playlist.id).first)
+          .where(
+            (track) => track.accountId == null || track.accountId == account.id,
+          )
+          .toList(growable: false);
       playlists.add(
         BackendPlaylist(
           remoteId: playlist.remoteId ?? 'playlist-${playlist.id}',
           name: playlist.name,
           updatedAt: playlist.updatedAt,
-          tracks: tracks.map(BackendTrack.fromLocal).toList(growable: false),
+          tracks: tracks
+              .map(
+                (track) => BackendTrack.fromLocal(
+                  track,
+                  trackMatchKey: session.trackMatchKey,
+                ),
+              )
+              .toList(growable: false),
         ),
       );
     }
-    final localLikes = await _database.allLikedTracksForSync();
+    final localLikes = await _database.allLikedTracksForSync(
+      accountId: account.id,
+    );
     final likedTracks = localLikes
         .map(
-          (item) =>
-              BackendTrack.fromLocal(item.track, updatedAt: item.updatedAt),
+          (item) => BackendTrack.fromLocal(
+            item.track,
+            updatedAt: item.updatedAt,
+            trackMatchKey: session.trackMatchKey,
+          ),
         )
         .toList(growable: false);
-    final localPresets = await _database.allEqualizerPresets();
+    final localPresets = await _database.equalizerPresetsForSync(account.id);
     final presets = localPresets
         .map(BackendEqualizerPreset.fromLocal)
         .toList(growable: false);
@@ -138,33 +178,32 @@ class BackendAuthRepository implements AuthRepository {
       account.id,
     );
     final deletions = localTombstones
-        .map(
-          (row) => BackendDeletion(
-            entityType: SyncEntityType.fromWireName(row.entityType),
-            remoteKey: row.remoteKey,
-            deletedAt: row.deletedAt,
-          ),
-        )
+        .map((row) => _backendDeletion(row, localTrackMatcher))
         .toList(growable: false);
 
+    await _ensureSyncAccountCurrent(expectedAccountRemoteId);
     final remote = await _syncWithRefresh(
+      session,
+      expectedAccountRemoteId,
       playlists,
       likedTracks,
       presets,
       deletions,
     );
-    final localTrackMatcher = _LocalTrackMatcher(await _database.allTracks());
+    await _ensureSyncAccountCurrent(expectedAccountRemoteId);
     String deletionKey(String entityType, String remoteKey) =>
         '$entityType\u0000$remoteKey';
 
-    final currentPlaylists = await _database.watchPlaylists().first;
+    final currentPlaylists = await _database.playlistsForSync(account.id);
     final playlistByRemoteId = {
       for (final playlist in currentPlaylists)
         (playlist.remoteId ?? 'playlist-${playlist.id}'): playlist,
     };
-    final currentLikes = await _database.allLikedTracksForSync();
+    final currentLikes = await _database.allLikedTracksForSync(
+      accountId: account.id,
+    );
     final likeByUri = {for (final item in currentLikes) item.track.uri: item};
-    final currentPresets = await _database.allEqualizerPresets();
+    final currentPresets = await _database.equalizerPresetsForSync(account.id);
     final presetByRemoteId = {
       for (final preset in currentPresets)
         (preset.remoteId ?? 'preset-${preset.id}'): preset,
@@ -179,10 +218,15 @@ class BackendAuthRepository implements AuthRepository {
             playlistByRemoteId.remove(deletion.remoteKey);
           }
         case SyncEntityType.likedTrack:
-          final local = likeByUri[deletion.remoteKey];
+          final matchedTrack = isTrackMatchToken(deletion.remoteKey)
+              ? localTrackMatcher.findKnownByMatchToken(deletion.remoteKey)
+              : localTrackMatcher.findKnownByUri(deletion.remoteKey);
+          final local = matchedTrack == null
+              ? null
+              : likeByUri[matchedTrack.uri];
           if (local != null && !local.updatedAt.isAfter(deletion.deletedAt)) {
             await _database.setTrackLikedFromSync(local.track.id, false);
-            likeByUri.remove(deletion.remoteKey);
+            likeByUri.remove(local.track.uri);
           }
         case SyncEntityType.equalizerPreset:
           final local = presetByRemoteId[deletion.remoteKey];
@@ -236,7 +280,7 @@ class BackendAuthRepository implements AuthRepository {
             local?.id ??
             _uuid.v5(
               Namespace.url.value,
-              'playlist:${remotePlaylist.remoteId}',
+              'playlist:${account.id}:${remotePlaylist.remoteId}',
             ),
         remoteId: remotePlaylist.remoteId,
         accountId: account.id,
@@ -252,10 +296,10 @@ class BackendAuthRepository implements AuthRepository {
 
     var downloadedLikes = 0;
     for (final track in remote.likedTracks) {
-      final localTrack = await _database.findTrackByUri(track.uri);
+      final localTrack = localTrackMatcher.find(track);
       if (localTrack == null) continue;
       final updatedAt = track.updatedAt ?? DateTime.now();
-      final local = likeByUri[track.uri];
+      final local = likeByUri[localTrack.uri];
       if (local != null && local.updatedAt.isAfter(updatedAt)) continue;
       await _database.setTrackLikedFromSync(
         localTrack.id,
@@ -277,7 +321,7 @@ class BackendAuthRepository implements AuthRepository {
               local?.id ??
               _uuid.v5(
                 Namespace.url.value,
-                'equalizer:${remotePreset.remoteId}',
+                'equalizer:${account.id}:${remotePreset.remoteId}',
               ),
           remoteId: Value(remotePreset.remoteId),
           accountId: Value(account.id),
@@ -303,16 +347,12 @@ class BackendAuthRepository implements AuthRepository {
       account.id,
     );
     for (final row in latestLocalTombstones) {
-      final key = deletionKey(row.entityType, row.remoteKey);
+      final pending = _backendDeletion(row, localTrackMatcher);
+      final key = deletionKey(pending.entityType.wireName, pending.remoteKey);
       final uploaded = uploadedDeletionByKey[key];
       if (uploaded != null && !row.deletedAt.isAfter(uploaded.deletedAt)) {
         continue;
       }
-      final pending = BackendDeletion(
-        entityType: SyncEntityType.fromWireName(row.entityType),
-        remoteKey: row.remoteKey,
-        deletedAt: row.deletedAt,
-      );
       final existing = mergedDeletions[key];
       if (existing == null || pending.deletedAt.isAfter(existing.deletedAt)) {
         mergedDeletions[key] = pending;
@@ -340,13 +380,13 @@ class BackendAuthRepository implements AuthRepository {
   }
 
   Future<BackendLibrary> _syncWithRefresh(
+    BackendSession session,
+    String expectedAccountRemoteId,
     List<BackendPlaylist> playlists,
     List<BackendTrack> likedTracks,
     List<BackendEqualizerPreset> equalizerPresets,
     List<BackendDeletion> deletions,
   ) async {
-    var session = await currentSession();
-    if (session == null) throw StateError('请先登录账号。');
     try {
       return await _gateway.syncLibrary(
         session,
@@ -357,15 +397,33 @@ class BackendAuthRepository implements AuthRepository {
       );
     } on BackendException catch (error) {
       if (!error.isUnauthorized) rethrow;
-      session = await currentSession(forceRefresh: true);
-      if (session == null) throw StateError('登录已过期，请重新登录。');
+      if (_session?.account.remoteId != expectedAccountRemoteId) {
+        throw StateError('账号已切换，本次同步已取消。');
+      }
+      final refreshedSession = await currentSession(forceRefresh: true);
+      if (refreshedSession == null) {
+        throw StateError('登录已过期，请重新登录。');
+      }
+      if (refreshedSession.account.remoteId != expectedAccountRemoteId) {
+        throw StateError('账号已切换，本次同步已取消。');
+      }
       return _gateway.syncLibrary(
-        session,
+        refreshedSession,
         playlists,
         likedTracks,
         equalizerPresets,
         deletions,
       );
+    }
+  }
+
+  Future<void> _ensureSyncAccountCurrent(String expectedRemoteId) async {
+    final activeSession = _session;
+    final activeAccount = await _database.watchCurrentAccount().first;
+    if (activeSession?.account.remoteId != expectedRemoteId ||
+        activeAccount == null ||
+        (activeAccount.remoteId ?? activeAccount.id) != expectedRemoteId) {
+      throw StateError('账号已切换，本次同步已取消。');
     }
   }
 
@@ -383,8 +441,18 @@ class BackendAuthRepository implements AuthRepository {
     if (refreshToken == null || refreshToken.isEmpty) return null;
     try {
       final refreshed = await _gateway.refreshSession(refreshToken);
-      await _saveSession(refreshed);
-      return refreshed;
+      final expectedAccountId =
+          _session?.account.remoteId ?? stored?.accountRemoteId;
+      if (expectedAccountId != null &&
+          refreshed.account.remoteId != expectedAccountId) {
+        await _clearSession();
+        return null;
+      }
+      final effective = refreshed.withTrackMatchKey(
+        _session?.trackMatchKey ?? stored?.trackMatchKey,
+      );
+      await _saveSession(effective);
+      return effective;
     } on BackendException catch (error) {
       if (!error.isUnauthorized) rethrow;
       await _clearSession();
@@ -393,28 +461,46 @@ class BackendAuthRepository implements AuthRepository {
   }
 
   Future<void> _saveSession(BackendSession session) async {
-    _session = session;
     final now = DateTime.now();
     final account = session.account;
-    await _database.saveAccount(
-      AccountsCompanion.insert(
-        id: _uuid.v5(Namespace.url.value, 'account:${account.remoteId}'),
-        remoteId: Value(account.remoteId),
-        username: account.username,
-        displayName: account.displayName,
-        avatarUri: Value(account.avatarUri),
-        createdAt: now,
-        updatedAt: now,
-        isMock: const Value(false),
-      ),
-    );
-    await _tokenStore.write(
-      StoredAuthTokens(
-        token: session.token,
-        refreshToken: session.refreshToken,
-        expiresAt: session.expiresAt,
-      ),
-    );
+    try {
+      await _database.replaceCurrentAccount(
+        AccountsCompanion.insert(
+          id: _uuid.v5(Namespace.url.value, 'account:${account.remoteId}'),
+          remoteId: Value(account.remoteId),
+          username: account.username,
+          displayName: account.displayName,
+          avatarUri: Value(account.avatarUri),
+          createdAt: now,
+          updatedAt: now,
+          isMock: const Value(false),
+        ),
+      );
+      await _tokenStore.write(
+        StoredAuthTokens(
+          token: session.token,
+          refreshToken: session.refreshToken,
+          expiresAt: session.expiresAt,
+          accountRemoteId: account.remoteId,
+          trackMatchKey: session.trackMatchKey,
+        ),
+      );
+      _session = session;
+    } catch (_) {
+      _session = null;
+      try {
+        await _tokenStore.clear();
+      } catch (_) {
+        // Keep the original persistence error; restoration also checks the
+        // account binding before accepting any remaining token material.
+      }
+      try {
+        await _database.clearAccounts();
+      } catch (_) {
+        // Keep the original persistence error.
+      }
+      rethrow;
+    }
   }
 
   Future<void> _clearSession() async {
@@ -448,6 +534,26 @@ class BackendAuthRepository implements AuthRepository {
   }
 }
 
+BackendDeletion _backendDeletion(
+  SyncTombstoneData row,
+  _LocalTrackMatcher matcher,
+) {
+  final entityType = SyncEntityType.fromWireName(row.entityType);
+  var remoteKey = row.remoteKey;
+  if (entityType == SyncEntityType.likedTrack &&
+      !isTrackMatchToken(remoteKey)) {
+    final track = matcher.findKnownByUri(remoteKey);
+    remoteKey = track == null
+        ? remoteKey
+        : matcher.matchTokenFor(track) ?? remoteKey;
+  }
+  return BackendDeletion(
+    entityType: entityType,
+    remoteKey: remoteKey,
+    deletedAt: row.deletedAt,
+  );
+}
+
 String _onlineTrackId(Uri uri) =>
     'online:${uri.pathSegments[0]}:${uri.pathSegments[1]}';
 
@@ -465,11 +571,19 @@ const _indexedLocalSourceTypes = {
 };
 
 class _LocalTrackMatcher {
-  _LocalTrackMatcher(Iterable<Track> tracks) {
+  _LocalTrackMatcher(Iterable<Track> tracks, {required this.trackMatchKey}) {
     for (final track in tracks) {
+      _knownByUri[track.uri] = track;
+      final matchToken = matchTokenFor(track);
+      if (matchToken != null) {
+        _knownTracksByMatchToken.putIfAbsent(matchToken, () => []).add(track);
+      }
       if (!track.isAvailable) continue;
       _availableByUri[track.uri] = track;
       _availableById[track.id] = track;
+      if (matchToken != null) {
+        _tracksByMatchToken.putIfAbsent(matchToken, () => []).add(track);
+      }
       if (!_indexedLocalSourceTypes.contains(track.sourceType)) continue;
       final title = _normalizeSyncValue(track.title);
       if (title.isNotEmpty) {
@@ -484,8 +598,29 @@ class _LocalTrackMatcher {
 
   final Map<String, Track> _availableByUri = {};
   final Map<String, Track> _availableById = {};
+  final Map<String, Track> _knownByUri = {};
   final Map<String, List<Track>> _tracksByTitle = {};
   final Map<String, List<Track>> _tracksByFileName = {};
+  final Map<String, List<Track>> _tracksByMatchToken = {};
+  final Map<String, List<Track>> _knownTracksByMatchToken = {};
+  final String? trackMatchKey;
+
+  Track? findKnownByUri(String uri) => _knownByUri[uri];
+
+  Track? findKnownByMatchToken(String token) {
+    final matches = _knownTracksByMatchToken[token];
+    return matches?.length == 1 ? matches!.single : null;
+  }
+
+  Track? findByMatchToken(String token) {
+    final matches = _tracksByMatchToken[token];
+    return matches?.length == 1 ? matches!.single : null;
+  }
+
+  String? matchTokenFor(Track track) => createTrackMatchToken(
+    contentFingerprint: track.contentFingerprint,
+    trackMatchKey: trackMatchKey,
+  );
 
   Track? find(BackendTrack remote) {
     final exact = _availableByUri[remote.uri];
@@ -495,6 +630,11 @@ class _LocalTrackMatcher {
     if (_isOnlineTrackUri(uri)) {
       return _availableById[_onlineTrackId(uri!)];
     }
+
+    final tokenMatch = remote.matchToken == null
+        ? null
+        : findByMatchToken(remote.matchToken!);
+    if (tokenMatch != null) return tokenMatch;
 
     final candidates = <String, Track>{};
     void addCandidates(List<Track>? values) {

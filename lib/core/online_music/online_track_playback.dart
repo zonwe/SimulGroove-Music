@@ -47,6 +47,7 @@ class DefaultOnlineTrackPlayback implements OnlineTrackPlayback {
     try {
       return await _repository.loadLyrics(track);
     } catch (_) {
+      // 歌词是可选增强：加载失败时按"暂无歌词"降级，不阻塞播放。
       return null;
     }
   }
@@ -55,6 +56,7 @@ class DefaultOnlineTrackPlayback implements OnlineTrackPlayback {
     try {
       return await _repository.loadArtwork(track);
     } catch (_) {
+      // 封面是可选增强：加载失败时由 UI 显示占位图，不阻塞播放。
       return null;
     }
   }

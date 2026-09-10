@@ -1,0 +1,181 @@
+name: 生产环境验收
+
+on:
+  workflow_dispatch:
+    inputs:
+      acceptance_action:
+        description: 验收阶段
+        required: true
+        default: Configuration
+        type: choice
+        options:
+          - Configuration
+          - Runtime
+          - Fire
+          - Resolve
+          - Finalize
+      alert_scenario:
+        description: Fire/Resolve 使用的告警场景
+        required: false
+        default: FailureWarning
+        type: choice
+        options:
+          - FailureWarning
+          - FailureCritical
+          - CircuitBreaker
+      alert_test_id:
+        description: Fire/Resolve 共用的不含秘密的测试编号
+        required: false
+        type: string
+      notification_receipt_reference:
+        description: Resolve 使用的不含秘密或个人信息的通知/工单编号
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-acceptance
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: 执行生产验收
+    if: github.ref_name == github.event.repository.default_branch
+    environment: production
+    runs-on: [self-hosted, simulgroove-production]
+    timeout-minutes: 30
+    env:
+      PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+      PRODUCTION_ENV_FILE: ${{ vars.PRODUCTION_ENV_FILE }}
+      PRODUCTION_ACCEPTANCE_EVIDENCE_DIR: ${{ vars.PRODUCTION_ACCEPTANCE_EVIDENCE_DIR }}
+      PRODUCTION_APPROVED_SOURCE_IDS: ${{ vars.PRODUCTION_APPROVED_SOURCE_IDS }}
+      PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE: ${{ vars.PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE }}
+      PRODUCTION_RUNBOOK_URL: ${{ vars.PRODUCTION_RUNBOOK_URL }}
+      ACCEPTANCE_ACTION: ${{ inputs.acceptance_action }}
+      ALERT_SCENARIO: ${{ inputs.alert_scenario }}
+      ALERT_TEST_ID: ${{ inputs.alert_test_id }}
+      NOTIFICATION_RECEIPT_REFERENCE: ${{ inputs.notification_receipt_reference }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 执行受保护的生产验收
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          . ./tool/acceptance_git_state.ps1
+
+          function Assert-ConfiguredValue {
+            param([string]$Value, [string]$Name)
+            if ([string]::IsNullOrWhiteSpace($Value)) {
+              throw "production Environment 未配置 $Name。"
+            }
+          }
+
+          Assert-ConfiguredValue $env:PRODUCTION_BASE_URL "PRODUCTION_BASE_URL"
+          Assert-ConfiguredValue $env:PRODUCTION_ENV_FILE "PRODUCTION_ENV_FILE"
+          Assert-ConfiguredValue $env:PRODUCTION_ACCEPTANCE_EVIDENCE_DIR "PRODUCTION_ACCEPTANCE_EVIDENCE_DIR"
+
+          $environmentFile = Resolve-AcceptanceExternalPath `
+            -RepositoryRoot $env:GITHUB_WORKSPACE `
+            -Path $env:PRODUCTION_ENV_FILE `
+            -Name "PRODUCTION_ENV_FILE" `
+            -PathType Leaf `
+            -MustExist
+          $evidenceDirectory = Resolve-AcceptanceExternalPath `
+            -RepositoryRoot $env:GITHUB_WORKSPACE `
+            -Path $env:PRODUCTION_ACCEPTANCE_EVIDENCE_DIR `
+            -Name "PRODUCTION_ACCEPTANCE_EVIDENCE_DIR"
+          $null = New-Item -ItemType Directory -Path $evidenceDirectory -Force
+          $evidenceFilesBefore = @{}
+          Get-ChildItem -LiteralPath $evidenceDirectory -Filter "production-*.json" -File |
+            ForEach-Object { $evidenceFilesBefore[$_.FullName] = $true }
+          $approvedSources = @(
+            $env:PRODUCTION_APPROVED_SOURCE_IDS -split "," |
+              ForEach-Object { $_.Trim().ToLowerInvariant() } |
+              Where-Object { $_ }
+          )
+
+          $arguments = @{
+            BaseUrl = $env:PRODUCTION_BASE_URL
+            EnvironmentFile = $environmentFile
+            EvidenceDirectory = $evidenceDirectory
+            BuildRevision = $env:GITHUB_SHA
+            AlertAction = "None"
+          }
+
+          if ($approvedSources.Count -gt 0) {
+            Assert-ConfiguredValue $env:PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE "PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE"
+            $arguments.ApprovedSourceId = $approvedSources
+            $arguments.SourceApprovalEvidencePath = Resolve-AcceptanceExternalPath `
+              -RepositoryRoot $env:GITHUB_WORKSPACE `
+              -Path $env:PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE `
+              -Name "PRODUCTION_SOURCE_APPROVAL_EVIDENCE_FILE" `
+              -PathType Leaf `
+              -MustExist
+          }
+
+          switch ($env:ACCEPTANCE_ACTION) {
+            "Configuration" {
+              $arguments.ConfigurationOnly = $true
+              $expectedStatus = "configuration_valid"
+            }
+            "Runtime" {
+              $expectedStatus = "runtime_valid_alert_delivery_not_exercised"
+            }
+            "Fire" {
+              Assert-ConfiguredValue $env:PRODUCTION_RUNBOOK_URL "PRODUCTION_RUNBOOK_URL"
+              Assert-ConfiguredValue $env:ALERT_TEST_ID "alert_test_id"
+              $arguments.AlertAction = "Fire"
+              $arguments.AlertScenario = $env:ALERT_SCENARIO
+              $arguments.AlertTestId = $env:ALERT_TEST_ID
+              $arguments.RunbookUrl = $env:PRODUCTION_RUNBOOK_URL
+              $expectedStatus = "alert_fired_awaiting_notification_confirmation"
+            }
+            "Resolve" {
+              Assert-ConfiguredValue $env:PRODUCTION_RUNBOOK_URL "PRODUCTION_RUNBOOK_URL"
+              Assert-ConfiguredValue $env:ALERT_TEST_ID "alert_test_id"
+              Assert-ConfiguredValue $env:NOTIFICATION_RECEIPT_REFERENCE "notification_receipt_reference"
+              $arguments.AlertAction = "Resolve"
+              $arguments.AlertScenario = $env:ALERT_SCENARIO
+              $arguments.AlertTestId = $env:ALERT_TEST_ID
+              $arguments.RunbookUrl = $env:PRODUCTION_RUNBOOK_URL
+              $arguments.NotificationReceiptReference = $env:NOTIFICATION_RECEIPT_REFERENCE
+              $expectedStatus = "scenario_complete"
+            }
+            "Finalize" {
+              $arguments.AlertAction = "Finalize"
+              $expectedStatus = "complete"
+            }
+            default {
+              throw "未知验收阶段：$($env:ACCEPTANCE_ACTION)"
+            }
+          }
+
+          ./tool/production_acceptance.ps1 @arguments
+
+          $newEvidenceFiles = @(
+            Get-ChildItem -LiteralPath $evidenceDirectory -Filter "production-*.json" -File |
+              Where-Object { -not $evidenceFilesBefore.ContainsKey($_.FullName) }
+          )
+          if ($newEvidenceFiles.Count -ne 1) {
+            throw "生产验收必须恰好生成一个新证据文件；实际为 $($newEvidenceFiles.Count) 个。"
+          }
+          $evidenceFile = $newEvidenceFiles[0]
+          $evidence = Get-Content -LiteralPath $evidenceFile.FullName -Raw | ConvertFrom-Json
+          if ($evidence.status -ne $expectedStatus) {
+            throw "生产验收状态不正确，预期 $expectedStatus，实际 $($evidence.status)。"
+          }
+          $expectedBaseUrl = ([uri]$env:PRODUCTION_BASE_URL).AbsoluteUri.TrimEnd("/")
+          if ($evidence.schema_version -ne 2 -or
+              $evidence.build_revision -ne $env:GITHUB_SHA.ToLowerInvariant() -or
+              $evidence.base_url -ne $expectedBaseUrl) {
+            throw "生产验收证据未绑定当前 schema、提交和 Base URL。"
+          }
+
+          "### 生产验收" >> $env:GITHUB_STEP_SUMMARY
+          "- 阶段：$($env:ACCEPTANCE_ACTION)" >> $env:GITHUB_STEP_SUMMARY
+          "- 状态：$($evidence.status)" >> $env:GITHUB_STEP_SUMMARY
+          "- 检查时间：$($evidence.checked_at_utc)" >> $env:GITHUB_STEP_SUMMARY
+          "- 完整证据保留在受保护执行器的外部证据目录，未上传到 GitHub。" >> $env:GITHUB_STEP_SUMMARY

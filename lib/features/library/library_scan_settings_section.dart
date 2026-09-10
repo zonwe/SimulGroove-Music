@@ -321,6 +321,7 @@ class _LibraryScanSettingsSectionState
     lyrics: Value(track.lyrics),
     fileSize: Value(track.fileSize),
     modifiedAt: Value(track.modifiedAt),
+    contentFingerprint: Value(track.contentFingerprint),
     updatedAt: DateTime.now(),
   );
 }

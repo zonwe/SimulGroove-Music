@@ -226,9 +226,24 @@ public sealed class SqliteScanSourceStore : IScanSourceStore
             var result = new List<ScannedTrackResponse>();
             while (reader.Read())
             {
-                result.Add(new ScannedTrackResponse(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetInt64(7), Parse(reader.GetString(8))));
+                result.Add(ReadTrack(reader));
             }
             return result;
+        }
+    }
+
+    public ScannedTrackResponse? GetTrack(string username, string sourceId, string trackId)
+    {
+        lock (_gate)
+        {
+            using var connection = OpenConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT t.id, t.scan_source_id, t.file_path, t.title, t.artist, t.album, t.extension, t.file_size, t.modified_at FROM library_tracks t JOIN scan_sources s ON s.id = t.scan_source_id WHERE t.username = $username AND t.scan_source_id = $sourceId AND t.id = $trackId AND s.username = $username";
+            command.Parameters.AddWithValue("$username", username);
+            command.Parameters.AddWithValue("$sourceId", sourceId);
+            command.Parameters.AddWithValue("$trackId", trackId);
+            using var reader = command.ExecuteReader();
+            return reader.Read() ? ReadTrack(reader) : null;
         }
     }
 
@@ -319,6 +334,17 @@ public sealed class SqliteScanSourceStore : IScanSourceStore
         }
         return result;
     }
+
+    private static ScannedTrackResponse ReadTrack(SqliteDataReader reader) => new(
+        reader.GetString(0),
+        reader.GetString(1),
+        reader.GetString(2),
+        reader.GetString(3),
+        reader.GetString(4),
+        reader.GetString(5),
+        reader.GetString(6),
+        reader.GetInt64(7),
+        Parse(reader.GetString(8)));
 
     private static StoredSource? GetById(SqliteConnection connection, SqliteTransaction? transaction, string id)
     {
