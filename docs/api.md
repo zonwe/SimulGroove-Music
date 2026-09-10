@@ -42,7 +42,7 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `Scanning:AllowedRoots` | `[]` | 允许扫描的根目录；空数组表示后端可访问的任意目录 |
 | `Audit:RetentionDays` | `90` | 审计日志保留天数，范围 7-3650 |
 | `OnlineMusic:Enabled` | `false` | 是否启用在线音乐搜索；默认关闭 |
-| `OnlineMusic:SidecarBaseUrl` | `http://127.0.0.1:8080` | 仅供 Music.Api 访问的 go-music-dl sidecar 地址 |
+| `OnlineMusic:SidecarBaseUrl` | `http://127.0.0.1:8081` | 仅供 Music.Api 访问的 go-music-dl sidecar 地址 |
 | `OnlineMusic:AllowedSources` | `[]` | 允许搜索的规范来源 ID 白名单 |
 | `OnlineMusic:RequestTimeoutSeconds` | `12` | sidecar 搜索请求超时秒数 |
 | `OnlineMusic:HealthCheckTimeoutSeconds` | `3` | 就绪检查访问 sidecar 的超时秒数，运行时限制为 1–10 |
@@ -117,6 +117,7 @@ Authorization: Bearer <JWT access token>
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "refreshToken": "secure-random-refresh-token",
   "expiresAt": "2026-07-24T10:35:12.8206313+00:00",
+  "trackMatchSalt": "public-per-account-base64url-salt",
   "account": {
     "remoteId": "account-user@example.com",
     "username": "user@example.com",
@@ -125,6 +126,8 @@ Authorization: Bearer <JWT access token>
   }
 }
 ```
+
+`trackMatchSalt` 是公开的账号级随机盐值，不是凭据。Flutter 仅在交互式登录时用密码与该盐值通过 PBKDF2-HMAC-SHA256 派生 32 字节本地密钥，并把密钥保存在系统安全存储中。同步时客户端对本地 `sha256:` 内容指纹计算 HMAC，只发送 `hmac-sha256:` 盲匹配令牌；密码、派生密钥和原始内容指纹均不会发送或写入后端数据库。
 
 参数为空返回 `400`；密码不正确返回 `401`：
 
@@ -187,7 +190,7 @@ JWT 签名错误、受众不匹配或已过期时返回 `401`。
 
 `POST /api/playlists/sync`
 
-需要 Bearer Access Token。歌单和均衡器预设以 `remoteId` 为键，喜欢歌曲以 `uri` 为键；同一实体按 `updatedAt` 采用较新版本，相同时间戳视为同一版本并保留服务端已有内容。删除通过 `deletions` 墓碑传播，删除时间不早于实体更新时间时生效。较新的实体可以恢复较旧的墓碑，避免旧设备同步后覆盖新修改或把已删除内容意外复活。未提交且没有墓碑的服务端数据保留。
+需要 Bearer Access Token。歌单和均衡器预设以 `remoteId` 为键；新客户端为有内容指纹的本地歌曲附带账号内稳定的 `matchToken`，喜欢歌曲优先以该令牌合并，旧客户端或无指纹歌曲仍以 `uri` 为键。同一实体按 `updatedAt` 采用较新版本，相同时间戳视为同一版本并保留服务端已有内容。删除通过 `deletions` 墓碑传播，删除时间不早于实体更新时间时生效。较新的实体可以恢复较旧的墓碑，避免旧设备同步后覆盖新修改或把已删除内容意外复活。未提交且没有墓碑的服务端数据保留。
 
 `entityType` 只接受 `playlist`、`likedTrack` 和 `equalizerPreset`。墓碑按账号长期保留，并随同步响应返回给其他客户端。
 
@@ -206,7 +209,8 @@ JWT 签名错误、受众不匹配或已过期时返回 `401`。
           "title": "Song",
           "artist": "Artist",
           "album": "Album",
-          "durationMs": 215000
+          "durationMs": 215000,
+          "matchToken": "hmac-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ]
     }
@@ -218,7 +222,8 @@ JWT 签名错误、受众不匹配或已过期时返回 `401`。
       "artist": "Artist",
       "album": "Album",
       "durationMs": 215000,
-      "updatedAt": "2026-07-24T08:05:00Z"
+      "updatedAt": "2026-07-24T08:05:00Z",
+      "matchToken": "hmac-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
   ],
   "equalizerPresets": [
@@ -240,7 +245,7 @@ JWT 签名错误、受众不匹配或已过期时返回 `401`。
 }
 ```
 
-成功响应 `200` 包含该账号合并后的 `playlists`、`likedTracks`、`equalizerPresets` 和 `deletions`。客户端先复用 URI 完全相同的本地歌曲；不同设备的文件路径不一致时，会在本机已扫描的音乐目录索引中按文件名、标题、歌手、专辑和时长寻找唯一匹配，并把歌单条目关联到本地可播放文件。无法唯一匹配的跨设备本地路径不会保存为“不可用”歌曲，在线歌曲仍沿用受控在线音乐链路。该接口不会上传或下载音频文件。歌单缺少 `remoteId` 或 `name`、预设缺少 `remoteId` 或 `name`、墓碑字段无效或类型不受支持时返回 `400`；未认证返回 `401`。
+成功响应 `200` 包含该账号合并后的 `playlists`、`likedTracks`、`equalizerPresets` 和 `deletions`。客户端依次尝试 URI 精确匹配、稳定在线曲目 ID、唯一 `matchToken`，最后才按文件名、标题、歌手、专辑和时长寻找唯一候选，并把歌单或喜欢记录关联到本地可播放文件。相同内容在本机存在多份副本时不会任意选择；无法唯一匹配的跨设备本地路径不会保存为“不可用”歌曲，在线歌曲仍沿用受控在线音乐链路。该接口不会上传或下载音频文件，也不接收原始内容指纹。歌单缺少 `remoteId` 或 `name`、预设缺少 `remoteId` 或 `name`、`matchToken` 格式无效、墓碑字段无效或类型不受支持时返回 `400`；未认证返回 `401`。
 
 ## 6. 定时路径扫描
 
@@ -298,6 +303,14 @@ JWT 签名错误、受众不匹配或已过期时返回 `401`。
 `GET /api/scan-sources/{id}/tracks?limit=200`
 
 `limit` 默认 `200`，最大 `1000`。每次成功扫描会新增或更新仍存在的音乐，并移除该扫描路径下本次未发现的旧记录。
+
+### 6.6 播放已扫描音乐
+
+`GET /api/scan-sources/{id}/tracks/{trackId}/stream`
+
+请求必须携带 Bearer Token，可携带 `Range: bytes=...`。接口只允许当前账号读取指定扫描源中仍存在的已索引曲目，并返回 `200` 或 `206`；文件、扫描源或曲目不存在时统一返回 `404 server_track_not_found`，无效或越界 Range 返回 `416`。服务端会重新校验文件仍位于扫描根目录内，并拒绝通过后续符号链接或目录联接跳出扫描根目录。响应使用实际音频 MIME，带有 `Last-Modified`、`Accept-Ranges`、`Content-Range` 等标准文件响应头，不暴露其他账号的索引。
+
+管理页 `/admin/scanning` 的“试听”按钮使用相同的文件校验逻辑，通过管理员 HttpOnly Cookie 鉴权。Flutter 客户端当前没有服务器扫描浏览入口，因此该 Bearer API 主要供后续客户端接入或受控 API 调用。
 
 后台 `ScheduledMusicScanWorker` 每隔 `Scanning:PollSeconds` 检查已启用且到期的扫描源。部署时建议配置 `Scanning:AllowedRoots`，例如：
 
@@ -361,7 +374,7 @@ JWT 签名错误、受众不匹配或已过期时返回 `401`。
 部署环境必须显式审核 `OnlineMusic:Enabled`、私有 sidecar 地址和来源白名单。仓库内 `go-music-dl` clone 的集成提交 `11bfd8b` 基于上游提交 `c5a30343f12fafbad83245eee2119768a77be575` 实现了 JSON 集成契约；本地启动命令：
 
 ```powershell
-go -C go-music-dl run ./cmd/music-dl integration --host 127.0.0.1 --port 8080
+go -C go-music-dl run ./cmd/music-dl integration --host 127.0.0.1 --port 8081
 ```
 
 Development 配置默认启用 `netease`、`kugou`、`kuwo`。生产部署需要显式启用并设置经过验证的来源白名单：
@@ -370,7 +383,7 @@ Development 配置默认启用 `netease`、`kugou`、`kuwo`。生产部署需要
 {
   "OnlineMusic": {
     "Enabled": true,
-    "SidecarBaseUrl": "http://127.0.0.1:8080",
+    "SidecarBaseUrl": "http://127.0.0.1:8081",
     "AllowedSources": ["实际来源 ID"]
   }
 }

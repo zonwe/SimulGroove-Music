@@ -1,6 +1,8 @@
 # SimulGroove Music
 
-面向 Android、Windows、Linux 和 Web 的私人本地音乐播放器。当前版本实现 Groove Music 风格的本地音乐体验，并已接入仓库内的 ASP.NET Core 后端，用于账号、歌单/喜欢同步、服务器目录扫描和受控在线音乐聚合。
+面向 Android、Windows、Linux 和 Web 的私人本地音乐播放器。当前版本实现 Groove Music 风格的本地音乐体验，并已接入仓库内的 ASP.NET Core 后端，用于账号、歌单/喜欢/均衡器预设同步、服务器目录扫描和受控在线音乐聚合。
+
+截至 2026-09-07，本次核对已确认 `flutter analyze`、120 项 Flutter 测试、60 项后端测试和最新 Android Debug/ARM64 Release 构建通过；K80 Ultra 模拟器已通过 APK 安装启动、通知/媒体权限拒绝与允许、MediaStore 扫描落库、扫描完成通知和本机后端登录同步冒烟。隔离分支的线上 CI 已通过 Flutter 格式/分析/测试、Web 构建、后端测试、Android Debug 构建、生产部署配置校验、非 root API 镜像构建与容器就绪冒烟、API→OTLP Collector 的真实指标和敏感字段检查，以及告警阈值、持续时间和恢复测试。Windows Debug 构建最近一次通过记录为 2026-09-03，Linux 构建与实机回归按当前安排暂缓，Android 深度实机回归仍需连接真实设备确认。
 
 ## 当前功能
 
@@ -9,22 +11,24 @@
 - Linux：通过系统目录选择器添加并递归扫描音乐目录，使用 media_kit 播放本地与在线音频，支持 MPRIS 系统媒体控制、桌面快捷键、宽屏播放队列和紧凑悬浮窗。
 - 常见格式：MP3、FLAC、M4A、AAC、WAV、OGG、OPUS、WMA（最终能否解码也取决于系统/平台解码器）。
 - 音乐库：歌曲、专辑、艺术家视图，本地搜索，封面及标签读取。
-- 播放：队列、上一首/下一首、进度、暂停/继续、底栏迷你播放器。
+- 播放：队列、上一首/下一首、进度、暂停/继续、循环/随机、音量与静音、底栏迷你播放器；桌面端可切换正在播放页布局。
 - 歌词：读取内嵌歌词或同名 `.lrc`，Android 播放页可切换封面与同步歌词。
 - 歌单：新建、删除、添加歌曲并按歌单播放。
+- 音效：10 段均衡器、前级增益、内置/自定义预设；Windows、Linux 和 Android 使用各自平台效果链应用配置。
+- 扫描体验：可保存多个搜索位置、重新扫描全部，并按设置发送扫描开始、完成或失败的系统通知。
 - 导航：歌单为默认首页，其他一级页面的返回操作统一回到歌单。
 - 外观：默认跟随系统浅色/深色模式，也可手动指定，并提供 8 种可持久化主题色。
-- 账号：连接 `backend/Music.Api`，支持 JWT、Refresh Token 轮换、安全令牌存储、退出和歌单/喜欢同步。
-- 服务器扫描：由 `backend/Music.Api` 托管的 Web 控制台配置后端机器上的音乐绝对路径、定时扫描并查看索引结果；Flutter 客户端不提供该入口，也不会上传客户端音乐。
+- 账号：连接 `backend/Music.Api`，支持 JWT、Refresh Token 轮换、安全令牌存储、退出，以及歌单、喜欢歌曲、均衡器预设和删除墓碑的双向同步；本地曲目通过账号内 HMAC 盲匹配令牌跨设备关联，不向后端上传原始内容指纹。
+- 服务器扫描：由 `backend/Music.Api` 托管的 Web 控制台配置后端机器上的音乐绝对路径、定时扫描并查看索引结果；已索引曲目可在管理页试听，也可通过账号隔离、支持 Range 的 API 播放；Flutter 客户端不提供该管理入口，也不会上传客户端音乐。
 - 在线音乐：通过已登录的 `Music.Api` 聚合受控来源，点击搜索按钮后请求，搜索结果以紧凑两行展示并可整行点击播放，封面可在设置中关闭；右键或长按结果会打开歌曲菜单，可查看歌手/专辑集合与封面、选择歌曲或下载单曲。搜索、歌手和专辑页面都可批量加入新建或已有歌单；Windows/Linux/Android 可在设置页指定系统授权目录、选择下载文件命名规则并批量下载，支持的音频格式优先内嵌封面与歌词，无法内嵌时保存同名封面或 `.lrc`，下载完成后立即进入本地音乐库；Web 暂不开放需要认证请求头的播放和下载。
-- 在线音乐运维：区分 `/health` 存活检查与 `/health/ready` 依赖就绪检查；支持安全的 `X-Correlation-ID`、低基数 .NET `Meter` 指标和连续瞬时失败熔断。生产指标导出与告警规则仍需按部署环境接入。
+- 在线音乐运维：区分 `/health` 存活检查与 `/health/ready` 依赖就绪检查；支持安全的 `X-Correlation-ID`、低基数 .NET `Meter` 指标、可选 OTLP 导出和连续瞬时失败熔断；来源复核门禁见 [在线音乐来源授权与发布复核](docs/online_music_release_review.md)。
 - 占位入口：听歌识曲（已声明麦克风权限但未实现）。
 - Web：提供响应式界面、真实后端登录与在线搜索；按当前需求不提供本地目录扫描和本地播放。
 
 本地在线搜索联调需先在另一个终端启动项目内的 sidecar clone：
 
 ```powershell
-go -C go-music-dl run ./cmd/music-dl integration --host 127.0.0.1 --port 8080
+go -C go-music-dl run ./cmd/music-dl integration --host 127.0.0.1 --port 8081
 dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:5080
 ```
 
@@ -79,7 +83,7 @@ flutter run -d linux --dart-define=MUSIC_API_URL=http://localhost:5080
 
 完整配置、Android/Web 地址差异、令牌策略和已知限制见 [`docs/flutter_backend_integration.md`](docs/flutter_backend_integration.md)。
 
-仓库配置了最小 CI（`.github/workflows/ci.yml`）：Flutter 侧执行格式检查、静态分析、单元测试和 Web 构建冒烟验证；后端侧执行 `dotnet build` 与 Release 测试。推送或提交 PR 时自动运行。
+仓库 CI（`.github/workflows/ci.yml`）包含 Flutter 格式检查、静态分析、单元测试、Web 冒烟构建、后端 Release 测试和 Android Debug 构建；支持推送、PR 和手动触发，不会上传构建产物。Linux Release 任务暂缓且默认跳过，仅在手动运行工作流时勾选 `run_linux` 才会执行。
 
 后端回归测试：
 
@@ -104,20 +108,25 @@ flutter build apk --release --split-per-abi
 adb install -r build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 ```
 
-当前 ARM64 Release 约 20.5 MB。Debug 包约 170 MB，并会把约 99 MB JIT 资产解压到应用数据目录；升级到本项目的 Release 后会在保留数据库的前提下自动清理这些旧调试资产。扫描所得封面会压缩到最多 256–320 像素，避免音乐库数据库随原始大封面快速膨胀。
+2026-09-07 构建的 ARM64 Release 测试包为 24,125,567 字节，SHA-256 为 `819F3648D06686CE2087A10D070DC85844D72783F3E2C2BB8E46344F86B304EE`；清单确认只包含 `arm64-v8a`，当前仍使用 Android Debug 证书签名，仅用于开发设备回归，不作为应用商店正式发布包。Debug 包约 170 MB，并会把约 99 MB JIT 资产解压到应用数据目录；升级到本项目的 Release 后会在保留数据库的前提下自动清理这些旧调试资产。扫描所得封面会压缩到最多 256–320 像素，避免音乐库数据库随原始大封面快速膨胀。完整的 K80 Ultra 安装、型号校验、人工检查项和本地证据流程见 [Android 真机验收](docs/android_device_acceptance.md)。
 
 Drift 表结构变化后重新生成代码：
 
 ```powershell
-dart run build_runner build
+dart run build_runner build --delete-conflicting-outputs
 ```
 
 当前 Android 模拟器配置为 1280×2772、480 dpi、x86_64、8 核、12 GB RAM；CPU/RAM 修改在模拟器下次冷启动后生效。ARM64 发布/兼容性由 Redmi K80 Ultra 实机验证。
 
-## 暂未实现
+## 当前边界与待完成事项
 
-- 服务端音乐文件流式播放（当前服务器扫描只建立索引）
-- 多端歌单冲突合并和删除传播（当前同步采用客户端提交覆盖同 ID 歌单）
+项目的本地音乐、播放、资料库管理、账号同步和受控在线音乐主链路已经较完整，但以下产品与生产化边界尚未闭环：
+
+- 在线音乐已具备显式启用的 OTLP 导出，以及只发布 Caddy 80/443 的生产 Compose、私有 Collector/Prometheus/Alertmanager 链路、告警规则、处置手册和逐来源发布门禁；CI 已实际验证请求/失败/熔断计数器导出且不包含搜索词、账号或令牌，并通过告警阈值、持续时间与恢复测试。生产验收脚本会检查真实域名证书、外置通知配置、三种真实告警路由、Fire/Resolve 证据链和结构化来源审批，但真实域名、通知接收方、实际送达回执与来源批准仍需由目标部署环境提供
+- CI 已补 Android Debug、生产部署配置校验、非 root API 镜像构建/就绪冒烟、OTLP 端到端指标检查与手动启用的 Linux Release 构建任务，最新线上运行已于 2026-09-07 全部通过；Linux 构建与回归按当前安排暂缓。K80 Ultra 真机验收脚本会拒绝模拟器、验证 ARM64 APK 与 v2 签名、安装启动并保存去标识化证据，深度回归仍待连接真实设备执行
+
+## 以下待完成事项暂不需要实现
+
 - 听歌识曲实现
-- 在线音乐服务的生产指标导出与告警
-- Web 本地文件扫描与播放
+- Web 本地文件扫描、本地播放、在线播放与在线下载
+- iOS 与 macOS 产品级支持（当前仅保留 Flutter 平台脚手架）

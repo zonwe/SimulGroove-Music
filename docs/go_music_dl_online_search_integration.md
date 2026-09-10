@@ -1,7 +1,7 @@
 # go-music-dl 在线搜索接入方案
 
-> 状态：阶段 1 搜索、阶段 2 在线播放与阶段 3 歌词/封面缓存已实现；Windows/Android 使用全局播放器，Web 受认证请求头能力限制暂不开放播放
-> 最后更新：2026-08-08  
+> 状态：搜索、在线播放、歌词/封面缓存、运维加固和下载入库已实现；Windows/Linux/Android 使用全局播放器，Web 受认证请求头能力限制暂不开放播放与下载
+> 最后更新：2026-09-06
 > 适用范围：Flutter 客户端、`backend/Music.Api`、独立运行的 `go-music-dl` sidecar
 
 ## 1. 结论
@@ -52,9 +52,9 @@ SimulGroove Music 的在线搜索页已通过 `OnlineMusicGateway`/`AuthReposito
 - 单个音乐源失败时可返回其他来源的结果，并明确显示“部分结果不可用”。
 - 播放时仍使用全局唯一的 `MusicAudioHandler`，支持暂停、继续、切歌和拖动进度。
 - Flutter 只接触 `Music.Api` 生成的短期播放地址，不接触第三方 Cookie 或原始 URL。
-- Windows、Android 和 Web 使用同一套公开 API 契约。
+- Windows、Linux、Android 和 Web 使用同一套公开 API 契约；Web 只启用其可安全承载的搜索与账号能力。
 
-### 3.2 第一阶段非目标
+### 3.2 第一阶段非目标（历史边界）
 
 - 不实现音乐文件永久下载或离线缓存。
 - 不把第三方音乐平台 Cookie 管理放进 Flutter。
@@ -62,6 +62,8 @@ SimulGroove Music 的在线搜索页已通过 `OnlineMusicGateway`/`AuthReposito
 - 不把在线搜索结果立即写入本地 `Tracks` 表；若未来需要收藏或入歌单，应先设计稳定的在线曲目引用模型。
 - 不承诺所有来源、所有地区或所有曲目都可播放。
 - 不将该能力直接作为公开、多租户的音乐分发服务上线。
+
+这些限制描述的是“只接搜索”的阶段 1。后续阶段已经加入受控下载和在线歌曲歌单占位记录，但 Cookie、第三方 URL、不可靠来源和公网分发等安全边界仍保持不变。
 
 ## 4. 架构与职责边界
 
@@ -353,7 +355,7 @@ UI 不直接展示 Go、Gin、第三方平台或网络库的原始异常。服�
 {
   "OnlineMusic": {
     "Enabled": false,
-    "SidecarBaseUrl": "http://127.0.0.1:8080",
+    "SidecarBaseUrl": "http://127.0.0.1:8081",
     "RequestTimeoutSeconds": 12,
     "SearchCacheSeconds": 60,
     "PlaybackTicketSeconds": 300,
@@ -380,7 +382,7 @@ UI 不直接展示 Go、Gin、第三方平台或网络库的原始异常。服�
 
 ```text
 Flutter -> http://localhost:5080
-Music.Api -> http://127.0.0.1:8080
+Music.Api -> http://127.0.0.1:8081
 go-music-dl -> 第三方音乐平台
 ```
 
@@ -429,6 +431,8 @@ Invoke-WebRequest http://localhost:5080/health/ready
 上游仓库采用 [GNU AGPL-3.0](https://github.com/guohuiyuan/go-music-dl/blob/main/LICENSE)。独立 HTTP sidecar 可以降低代码耦合，但不会自动免除对已修改 sidecar 的许可证义务。特别是维护 fork 并通过网络向用户提供其功能时，应在公开部署前完成许可证审查，并准备按适用条款提供对应源代码。
 
 第三方平台的可搜索或可播放结果也不等于获得了再分发授权。正式发布前还需要核对目标平台服务条款、地区限制、版权和隐私要求。本文是工程设计，不构成法律意见。
+
+具体发布门禁、当前来源结论和逐来源复核模板见 [在线音乐来源授权与发布复核](online_music_release_review.md)。截至 2026-09-06，仓库内没有可核验的来源授权批复，因此开发环境中的来源列表不能直接复制到生产白名单。
 
 ## 13. 建议代码落点
 
@@ -493,7 +497,7 @@ lib/features/online_search/
 
 ### 阶段 2：在线播放
 
-当前状态：sidecar 私有曲目注册表与 `streamRef`、Music.Api 账号绑定播放票据、Range 转发、Flutter 票据刷新和全局 `MusicAudioHandler` 播放路径已落地。票据默认五分钟有效；已建立的响应可继续传输，过期后的新 Range 请求需要重新解析。Web 因无法可靠为音频元素附加 Bearer Token 暂不开放播放按钮。
+当前状态：sidecar 私有曲目注册表与 `streamRef`、Music.Api 账号绑定播放票据、Range 转发、Flutter 票据刷新和全局 `MusicAudioHandler` 播放路径已落地。Windows、Linux 和 Android 复用同一播放编排；票据默认五分钟有效，已建立的响应可继续传输，过期后的新 Range 请求需要重新解析。Web 因无法可靠为音频元素附加 Bearer Token 暂不开放播放按钮。
 
 2026-08-08 的真实端到端验证使用 `netease` 搜索结果完成解析：公开票据响应未包含 sidecar `streamRef`、第三方 URL 或签名参数；`Range: bytes=0-1023` 返回 `206`、`Content-Range: bytes 0-1023/10484550`、`audio/mpeg` 和精确 1024 字节；另一个已登录账号复用同一票据返回 `404`。
 
@@ -502,11 +506,11 @@ lib/features/online_search/
 - 验证暂停、切歌、拖动、队列和后台媒体控制。
 - 验证票据过期、曲目失效和 sidecar 重启后的恢复行为。
 
-交付物：Windows、Android、Web 至少完成与产品边界一致的播放验证。
+交付物：Windows、Linux、Android 完成与产品边界一致的播放实现，Web 保留搜索能力并明确禁用需要认证请求头的播放。
 
 ### 阶段 3：歌词、封面和缓存
 
-当前状态：sidecar 仅根据短期私有曲目注册表读取歌词和封面，公开 DTO 不包含上游 URL；Music.Api 为两个端点统一执行 Bearer 认证、来源白名单校验、单资源大小限制和独立的 32 MiB 内存缓存。歌词默认缓存 15 分钟，封面默认缓存 6 小时；空资源返回稳定 404，超限或损坏资源不会进入缓存。Flutter 搜索结果按需加载封面，Windows/Android 播放前并行获取歌词与封面并写入同一个 `MusicAudioHandler` 的 `MediaItem`，资源失败时仍允许音频降级播放。
+当前状态：sidecar 仅根据短期私有曲目注册表读取歌词和封面，公开 DTO 不包含上游 URL；Music.Api 为两个端点统一执行 Bearer 认证、来源白名单校验、单资源大小限制和独立的 32 MiB 内存缓存。歌词默认缓存 15 分钟，封面默认缓存 6 小时；空资源返回稳定 404，超限或损坏资源不会进入缓存。Flutter 搜索结果按需加载封面，Windows/Linux/Android 播放前并行获取歌词与封面并写入同一个 `MusicAudioHandler` 的 `MediaItem`，资源失败时仍允许音频降级播放。
 
 - 接入歌词和封面代理。
 - 增加受控缓存、大小限制和失效策略。
@@ -514,12 +518,16 @@ lib/features/online_search/
 
 ### 阶段 4：加固与运维
 
-当前状态：Music.Api 已区分进程存活检查 `/health` 与依赖就绪检查 `/health/ready`；在线音乐启用时，就绪检查会以独立的 1–10 秒超时探测 sidecar。经过字符集和长度校验的 `X-Correlation-ID` 会贯穿响应、账号审计记录与 sidecar 请求，非法值由服务端替换，且不携带敏感业务数据。sidecar 业务调用已经发布低基数请求数、失败数、耗时与熔断拒绝指标，并在连续瞬时失败后打开进程内熔断；恢复窗口只允许单个探测请求，就绪检查则绕过熔断以准确发现依赖恢复。
+当前状态：Music.Api 已区分进程存活检查 `/health` 与依赖就绪检查 `/health/ready`；在线音乐启用时，就绪检查会以独立的 1–10 秒超时探测 sidecar。经过字符集和长度校验的 `X-Correlation-ID` 会贯穿响应、账号审计记录与 sidecar 请求，非法值由服务端替换，且不携带敏感业务数据。sidecar 业务调用已经发布低基数请求数、失败数、耗时与熔断拒绝指标，并在连续瞬时失败后打开进程内熔断；恢复窗口只允许单个探测请求，就绪检查则绕过熔断以准确发现依赖恢复。Music.Api 已可在显式配置 OTLP 地址时导出这些指标；生产 Collector、Prometheus 告警和 HTTPS 入口仍需在得到网络边界授权后落盘与验证。
 
 - 健康检查、指标、关联 ID、熔断和告警。
 - 容器/服务管理配置与版本升级流程。
 - 管理员可见的能力状态，但不把第三方 Cookie 暴露到 Flutter。
 - 压测搜索并发和 Range 流并发。
+
+### 阶段 5：下载与本地入库
+
+当前状态：Windows、Linux 和 Android 支持单曲与批量下载，下载目录通过系统选择器授权，文件命名规则可持久化。客户端优先请求服务端把歌词与封面写入支持的音频元数据，无法内嵌时保存同名封面或 `.lrc`，完成后立即把本地副本写入 Drift 音乐库。Web 继续禁用下载。
 
 ## 15. 测试矩阵
 
@@ -538,6 +546,7 @@ lib/features/online_search/
 - 局部失败返回 200 + `partial`，全部失败返回 503/504。
 - 超时、限流、缓存命中和熔断。
 - 播放端点正确转发 `Range` 并返回 206。
+- 下载端点只返回受控音频字节，并准确标记封面和歌词的内嵌结果。
 - 只透传允许的响应头，不记录敏感字段。
 
 ### 15.3 Flutter 测试
@@ -546,6 +555,7 @@ lib/features/online_search/
 - 快速连续输入时旧结果不能覆盖新结果。
 - 401 仍沿用现有单次刷新重试。
 - 在线曲目通过全局 `MusicAudioHandler` 播放。
+- 单曲/批量下载、命名规则、旁路封面/LRC 与下载后本地入库。
 - Windows 宽屏、Android 窄屏和 Web 刷新后的页面状态。
 - sidecar 不可用、票据过期、播放中断时有可理解提示。
 
@@ -557,6 +567,7 @@ lib/features/online_search/
 - 至少两个允许来源可返回统一搜索结果；单个来源失败不会丢弃其他成功结果。
 - 播放支持 HTTP 206 和拖动定位，不会由 Music.Api 整首缓冲到内存。
 - 退出登录、票据过期、曲目失效和上游超时均有明确行为。
+- 下载失败不会留下被误认为完成的本地曲目，批量任务能报告成功与失败数量。
 - 搜索、播放和错误日志中没有 JWT、Cookie、签名 URL 或完整敏感响应。
 - 固定的 sidecar 版本通过契约测试，升级步骤可重复。
 - API 变化已经同步到 OpenAPI、`docs/api.md` 和 Flutter Gateway 模型。

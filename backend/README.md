@@ -1,6 +1,6 @@
 # SimulGroove Music 后端
 
-`backend/Music.Api` 是 SimulGroove Music 的实验性同步后端，基于 ASP.NET Core 10 Minimal API 和 SQLite。它提供账号会话、歌单/喜欢同步、服务器目录扫描、在线音乐搜索 BFF 和审计日志，并已接入 Flutter 主界面。客户端运行配置见 [`../docs/flutter_backend_integration.md`](../docs/flutter_backend_integration.md)。
+`backend/Music.Api` 是 SimulGroove Music 的实验性同步后端，基于 ASP.NET Core 10 Minimal API 和 SQLite。它提供账号会话、歌单/喜欢/均衡器预设与删除墓碑同步、服务器目录扫描、在线音乐 BFF 和审计日志，并已接入 Flutter 主界面。客户端运行配置见 [`../docs/flutter_backend_integration.md`](../docs/flutter_backend_integration.md)。
 
 ## 快速开始
 
@@ -23,7 +23,7 @@ Invoke-RestMethod http://localhost:5080/openapi.json
 在线搜索联调还需要在仓库根目录的 `go-music-dl` clone 中启动仅监听本机的集成服务：
 
 ```powershell
-go -C go-music-dl run ./cmd/music-dl integration --host 127.0.0.1 --port 8080
+go -C go-music-dl run ./cmd/music-dl integration --host 127.0.0.1 --port 8081
 ```
 
 Development 配置默认启用 `netease`、`kugou`、`kuwo` 三个已验证来源；生产 `appsettings.json` 仍默认关闭在线音乐功能。
@@ -52,7 +52,24 @@ docker compose --env-file .env -f compose.online-music.yml up --detach --build
 Invoke-WebRequest http://localhost:5080/health/ready
 ```
 
-API 数据库、Data Protection 密钥和 sidecar 数据分别保存在命名卷中。不要提交 `.env`、数据库、Cookie 或卷导出文件。生产环境还应在 API 前配置 HTTPS 反向代理；Compose 文件不负责申请证书。
+API 数据库、Data Protection 密钥和 sidecar 数据分别保存在命名卷中。不要提交 `.env`、数据库、Cookie 或卷导出文件。
+
+生产部署使用独立的 [`compose.online-music.production.yml`](../compose.online-music.production.yml)。它只向宿主机发布 Caddy 的 `80/443`，由 Caddy 自动申请和续期 HTTPS 证书；API、sidecar、OTLP Collector、Prometheus 与 Alertmanager 均不发布宿主机端口。指标从 API 经私有 OTLP gRPC 发送给 Collector，再由 Prometheus 抓取并加载仓库中的在线音乐告警规则。
+
+部署前必须完成以下准备：
+
+1. 将 `MUSIC_DOMAIN` 的 DNS A/AAAA 记录指向部署主机，并允许公网访问 TCP 80/443 与 UDP 443。
+2. 在 `.env` 中替换 JWT、管理员密码、域名和 ACME 邮箱；`ONLINE_MUSIC_ENABLED` 保持 `false`，来源变量保持为空，直到逐来源发布复核通过。
+3. 把 [`../deploy/observability/alertmanager.example.yml`](../deploy/observability/alertmanager.example.yml) 复制到仓库外的受控路径，配置真实通知接收方，并用 `ALERTMANAGER_CONFIG_PATH` 指向它；禁止提交 webhook、邮箱密码或值班地址。
+4. 在目标主机验证配置并启动，再从公网和监控网络分别完成 HTTPS、指标样本、告警触发/恢复及通知到达测试。
+
+```powershell
+docker compose --env-file .env -f compose.online-music.production.yml config
+docker compose --env-file .env -f compose.online-music.production.yml up --detach --build
+Invoke-WebRequest "https://$env:MUSIC_DOMAIN/health/ready"
+```
+
+生产模板固定 Caddy、OpenTelemetry Collector、Prometheus 和 Alertmanager 的镜像版本，升级时应单独审查发行说明并重新完成告警演练。模板中的 Alertmanager 示例地址不可用于生产，且来源授权门禁仍以 [`../docs/online_music_release_review.md`](../docs/online_music_release_review.md) 为准。
 
 升级前记录主仓库与 sidecar commit，备份 `music-api-data` 卷，并先运行 Go 契约测试与后端测试。随后重新构建并检查就绪状态：
 
@@ -92,8 +109,10 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `Scanning:PollSeconds` | `30` | 后台扫描任务轮询间隔，代码会限制在 5–3600 秒 |
 | `Scanning:AllowedRoots` | `[]` | 允许用户配置的服务器目录根；生产环境应显式设置 |
 | `Audit:RetentionDays` | `90` | 审计日志保留时间，范围为 7–3650 天 |
+| `Observability:ServiceName` | `music-api` | OTLP 资源中的服务名 |
+| `Observability:OtlpEndpoint` | 空 | 留空时不启动 OpenTelemetry；设置为绝对 HTTP(S) 地址时导出 API 与在线音乐指标 |
 | `OnlineMusic:Enabled` | `false` | 是否启用在线音乐搜索 |
-| `OnlineMusic:SidecarBaseUrl` | `http://127.0.0.1:8080` | 私有 go-music-dl sidecar 地址 |
+| `OnlineMusic:SidecarBaseUrl` | `http://127.0.0.1:8081` | 私有 go-music-dl sidecar 地址 |
 | `OnlineMusic:HealthCheckTimeoutSeconds` | `3` | 就绪检查访问 sidecar 的超时秒数，运行时限制为 1–10 |
 | `OnlineMusic:CircuitBreakerFailureThreshold` | `5` | 连续瞬时失败达到该次数后打开熔断，运行时限制为 2–20 |
 | `OnlineMusic:CircuitBreakerBreakSeconds` | `30` | 熔断持续秒数，运行时限制为 5–300；恢复窗口仅允许一个探测请求 |
@@ -112,23 +131,27 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 
 客户端可以传入最多 64 个字符的 `X-Correlation-ID`（仅允许 ASCII 字母、数字、点、下划线和连字符）。服务端会拒绝不安全的值并生成替代 ID，在响应、账号审计记录和发往 sidecar 的请求中复用该 ID。
 
-在线音乐 sidecar 调用通过 .NET `Meter` `FlutterMusic.OnlineMusic` 提供请求数、失败数、耗时和熔断拒绝数。标签只包含规范操作名与失败类型，不包含搜索词、来源、曲目 ID、Token 或 URL。生产部署可用 OpenTelemetry 或兼容的 `MeterListener` 订阅以下指标：
+在线音乐 sidecar 调用通过 .NET `Meter` `FlutterMusic.OnlineMusic` 提供请求数、失败数、耗时和熔断拒绝数。标签只包含规范操作名与失败类型，不包含搜索词、来源、曲目 ID、Token 或 URL。设置 `Observability:OtlpEndpoint` 后，服务使用稳定版 OpenTelemetry OTLP 导出器发送这些指标；留空不会建立外发连接：
 
 - `flutter_music.online_music.sidecar.requests`
 - `flutter_music.online_music.sidecar.failures`
 - `flutter_music.online_music.sidecar.duration`
 - `flutter_music.online_music.sidecar.circuit_rejections`
 
+Prometheus 兼容告警规则位于 [`../deploy/observability/online_music_alerts.yml`](../deploy/observability/online_music_alerts.yml)，阈值、演练和处置步骤见 [`../docs/online_music_operations.md`](../docs/online_music_operations.md)。生产 Compose 已接好 Collector、Prometheus 和 Alertmanager 的私有链路；部署方仍必须提供仓库外的真实通知配置，并确认实际指标名称、告警触发/恢复和敏感标签检查。
+
 - `POST /api/auth/login`：首次使用账号时创建账号并登录。
 - `POST /api/auth/refresh`：轮换 Access Token 和 Refresh Token；客户端必须替换旧 Refresh Token。
 - `GET /api/auth/me`、`POST /api/auth/logout`：读取当前账号、撤销当前账号的 Refresh Token。
-- `POST /api/playlists/sync`：按 `remoteId` 合并歌单和喜欢的歌曲。
+- `POST /api/playlists/sync`：按更新时间合并歌单、喜欢歌曲和均衡器预设，并通过删除墓碑在设备间传播删除；本地曲目可使用账号内 HMAC 盲匹配令牌跨设备关联，后端不接收原始内容指纹或派生密钥。
 - `GET/POST /api/scan-sources/`、`PUT/DELETE /api/scan-sources/{id}`：管理服务器扫描源。
 - `POST /api/scan-sources/{id}/scan`、`GET /api/scan-sources/{id}/tracks`：立即扫描和读取索引结果。
+- `GET /api/scan-sources/{id}/tracks/{trackId}/stream`：按账号播放已索引的服务器曲目，支持 Range 请求。
 - `GET /api/audit-logs`：分页查询当前账号的审计日志。
 - `GET /api/online-music/sources`、`POST /api/online-music/search`：查询允许来源和执行跨来源搜索。
 - `POST /api/online-music/tracks/{source}/{trackId}/playback`、`GET /api/online-music/playback/{ticket}`：签发账号绑定短期票据并转发支持 Range 的在线音频流。
 - `GET /api/online-music/tracks/{source}/{trackId}/lyrics`、`GET /api/online-music/tracks/{source}/{trackId}/cover`：读取受控歌词与封面代理；空资源返回稳定 404。
+- `GET /api/online-music/tracks/{source}/{trackId}/download`：通过私有 sidecar 下载歌曲，并用响应头说明封面与歌词是否已内嵌。
 
 服务器扫描管理页位于 `/admin/scanning`，登录页位于 `/admin/login`。Flutter 客户端不包含服务器扫描管理入口。
 
