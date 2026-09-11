@@ -2,6 +2,22 @@ import 'package:flutter/material.dart';
 
 import '../../core/lyrics/lrc_parser.dart';
 
+@visibleForTesting
+int lyricsScrollTargetIndex(List<LyricLine> lines, int currentIndex) {
+  if (currentIndex < 0) return currentIndex;
+  final lastTextIndex = lines.lastIndexWhere((line) => line.text.isNotEmpty);
+  if (lastTextIndex >= 0 && currentIndex >= lastTextIndex) {
+    return lastTextIndex;
+  }
+  return currentIndex;
+}
+
+@visibleForTesting
+double lyricsScrollAlignment(List<LyricLine> lines, int targetIndex) {
+  final lastTextIndex = lines.lastIndexWhere((line) => line.text.isNotEmpty);
+  return targetIndex >= 0 && targetIndex == lastTextIndex ? 1 : 0.5;
+}
+
 /// 同步歌词面板：跟随播放进度滚动并高亮当前行。
 class LyricsPanel extends StatefulWidget {
   const LyricsPanel({
@@ -24,7 +40,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
   final ScrollController _scrollController = ScrollController(
     keepScrollOffset: false,
   );
-  int? _lastIndex;
+  int? _lastScrollTargetIndex;
 
   @override
   void dispose() {
@@ -37,7 +53,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.lyrics != widget.lyrics) {
       _lineKeys.clear();
-      _lastIndex = null;
+      _lastScrollTargetIndex = null;
     }
   }
 
@@ -59,17 +75,19 @@ class _LyricsPanelState extends State<LyricsPanel> {
       builder: (context, snapshot) {
         final current = lyricAt(lines, snapshot.data ?? Duration.zero);
         final currentIndex = current == null ? -1 : lines.indexOf(current);
-        if (currentIndex >= 0 && currentIndex != _lastIndex) {
-          _lastIndex = currentIndex;
+        final scrollTargetIndex = lyricsScrollTargetIndex(lines, currentIndex);
+        if (scrollTargetIndex >= 0 &&
+            scrollTargetIndex != _lastScrollTargetIndex) {
+          _lastScrollTargetIndex = scrollTargetIndex;
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted || currentIndex >= _lineKeys.length) return;
-            final lineContext = _lineKeys[currentIndex].currentContext;
+            if (!mounted || scrollTargetIndex >= _lineKeys.length) return;
+            final lineContext = _lineKeys[scrollTargetIndex].currentContext;
             if (lineContext != null) {
               Scrollable.ensureVisible(
                 lineContext,
                 duration: const Duration(milliseconds: 260),
                 curve: Curves.easeOutCubic,
-                alignment: 0.5,
+                alignment: lyricsScrollAlignment(lines, scrollTargetIndex),
               );
             }
           });
