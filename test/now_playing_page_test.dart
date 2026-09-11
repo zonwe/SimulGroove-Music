@@ -1,6 +1,8 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_music/core/player/now_playing_layout.dart';
+import 'package:flutter_music/core/lyrics/lrc_parser.dart';
+import 'package:flutter_music/features/player/lyrics_panel.dart';
 import 'package:flutter_music/features/player/now_playing_page.dart';
 import 'package:flutter_music/features/player/track_info_sheet.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -62,6 +64,19 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  test('末句歌词贴底并忽略其后的空结束时间标记', () {
+    final lines = parseLrc(
+      '[00:01.00]第一句\n[00:02.00]最后一句\n[00:03.00]\n[00:04.00]',
+    );
+
+    expect(lyricsScrollTargetIndex(lines, 0), 0);
+    expect(lyricsScrollAlignment(lines, 0), 0.5);
+    expect(lyricsScrollTargetIndex(lines, 1), 1);
+    expect(lyricsScrollAlignment(lines, 1), 1);
+    expect(lyricsScrollTargetIndex(lines, 2), 1);
+    expect(lyricsScrollTargetIndex(lines, 3), 1);
   });
 
   testWidgets('多个歌手会拆分为可独立点击的链接', (tester) async {
