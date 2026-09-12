@@ -7,19 +7,25 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart' as ja;
 
 import '../database/app_database.dart';
+import '../log/app_log.dart';
 import 'artwork_cache.dart';
 import 'equalizer_controller.dart';
 import 'local_audio_source.dart';
 import 'playback_queue_logic.dart';
 import 'volume_state.dart';
+import 'saved_playback.dart';
 
 export 'playback_queue_logic.dart' show PlaybackMode;
 
 class MusicAudioHandler extends BaseAudioHandler
     with QueueHandler, SeekHandler {
-  MusicAudioHandler() {
+  MusicAudioHandler({ja.AudioPlayer? player})
+    : _player = player ?? _createPlayer() {
     _subscriptions.add(
-      _player.playbackEventStream.listen(_handlePlaybackEvent),
+      _player.playbackEventStream.listen(
+        _handlePlaybackEvent,
+        onError: _reportPlaybackError,
+      ),
     );
     _subscriptions.add(
       _player.playingStream.listen((_) {
@@ -34,11 +40,14 @@ class MusicAudioHandler extends BaseAudioHandler
 
   final EqualizerController _equalizer = EqualizerController();
 
-  final ja.AudioPlayer _player = ja.AudioPlayer(
+  static ja.AudioPlayer _createPlayer() => ja.AudioPlayer(
     audioPipeline: sharedAndroidEqualizer != null
         ? ja.AudioPipeline(androidAudioEffects: [sharedAndroidEqualizer!])
         : null,
   );
+  final ja.AudioPlayer _player;
+  final _errors = StreamController<String>.broadcast();
+  int _queueRequest = 0;
   final List<StreamSubscription<Object?>> _subscriptions = [];
   final Random _random = Random();
   List<Track> _tracks = const [];
@@ -62,34 +71,97 @@ class MusicAudioHandler extends BaseAudioHandler
   Stream<ja.PlayerState> get playerStateStream => _player.playerStateStream;
   Stream<double> get volumeStream => _player.volumeStream;
   Stream<int?> get currentIndexStream => _player.currentIndexStream;
+  Stream<String> get errors => _errors.stream;
+  int get queueRevision => _queueRequest;
+  bool get rebuildingQueue => _rebuildingQueue;
 
-  Future<void> playTracks(List<Track> tracks, {int initialIndex = 0}) async {
-    final items = await Future.wait(tracks.map(_toMediaItem));
+  SavedPlayback? get savedPlayback {
+    final currentId = mediaItem.value?.id;
+    if (_rebuildingQueue || _tracks.isEmpty || currentId == null) return null;
+    return SavedPlayback(
+      baseIds: _tracks.map((track) => track.id),
+      queueIds: queue.value.map((item) => item.id),
+      currentId: currentId,
+      position: _player.position,
+      repeatMode: playbackState.value.repeatMode,
+      shuffle: _shuffleEnabled,
+    );
+  }
+
+  Future<void> playTracks(List<Track> tracks, {int initialIndex = 0}) =>
+      _loadLocalQueue(tracks, initialIndex: initialIndex);
+
+  Future<void> restoreLocalQueue(
+    List<Track> tracks,
+    SavedPlayback saved, {
+    required int expectedRevision,
+  }) async {
+    if (_queueRequest != expectedRevision || queue.value.isNotEmpty) return;
+    final byId = {for (final track in tracks) track.id: track};
+    final base = [for (final id in saved.baseIds) ?byId[id]];
+    final indices = {for (var i = 0; i < base.length; i++) base[i].id: i};
+    final order = [for (final id in saved.queueIds) ?indices[id]];
+    if (order.isEmpty) return;
+    final current = saved.queueIds
+        .where(indices.containsKey)
+        .toList()
+        .indexOf(saved.currentId);
+    await _loadLocalQueue(
+      base,
+      initialIndex: current < 0 ? 0 : current,
+      order: order,
+      initialPosition: current < 0 ? Duration.zero : saved.position,
+      playWhenReady: false,
+      shuffle: saved.shuffle,
+      repeatMode: saved.repeatMode,
+    );
+  }
+
+  Future<void> _loadLocalQueue(
+    List<Track> tracks, {
+    int initialIndex = 0,
+    List<int>? order,
+    Duration initialPosition = Duration.zero,
+    bool playWhenReady = true,
+    bool shuffle = false,
+    AudioServiceRepeatMode? repeatMode,
+  }) async {
+    if (tracks.isEmpty || initialIndex < 0 || initialIndex >= tracks.length) {
+      return;
+    }
+    final request = ++_queueRequest;
+    final items = tracks.map(_toMediaItem).toList(growable: false);
+    final activeOrder =
+        order ?? List<int>.generate(tracks.length, (index) => index);
     final sources = await Future.wait(
-      List.generate(
-        tracks.length,
+      activeOrder.map(
         (index) => createAudioSource(tracks[index], items[index]),
       ),
     );
+    if (request != _queueRequest) return;
     _rebuildingQueue = true;
     try {
       await _player.setAudioSources(
         sources,
         initialIndex: initialIndex,
-        initialPosition: Duration.zero,
+        initialPosition: initialPosition,
       );
+      if (request == _queueRequest && repeatMode != null) {
+        await _player.setLoopMode(audioServiceRepeatToLoopMode(repeatMode));
+      }
     } finally {
-      _rebuildingQueue = false;
+      if (request == _queueRequest) _rebuildingQueue = false;
     }
+    if (request != _queueRequest) return;
     _tracks = List<Track>.unmodifiable(tracks);
     _items = List<MediaItem>.unmodifiable(items);
     _baseOrder = List<int>.generate(tracks.length, (index) => index);
-    _activeOrder = List<int>.of(_baseOrder);
-    _shuffleEnabled = false;
-    queue.add(items);
+    _activeOrder = List<int>.of(activeOrder);
+    _shuffleEnabled = shuffle;
+    queue.add([for (final index in activeOrder) items[index]]);
     _updateCurrentItem(initialIndex);
     _broadcastState(_player.playbackEvent);
-    await play();
+    if (playWhenReady) await play();
   }
 
   Future<void> playOnlineTrack({
@@ -105,14 +177,13 @@ class MusicAudioHandler extends BaseAudioHandler
     Uint8List? artwork,
     int? durationMs,
   }) async {
-    final artUri = await cacheArtwork(id, artwork);
+    final request = ++_queueRequest;
     final item = MediaItem(
       id: 'online:$id',
       title: title,
       artist: artist.isEmpty ? '未知艺术家' : artist,
       album: album,
       duration: durationMs == null ? null : Duration(milliseconds: durationMs),
-      artUri: artUri,
       extras: {
         'uri': uri.toString(),
         'sourceType': 'online',
@@ -131,8 +202,9 @@ class MusicAudioHandler extends BaseAudioHandler
         initialPosition: Duration.zero,
       );
     } finally {
-      _rebuildingQueue = false;
+      if (request == _queueRequest) _rebuildingQueue = false;
     }
+    if (request != _queueRequest) return;
     _tracks = const [];
     _items = [item];
     _baseOrder = const [0];
@@ -144,8 +216,7 @@ class MusicAudioHandler extends BaseAudioHandler
     await play();
   }
 
-  Future<MediaItem> _toMediaItem(Track track) async {
-    final artUri = await cacheArtwork(track.id, track.artwork);
+  MediaItem _toMediaItem(Track track) {
     return MediaItem(
       id: track.id,
       title: track.title,
@@ -154,7 +225,6 @@ class MusicAudioHandler extends BaseAudioHandler
       duration: track.durationMs == null
           ? null
           : Duration(milliseconds: track.durationMs!),
-      artUri: artUri,
       extras: {
         'uri': track.uri,
         'lyrics': track.lyrics,
@@ -169,7 +239,60 @@ class MusicAudioHandler extends BaseAudioHandler
     final items = queue.value;
     if (index != null && index >= 0 && index < items.length) {
       mediaItem.add(items[index]);
+      final bytes = items[index].extras?['artwork'];
+      if (items[index].artUri == null && bytes is Uint8List) {
+        unawaited(_cacheCurrentArtwork(items[index].id, bytes, _queueRequest));
+      }
     }
+  }
+
+  Future<void> updateOnlineTrackMetadata({
+    required String id,
+    String? lyrics,
+    Uint8List? artwork,
+  }) async {
+    final current = mediaItem.value;
+    if (current?.id != 'online:$id' ||
+        current?.extras?['sourceType'] != 'online') {
+      return;
+    }
+    _replaceItem(
+      current!.copyWith(
+        extras: {...?current.extras, 'lyrics': ?lyrics, 'artwork': ?artwork},
+      ),
+    );
+    if (artwork != null) {
+      await _cacheCurrentArtwork(current.id, artwork, _queueRequest);
+    }
+  }
+
+  Future<void> _cacheCurrentArtwork(
+    String id,
+    Uint8List bytes,
+    int request,
+  ) async {
+    try {
+      final artUri = await cacheArtwork(id, bytes);
+      final current = mediaItem.value;
+      if (request != _queueRequest || current?.id != id || artUri == null) {
+        return;
+      }
+      _replaceItem(current!.copyWith(artUri: artUri));
+    } catch (error, stackTrace) {
+      AppLog.warning('播放器封面缓存失败', error, stackTrace);
+    }
+  }
+
+  void _replaceItem(MediaItem updated) {
+    _items = [
+      for (final item in _items)
+        if (item.id == updated.id) updated else item,
+    ];
+    queue.add([
+      for (final item in queue.value)
+        if (item.id == updated.id) updated else item,
+    ]);
+    mediaItem.add(updated);
   }
 
   void _broadcastState(ja.PlaybackEvent event) {
@@ -231,7 +354,9 @@ class MusicAudioHandler extends BaseAudioHandler
     _restartingListLoop = true;
     try {
       await _player.seek(Duration.zero, index: 0);
-      await _player.play();
+      await play();
+    } catch (error, stackTrace) {
+      _reportPlaybackError(error, stackTrace);
     } finally {
       _restartingListLoop = false;
     }
@@ -239,12 +364,20 @@ class MusicAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> play() {
-    final playFuture = _player.play();
+    // just_audio completes this Future when playback ends, not when it starts.
+    // Keep command completion independent and surface later errors to the shell.
+    unawaited(_player.play().catchError(_reportPlaybackError));
     // _player.play() flips `playing` synchronously. Broadcast here as a
     // defensive fallback in addition to playingStream so audio_service never
     // misses the false -> true transition that starts Android foreground mode.
     _broadcastState(_player.playbackEvent);
-    return playFuture;
+    return Future.value();
+  }
+
+  void _reportPlaybackError(Object error, StackTrace stackTrace) {
+    // Native error strings may include authenticated stream URLs.
+    AppLog.error('音乐播放失败（${error.runtimeType}）', null, stackTrace);
+    if (!_errors.isClosed) _errors.add('播放失败，请检查文件权限、音频格式或网络连接。');
   }
 
   @override
@@ -371,7 +504,7 @@ class MusicAudioHandler extends BaseAudioHandler
     // native backend in sequential mode prevents MPV and just_audio from
     // maintaining two different notions of the current index.
     await _player.setShuffleModeEnabled(false);
-    if (wasPlaying) await _player.play();
+    if (wasPlaying) await play();
   }
 
   Future<void> setVolume(double volume) async {
@@ -415,5 +548,6 @@ class MusicAudioHandler extends BaseAudioHandler
       await subscription.cancel();
     }
     await _player.dispose();
+    await _errors.close();
   }
 }

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
 import '../../core/library/artist_names.dart';
+import '../../core/library/library_track_filter.dart';
 import '../../core/player/track_directory.dart';
 import 'artwork_view.dart';
 import 'collection_page.dart';
@@ -21,6 +22,7 @@ class LibraryPage extends ConsumerStatefulWidget {
 
 class _LibraryPageState extends ConsumerState<LibraryPage> {
   final TextEditingController _search = TextEditingController();
+  final _trackFilter = LibraryTrackFilter();
   _LibraryView _view = _LibraryView.songs;
   bool _selectionMode = false;
   final Set<String> _selectedTrackIds = <String>{};
@@ -124,15 +126,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
   }
 
   List<Track> _filterTracks(List<Track> allTracks) {
-    final query = _search.text.trim().toLowerCase();
-    return allTracks
-        .where((track) {
-          if (query.isEmpty) return true;
-          return '${track.title}\n${track.artist}\n${track.album}'
-              .toLowerCase()
-              .contains(query);
-        })
-        .toList(growable: false);
+    return _trackFilter.filter(allTracks, _search.text);
   }
 
   void _enterSelection(Track track) {

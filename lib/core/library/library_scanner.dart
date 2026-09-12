@@ -1,4 +1,5 @@
 import 'scanned_track.dart';
+import 'scan_fingerprint.dart';
 
 abstract interface class LibraryScanner {
   bool get isSupported;
@@ -10,5 +11,6 @@ abstract interface class LibraryScanner {
     required String sourceUri,
     required String platform,
     required String sourceLabel,
+    List<ScanFingerprint> fingerprintCache = const [],
   });
 }

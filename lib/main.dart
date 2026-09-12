@@ -14,6 +14,7 @@ import 'core/notifications/scan_notification_service_factory.dart';
 import 'core/player/audio_backend.dart';
 import 'core/player/equalizer_controller.dart';
 import 'core/player/music_audio_handler.dart';
+import 'core/player/playback_persistence.dart';
 import 'core/shortcuts/desktop_shortcut_service.dart';
 import 'core/startup/debug_artifact_cleanup.dart';
 import 'core/window/desktop_window_controller.dart';
@@ -42,7 +43,9 @@ Future<void> main() async {
       ),
     );
   }
+  final playbackPersistence = PlaybackPersistence(database, audioHandler);
   DesktopWindowController.configureTrayActions(
+    onBeforeQuit: playbackPersistence.saveNow,
     onTogglePlay: () async {
       if (audioHandler.playbackState.value.playing) {
         await audioHandler.pause();
@@ -73,6 +76,13 @@ Future<void> main() async {
       child: const MusicApp(),
     ),
   );
+
+  if (!kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux ||
+          defaultTargetPlatform == TargetPlatform.android)) {
+    unawaited(playbackPersistence.initialize());
+  }
 
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     unawaited(_configureAndroidAudioSession(audioHandler));

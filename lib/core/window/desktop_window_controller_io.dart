@@ -18,6 +18,7 @@ class DesktopWindowController {
   static Future<void> Function()? _onTogglePlay;
   static Future<void> Function()? _onPrevious;
   static Future<void> Function()? _onNext;
+  static Future<void> Function()? _onBeforeQuit;
   static bool _trayReady = false;
 
   static bool get minimizeToTrayOnClose => _minimizeToTray;
@@ -54,10 +55,12 @@ class DesktopWindowController {
   }
 
   static void configureTrayActions({
+    Future<void> Function()? onBeforeQuit,
     Future<void> Function()? onTogglePlay,
     Future<void> Function()? onPrevious,
     Future<void> Function()? onNext,
   }) {
+    _onBeforeQuit = onBeforeQuit;
     _onTogglePlay = onTogglePlay;
     _onPrevious = onPrevious;
     _onNext = onNext;
@@ -110,6 +113,7 @@ class DesktopWindowController {
 
   static Future<void> quit() async {
     if (!_isDesktop) return;
+    await _onBeforeQuit?.call();
     _allowQuit = true;
     if (_trayReady) await trayManager.destroy();
     if (_isWindows) await windowManager.setPreventClose(false);

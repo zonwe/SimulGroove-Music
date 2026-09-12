@@ -6,7 +6,7 @@
 
 - `Music.Api` 是独立的 ASP.NET Core 10 Minimal API，默认地址为 `http://localhost:5080`。
 - 后端 SQLite 是服务器端账号、歌单、扫描源、索引曲目和审计日志的事实源。
-- Flutter 主 UI 当前仍使用本地 Mock 账号链路；除非任务明确要求，不要把后端改动描述为真实登录已经接入客户端。
+- Flutter 主 UI 已通过 `HttpBackendGateway` 和 `BackendAuthRepository` 接入真实账号链路，维护时保持安全令牌存储、刷新轮换、401 单次重试与账号隔离。
 - 服务器扫描只访问后端机器的文件系统，不上传或复制客户端音频。
 
 ## 修改前

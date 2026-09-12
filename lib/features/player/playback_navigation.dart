@@ -57,12 +57,11 @@ Future<void> playOrOpenNowPlaying(
     ).push(MaterialPageRoute(builder: (_) => const NowPlayingPage()));
     return;
   }
-  final playableTracks = <Track>[];
-  for (final track in tracks) {
-    if (await checkTrackAvailability(track) == null) {
-      playableTracks.add(track);
-    }
-  }
+  // Validate the selected file immediately. Other files are opened lazily by
+  // the player, whose error stream reports missing or unreadable queue items.
+  final playableTracks = tracks
+      .where((track) => track.isAvailable && track.sourceType != 'online')
+      .toList(growable: false);
   final playableIndex = playableTracks.indexWhere(
     (track) => track.id == selected.id,
   );

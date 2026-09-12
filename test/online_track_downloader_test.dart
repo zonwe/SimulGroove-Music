@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:drift/native.dart';
 import 'package:flutter_music/core/database/app_database.dart';
 import 'package:flutter_music/core/online_music/online_download_platform.dart';
 import 'package:flutter_music/core/online_music/online_music_repository.dart';
@@ -8,6 +9,51 @@ import 'package:flutter_music/core/online_music/online_track_downloader.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'asset failure leaves audio indexed and retries attachments without downloading again',
+    () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      var failCover = true;
+      final platform = _FakeDownloadPlatform();
+      final downloader = DefaultOnlineTrackDownloader(
+        repository: _FakeRepository(
+          lyrics: '[00:01]lyrics',
+          artworkLoader: () async {
+            if (failCover) throw StateError('cover unavailable');
+            return Uint8List.fromList([0xff, 0xd8, 0xff]);
+          },
+        ),
+        platform: platform,
+        readSetting: (key) async => key == onlineDownloadDirectorySettingKey
+            ? 'test://downloads'
+            : null,
+        writeSetting: (_, _) async {},
+        saveDownloadedTrack: (track) => db.upsertTracks([track]),
+      );
+      const track = OnlineTrack(
+        provider: 'source',
+        trackId: 'assets',
+        title: 'song',
+        artists: [],
+        album: '',
+        playable: true,
+        capabilities: {'playback', 'artwork', 'lyrics'},
+      );
+      final result = await downloader.downloadAll([track]);
+      expect(result.downloaded, [track]);
+      expect(result.failures, isEmpty);
+      expect(result.warnings.single.assets, {OnlineDownloadAsset.artwork});
+      expect((await db.allTracks()).single.lyrics, '[00:01]lyrics');
+      failCover = false;
+      final remaining = await downloader.retryAttachments(result.warnings);
+      expect(remaining, isEmpty);
+      expect(platform.fileNames, hasLength(1));
+      final indexed = (await db.allTracks()).single;
+      expect(indexed.artwork, isNotEmpty);
+      expect(indexed.lyrics, '[00:01]lyrics');
+    },
+  );
   test('批量下载逐首保存，失败项不会中断后续歌曲', () async {
     final settings = <String, String>{};
     final platform = _FakeDownloadPlatform(failingTrackId: 'failed');
@@ -118,10 +164,11 @@ const _track = OnlineTrack(
 
 class _FakeRepository
     implements OnlineMusicSearchRepository, OnlineMusicDownloadRepository {
-  const _FakeRepository({this.artwork, this.lyrics});
+  const _FakeRepository({this.artwork, this.lyrics, this.artworkLoader});
 
   final Uint8List? artwork;
   final String? lyrics;
+  final Future<Uint8List?> Function()? artworkLoader;
 
   @override
   Future<OnlinePlaybackSource> prepareDownload(OnlineTrack track) =>
@@ -137,7 +184,8 @@ class _FakeRepository
       );
 
   @override
-  Future<Uint8List?> loadArtwork(OnlineTrack track) async => artwork;
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async =>
+      artworkLoader == null ? artwork : await artworkLoader!();
 
   @override
   Future<String?> loadLyrics(OnlineTrack track) async => lyrics;

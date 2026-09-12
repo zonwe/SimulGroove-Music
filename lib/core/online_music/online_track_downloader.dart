@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:path/path.dart' as p;
 
 import '../database/app_database.dart';
+import '../log/app_log.dart';
 import 'online_download_platform.dart';
 import 'online_music_repository.dart';
 import 'online_track.dart';
@@ -59,10 +61,34 @@ class OnlineDownloadBatchResult {
   const OnlineDownloadBatchResult({
     required this.downloaded,
     required this.failures,
+    this.warnings = const [],
   });
 
   final List<OnlineTrack> downloaded;
   final List<OnlineDownloadFailure> failures;
+  final List<OnlineDownloadWarning> warnings;
+}
+
+enum OnlineDownloadAsset { artwork, lyrics }
+
+class OnlineDownloadWarning {
+  const OnlineDownloadWarning(
+    this.track,
+    this.file,
+    this.destination,
+    this.assets,
+  );
+
+  final OnlineTrack track;
+  final DownloadedOnlineFile file;
+  final OnlineDownloadDestination destination;
+  final Set<OnlineDownloadAsset> assets;
+}
+
+abstract interface class OnlineDownloadAttachmentRetrier {
+  Future<List<OnlineDownloadWarning>> retryAttachments(
+    List<OnlineDownloadWarning> warnings,
+  );
 }
 
 abstract interface class OnlineTrackDownloader {
@@ -78,7 +104,8 @@ abstract interface class OnlineTrackDownloader {
   });
 }
 
-class DefaultOnlineTrackDownloader implements OnlineTrackDownloader {
+class DefaultOnlineTrackDownloader
+    implements OnlineTrackDownloader, OnlineDownloadAttachmentRetrier {
   factory DefaultOnlineTrackDownloader({
     required OnlineMusicSearchRepository repository,
     required OnlineDownloadPlatform platform,
@@ -144,6 +171,7 @@ class DefaultOnlineTrackDownloader implements OnlineTrackDownloader {
     }
     final downloaded = <OnlineTrack>[];
     final failures = <OnlineDownloadFailure>[];
+    final warnings = <OnlineDownloadWarning>[];
     var completed = 0;
     final filenameFormat = parseOnlineDownloadFilenameFormat(
       await _readSetting(onlineDownloadFilenameFormatSettingKey),
@@ -168,41 +196,22 @@ class DefaultOnlineTrackDownloader implements OnlineTrackDownloader {
           source: source,
           fileName: _fileName(track, source.mimeType, filenameFormat),
         );
-        Uint8List? artwork;
-        String? lyrics;
-        final companionPlatform = _platform is OnlineDownloadCompanionPlatform
-            ? _platform as OnlineDownloadCompanionPlatform
-            : null;
-        final actualName =
-            file.fileName ?? _fileName(track, source.mimeType, filenameFormat);
-        final stem = p.basenameWithoutExtension(actualName);
-        if (!file.artworkEmbedded && track.capabilities.contains('artwork')) {
-          artwork = await _repository.loadArtwork(track);
-          if (artwork != null && companionPlatform != null) {
-            final artworkType = _artworkType(artwork);
-            await companionPlatform.saveCompanion(
-              destination: target,
-              fileName: '$stem.${artworkType.$2}',
-              bytes: artwork,
-              mimeType: artworkType.$1,
-            );
-          }
-        }
-        if (!file.lyricsEmbedded && track.capabilities.contains('lyrics')) {
-          lyrics = await _repository.loadLyrics(track);
-          if (lyrics != null && companionPlatform != null) {
-            await companionPlatform.saveCompanion(
-              destination: target,
-              fileName: '$stem.lrc',
-              bytes: Uint8List.fromList(utf8.encode(lyrics)),
-              mimeType: 'text/plain',
-            );
-          }
-        }
-        await _saveDownloadedTrack(
-          downloadedOnlineTrack(track, file, artwork: artwork, lyrics: lyrics),
-        );
+        // Commit the playable audio before attempting optional resources.
+        await _saveDownloadedTrack(downloadedOnlineTrack(track, file));
         downloaded.add(track);
+        final warning = await _saveAttachments(
+          target,
+          track,
+          file,
+          {
+            if (!file.artworkEmbedded && track.capabilities.contains('artwork'))
+              OnlineDownloadAsset.artwork,
+            if (!file.lyricsEmbedded && track.capabilities.contains('lyrics'))
+              OnlineDownloadAsset.lyrics,
+          },
+          fallbackName: _fileName(track, source.mimeType, filenameFormat),
+        );
+        if (warning != null) warnings.add(warning);
       } catch (error) {
         failures.add(OnlineDownloadFailure(track, error));
       }
@@ -214,7 +223,96 @@ class DefaultOnlineTrackDownloader implements OnlineTrackDownloader {
     return OnlineDownloadBatchResult(
       downloaded: List.unmodifiable(downloaded),
       failures: List.unmodifiable(failures),
+      warnings: List.unmodifiable(warnings),
     );
+  }
+
+  @override
+  Future<List<OnlineDownloadWarning>> retryAttachments(
+    List<OnlineDownloadWarning> warnings,
+  ) async {
+    final remaining = <OnlineDownloadWarning>[];
+    for (final warning in warnings) {
+      final result = await _saveAttachments(
+        warning.destination,
+        warning.track,
+        warning.file,
+        warning.assets,
+      );
+      if (result != null) remaining.add(result);
+    }
+    return List.unmodifiable(remaining);
+  }
+
+  Future<OnlineDownloadWarning?> _saveAttachments(
+    OnlineDownloadDestination target,
+    OnlineTrack track,
+    DownloadedOnlineFile file,
+    Set<OnlineDownloadAsset> assets, {
+    String? fallbackName,
+  }) async {
+    if (assets.isEmpty) return null;
+    final failed = <OnlineDownloadAsset>{};
+    final platform = _platform;
+    final companion = platform is OnlineDownloadCompanionPlatform
+        ? platform as OnlineDownloadCompanionPlatform
+        : null;
+    final stem = p.basenameWithoutExtension(
+      file.fileName ??
+          fallbackName ??
+          file.filePath ??
+          Uri.parse(file.uri).pathSegments.lastOrNull ??
+          '歌曲',
+    );
+    for (final asset in assets) {
+      try {
+        switch (asset) {
+          case OnlineDownloadAsset.artwork:
+            final bytes = await _repository.loadArtwork(track);
+            if (bytes == null) continue;
+            await _saveDownloadedTrack(
+              downloadedOnlineTrack(
+                track,
+                file,
+                artwork: bytes,
+              ).copyWith(lyrics: const Value.absent()),
+            );
+            if (companion != null) {
+              final type = _artworkType(bytes);
+              await companion.saveCompanion(
+                destination: target,
+                fileName: '$stem.${type.$2}',
+                bytes: bytes,
+                mimeType: type.$1,
+              );
+            }
+          case OnlineDownloadAsset.lyrics:
+            final lyrics = await _repository.loadLyrics(track);
+            if (lyrics == null) continue;
+            await _saveDownloadedTrack(
+              downloadedOnlineTrack(
+                track,
+                file,
+                lyrics: lyrics,
+              ).copyWith(artwork: const Value.absent()),
+            );
+            if (companion != null) {
+              await companion.saveCompanion(
+                destination: target,
+                fileName: '$stem.lrc',
+                bytes: Uint8List.fromList(utf8.encode(lyrics)),
+                mimeType: 'text/plain',
+              );
+            }
+        }
+      } catch (error, stackTrace) {
+        failed.add(asset);
+        AppLog.warning('下载音频的附加资源保存失败：${asset.name}', error, stackTrace);
+      }
+    }
+    return failed.isEmpty
+        ? null
+        : OnlineDownloadWarning(track, file, target, Set.unmodifiable(failed));
   }
 
   String _fileName(

@@ -14,6 +14,7 @@ class DesktopWindowController {
   }
 
   static void configureTrayActions({
+    Future<void> Function()? onBeforeQuit,
     Future<void> Function()? onTogglePlay,
     Future<void> Function()? onPrevious,
     Future<void> Function()? onNext,

@@ -154,7 +154,7 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 
 ## 7. Drift 数据库约定
 
-数据库位于 `lib/core/database/app_database.dart`，当前 schema 版本为 4，包含：
+数据库位于 `lib/core/database/app_database.dart`，当前 schema 版本为 5，包含：
 
 - `Accounts`：本地账号快照。
 - `Tracks`：歌曲、来源、文件 URI/路径、标签、封面、歌词和同步字段。
@@ -162,7 +162,7 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 - `Playlists`：歌单元数据。
 - `PlaylistEntries`：歌单与歌曲的多对多关系及顺序。
 - `AppSettings`：字符串键值设置。
-- `PlaybackSnapshots`：为恢复播放状态预留的数据结构。
+- `PlaybackSnapshots`：保存本地曲目 ID、原始/实际队列顺序、进度与循环/随机模式，恢复后保持暂停；不保存在线票据或认证头。
 - `LikedTracks`：喜欢歌曲关系。
 - `EqualizerPresets`：可同步的自定义均衡器预设。
 - `SyncTombstones`：按账号保存歌单、喜欢歌曲和均衡器预设的删除墓碑。
@@ -182,6 +182,8 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 6. 检查生成 diff 是否只反映预期表结构变化。
 7. UI 读取优先使用 `watch...` 响应式查询，批处理和一致性更新使用 `batch`/`transaction`。
 
+数据库每次打开都启用 SQLite 外键，并一次性清理旧版本残留的孤立歌单条目与喜欢关系；级联删除回归必须使用真实 SQLite 验证。
+
 扫描重建尤其要谨慎：`replaceScanSourceTracks` 会删除某一来源中本次未发现的旧曲目。修改来源匹配表达式时必须验证运算符分组、Android Document URI 和 Windows 路径前缀，避免误删其他来源数据。
 
 ## 8. 本地音乐扫描约定
@@ -192,7 +194,9 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 - `scanner_factory.dart` 使用条件导出，在 IO 平台选择真实实现，在 Web 选择 stub。
 - Windows 目录选择器在 UI isolate 调用，递归遍历和同步元数据解析放入 `Isolate.run`。
 - Android 通过 `top.zonwe.simul_groove_player/media_store` MethodChannel 调用 Kotlin。
-- `ScannedTrack` 是扫描层模型，页面再映射成 Drift `TracksCompanion`。
+- `ScannedTrack` 是扫描层模型，由扫描控制器映射成 Drift `TracksCompanion`。
+- `LibraryScanController` 统一持有扫描、重扫与来源删除任务，跨页面共享进度和互斥状态，并在事务中提交扫描结果；页面不持有长时间扫描任务。
+- Windows/Linux 重扫可以按规范路径、文件大小和修改时间复用内容指纹，标签与同名歌词仍重新读取；数据库历史修改时间精度为秒，内容变更但大小和修改时间都不变时需重新添加目录执行完整扫描。
 
 必须保持的行为：
 
@@ -219,6 +223,8 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 - 循环和随机模式修改后要主动广播状态，因为底层不一定产生足以刷新 UI 的播放事件。
 - 封面通过缓存 URI 提供给系统通知，原始字节仍可放在 `extras` 给 Flutter UI。
 - 播放错误、文件失效和权限失效应在进入播放前或播放失败时给用户清晰反馈。
+- `MusicAudioHandler.play()` 在发出播放命令后返回，异步播放错误通过统一错误流展示；不要用底层 `AudioPlayer.play()` 的结束 Future 表示加载完成。
+- `PlaybackPersistence` 每 5 秒及播放状态变化时保存本地队列快照，在首帧后尝试恢复；恢复不得覆盖用户新发起的播放，也不得自动出声。
 
 不要：
 

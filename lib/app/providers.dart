@@ -8,6 +8,7 @@ import '../core/auth/backend_gateway.dart';
 import '../core/auth/http_backend_gateway.dart';
 import '../core/database/app_database.dart';
 import '../core/library/library_scanner.dart';
+import '../core/library/library_scan_controller.dart';
 import '../core/library/scanner_factory.dart';
 import '../core/notifications/scan_notification_service.dart';
 import '../core/notifications/scan_notification_service_factory.dart';
@@ -28,6 +29,9 @@ import '../core/theme/app_appearance.dart';
 import '../core/window/window_settings.dart';
 import '../features/online_search/online_search_controller.dart';
 
+export '../core/library/library_scan_controller.dart'
+    show scanNotificationEnabledSettingKey;
+
 final databaseProvider = Provider<AppDatabase>(
   (ref) => throw UnimplementedError(),
 );
@@ -40,6 +44,18 @@ final scannerProvider = Provider<LibraryScanner>(
 final scanNotificationServiceProvider = Provider<ScanNotificationService>(
   (ref) => createScanNotificationService(),
 );
+final playbackErrorsProvider = StreamProvider<String>(
+  (ref) => ref.watch(audioHandlerProvider).errors,
+);
+final libraryScanControllerProvider = Provider<LibraryScanController>((ref) {
+  final controller = LibraryScanController(
+    ref.watch(databaseProvider),
+    ref.watch(scannerProvider),
+    ref.watch(scanNotificationServiceProvider),
+  );
+  ref.onDispose(controller.dispose);
+  return controller;
+});
 final backendGatewayProvider = Provider<BackendGateway>(
   // 每次请求从 AppSettings 解析服务器地址，账号页保存后立即生效。
   (ref) => HttpBackendGateway(
@@ -178,7 +194,6 @@ final trayMinimizeOnCloseProvider = StreamProvider<bool>(
       .watchSettings()
       .map((settings) => settings[trayMinimizeOnCloseSettingKey] != 'false'),
 );
-const scanNotificationEnabledSettingKey = 'library.scan_notification_enabled';
 
 final scanNotificationEnabledProvider = StreamProvider<bool>(
   (ref) => ref
