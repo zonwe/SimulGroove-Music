@@ -6,7 +6,7 @@ $rootPath = $PSScriptRoot
 Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host " SimulGroove Music - 后端与 Sidecar 统一运行环境" -ForegroundColor Cyan
 Write-Host "========================================================" -ForegroundColor Cyan
-Write-Host "  - go-music-dl sidecar:  http://127.0.0.1:8081" -ForegroundColor Yellow
+Write-Host "  - go-music-dl sidecar:  http://0.0.0.0:8081" -ForegroundColor Yellow
 Write-Host "  - Music.Api 后端:       http://localhost:5080" -ForegroundColor Yellow
 Write-Host "  - 提示: 按 Ctrl + C 可一并停止两项服务" -ForegroundColor Gray
 Write-Host "========================================================" -ForegroundColor Cyan
@@ -27,7 +27,7 @@ $exitCode = 0
 try {
     Write-Host "[1/2] 正在启动 go-music-dl sidecar (8081)..." -ForegroundColor Green
     $goProc = Start-Process -FilePath "go" `
-        -ArgumentList "run", "./cmd/music-dl", "integration", "--host", "127.0.0.1", "--port", "8081" `
+        -ArgumentList "run", "./cmd/music-dl", "integration", "--host", "0.0.0.0", "--port", "8081" `
         -WorkingDirectory "$rootPath\go-music-dl" `
         -NoNewWindow `
         -PassThru

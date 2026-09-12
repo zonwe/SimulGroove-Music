@@ -1,6 +1,6 @@
 # SimulGroove Music 项目协作指南
 
-本文是仓库根目录级别的开发与智能体协作说明，适用于整个仓库。无论是人类开发者还是自动化编码智能体，在修改代码前都应先阅读本文件。面向第一次接触项目的学习路线见 [`BEGINNER_GUIDE.md`](BEGINNER_GUIDE.md)。
+本文是仓库根目录级别的开发与智能体协作说明，适用于整个仓库。无论是人类开发者还是自动化编码智能体，在修改代码前都应先阅读本文件。
 
 ## 1. 项目目标与当前边界
 
@@ -494,7 +494,6 @@ docker compose --env-file .env -f compose.online-music.yml build
 
 - `README.md`：对所有使用者的功能与快速运行说明。
 - `AGENTS.md`：开发约束、架构边界和验证要求。
-- `BEGINNER_GUIDE.md`：学习顺序和练习路径。
 - `docs/api.md`：后端配置、认证与 API 契约。
 - `backend/README.md`：后端单独运行说明。
 
