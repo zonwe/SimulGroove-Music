@@ -45,6 +45,14 @@ docker compose --env-file .env -f compose.online-music.yml up --detach --build
 
 该编排只发布 `Music.Api` 端口，sidecar 保持在 Compose 私有网络。完整的密钥、数据卷、健康检查和升级说明见 [`backend/README.md`](backend/README.md)。
 
+需要把服务放到公网时，可用宿主机 Nginx 作为 TLS 入口：
+
+```powershell
+docker compose --env-file .env -f compose.online-music.nginx.yml up --detach --build
+```
+
+该编排把 `Music.Api` 只发布到 `127.0.0.1:${MUSIC_API_HOST_PORT:-5080}`，公网流量必须经过宿主机 Nginx，sidecar 仍只在 Compose 私有网络。环境变量模板见 `.env.nginx.example`，站点、限流和证书占位配置见 `deploy/nginx/music-api.conf.example`。应用内显式启用 `UseForwardedHeaders` 并只信任回环代理，因此真实客户端 IP 与 `https` 协议能正确传入限流和审计日志；不要改用 `ASPNETCORE_FORWARDEDHEADERS_ENABLED`，它不会注册中间件。
+
 ## 技术结构
 
 - Flutter + Riverpod
@@ -54,6 +62,7 @@ docker compose --env-file .env -f compose.online-music.yml up --detach --build
 - ASP.NET Core 10 + SQLite 后端，包含认证、同步、服务器扫描、在线音乐 BFF 和审计日志
 - 独立 `go-music-dl` 私有 sidecar；Flutter 不直连 sidecar，也不接触第三方 Cookie 或原始 URL
 - `compose.online-music.yml` 单机编排模板，只发布 `Music.Api` 端口
+- `compose.online-music.nginx.yml` 宿主机 Nginx 反向代理编排，`Music.Api` 只绑定回环地址
 
 ## 开发与验证
 
@@ -125,7 +134,7 @@ dart run build_runner build --delete-conflicting-outputs
 
 项目的本地音乐、播放、资料库管理、账号同步和受控在线音乐主链路已经较完整，但以下产品与生产化边界尚未闭环：
 
-- 在线音乐已具备显式启用的 OTLP 导出，以及只发布 Caddy 80/443 的生产 Compose、私有 Collector/Prometheus/Alertmanager 链路、告警规则、处置手册和逐来源发布门禁；CI 已实际验证请求/失败/熔断计数器导出且不包含搜索词、账号或令牌，并通过告警阈值、持续时间与恢复测试。生产验收脚本会检查真实域名证书、外置通知配置、三种真实告警路由、Fire/Resolve 证据链和结构化来源审批，但真实域名、通知接收方、实际送达回执与来源批准仍需由目标部署环境提供
+- 在线音乐已具备显式启用的 OTLP 导出，以及只发布 Caddy 80/443 的生产 Compose、私有 Collector/Prometheus/Alertmanager 链路、告警规则、处置手册和逐来源发布门禁（另有宿主机 Nginx 反代的替代编排）；CI 已实际验证请求/失败/熔断计数器导出且不包含搜索词、账号或令牌，并通过告警阈值、持续时间与恢复测试。生产验收脚本会检查真实域名证书、外置通知配置、三种真实告警路由、Fire/Resolve 证据链和结构化来源审批，但真实域名、通知接收方、实际送达回执与来源批准仍需由目标部署环境提供
 - CI 已补 Android Debug、生产部署配置校验、非 root API 镜像构建/就绪冒烟、OTLP 端到端指标检查与手动启用的 Linux Release 构建任务，最新线上运行已于 2026-09-07 全部通过；Linux 构建与回归按当前安排暂缓。K80 Ultra 真机验收脚本会拒绝模拟器、验证 ARM64 APK 与 v2 签名、安装启动并保存去标识化证据，深度回归仍待连接真实设备执行
 
 ## 以下待完成事项暂不需要实现

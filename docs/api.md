@@ -19,6 +19,12 @@ $env:Administration__Username = "admin"
 $env:Administration__Password = "使用密码管理器生成的管理员密码"
 ```
 
+### 反向代理部署
+
+把服务暴露到公网时，推荐使用 `compose.online-music.nginx.yml` 加宿主机 Nginx：`Music.Api` 只发布到 `127.0.0.1:${MUSIC_API_HOST_PORT:-5080}`，TLS 终止、限流和安全响应头由 Nginx 负责。环境变量模板见 `.env.nginx.example`，站点配置模板见 `deploy/nginx/music-api.conf.example`。
+
+应用在 `Program.cs` 中显式注册转发头中间件，只信任回环代理，并只接受 `X-Forwarded-For`/`X-Forwarded-Proto`；不要改用 `ASPNETCORE_FORWARDEDHEADERS_ENABLED`，它不会注册中间件。配置 `AllowedHosts` 时必须保留 `127.0.0.1`，否则容器内 healthcheck 的 Host 头会被拒绝。
+
 ### Flutter 客户端如何获得服务器地址
 
 客户端不内置任何默认地址，按以下优先级解析：

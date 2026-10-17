@@ -63,6 +63,9 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 | `backend/Music.Api/Services/OnlineMusic/` | sidecar 网关、缓存、票据、资源代理、指标和熔断 | 指标标签保持低基数；不得包含搜索词、曲目 ID、Token、Cookie 或 URL |
 | `go-music-dl/` | 固定上游 clone 与私有 JSON sidecar | 集成模式默认仅监听 `127.0.0.1`；搜索私有字段与上游 URL 只进短期内存注册表，不得向公网或 Flutter 暴露 |
 | `compose.online-music.yml` | `Music.Api` 与 sidecar 的单机容器编排模板 | 只发布 API 端口；sidecar 仅加入 Compose 私有网络并保留必要的外网访问能力 |
+| `compose.online-music.nginx.yml` | 宿主机 Nginx 反向代理的单机编排 | `Music.Api` 只绑定 `127.0.0.1`，公网流量必须经 Nginx；转发头由应用内中间件处理 |
+| `deploy/nginx/` | Nginx 站点、安全头与限流模板 | 模板只保留占位值；证书路径、域名和出口 IP 由部署环境替换 |
+| `.env.nginx.example` | Nginx 反代编排的环境变量模板 | 只能保存占位值；真实域名、密钥写入未提交的 `.env` |
 | `.env.example` | Compose 环境变量模板 | 只能保存占位值；真实 JWT、管理员密码和 Cookie 写入未提交的 `.env` 或密钥系统 |
 | `backend/Music.Api/Pages/Admin/` | 后端托管的服务器扫描 Razor Pages | 使用独立管理员 Cookie；PageModel 调用扫描 Service，不复用 Flutter JWT |
 | `backend/Music.Api/wwwroot/admin/scanning/` | 管理页面样式资源 | 不应再放置独立 HTML/JavaScript 应用 |
@@ -302,6 +305,8 @@ Windows 相关改动还要检查窗口生命周期、托盘释放、快捷键注
 - sidecar 业务调用的熔断只统计网络错误、超时、HTTP 408/429/5xx 等瞬时失败；404、资源超限等稳定业务响应不得错误打开熔断。
 - 生产环境必须覆盖默认 JWT 密钥；代码和文档中不得加入真实密钥。
 - 数据库文件、WAL/SHM、`bin/` 和 `obj/` 不应纳入功能改动。
+- 反向代理部署必须由应用显式注册转发头中间件（`Program.cs` 的 `UseForwardedHeaders`），且只信任回环代理；不要改用 `ASPNETCORE_FORWARDEDHEADERS_ENABLED`，它只配置选项类而不注册中间件。只接受 `X-Forwarded-For`/`X-Forwarded-Proto`，不信任客户端可伪造的 `X-Forwarded-Host`。
+- 配置 `AllowedHosts` 时必须保留 `127.0.0.1`，否则容器内 healthcheck 的 Host 头会被拒绝；Nginx 侧需转发 `Host`、`X-Real-IP`、`X-Forwarded-For` 与 `X-Forwarded-Proto`。
 - Compose 编排只发布 `Music.Api` 端口，sidecar 不映射宿主机端口；`.env`、数据卷导出、Data Protection 密钥和 sidecar Cookie 不得提交。
 
 后端标准命令：
@@ -418,11 +423,12 @@ Invoke-WebRequest http://localhost:5080/health/ready
 Invoke-RestMethod http://localhost:5080/openapi.json
 ```
 
-修改 `Dockerfile`、`.env.example` 或 `compose.online-music.yml` 时，在 Docker 可用的环境至少运行：
+修改 `Dockerfile`、`.env.example`、`compose.online-music.yml` 或 `compose.online-music.nginx.yml` 时，在 Docker 可用的环境至少运行：
 
 ```powershell
 docker compose --env-file .env -f compose.online-music.yml config
 docker compose --env-file .env -f compose.online-music.yml build
+docker compose --env-file .env -f compose.online-music.nginx.yml config
 ```
 
 若当前机器没有 Docker CLI，必须明确记录为“未执行”，不能仅凭 YAML 可读或后端单测通过推断镜像可构建。
