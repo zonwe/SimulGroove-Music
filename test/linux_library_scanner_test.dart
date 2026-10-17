@@ -2,10 +2,55 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_music/core/library/library_scanner_io.dart';
+import 'package:flutter_music/core/library/scan_fingerprint.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
+  test(
+    'rescan keeps unchanged fingerprints, rereads lyrics and invalidates changed audio',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'music_incremental_scan_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      final audio = File(p.join(root.path, 'Track.wav'));
+      await audio.writeAsBytes(_emptyPcmWave);
+      final first = (await scanDesktopDirectory(
+        root.path,
+        isWindows: false,
+      )).tracks.single;
+      final cache = [
+        ScanFingerprint(
+          path: first.filePath!,
+          fileSize: first.fileSize!,
+          modifiedAt: first.modifiedAt!,
+          fingerprint: first.contentFingerprint!,
+        ),
+      ];
+      await File(
+        p.setExtension(audio.path, '.lrc'),
+      ).writeAsString('new lyrics');
+      final second = (await scanDesktopDirectory(
+        root.path,
+        isWindows: false,
+        fingerprintCache: cache,
+      )).tracks.single;
+      expect(second.contentFingerprint, first.contentFingerprint);
+      expect(second.lyrics, 'new lyrics');
+      await audio.writeAsBytes([..._emptyPcmWave, 1, 2]);
+      final changed = (await scanDesktopDirectory(
+        root.path,
+        isWindows: false,
+        fingerprintCache: cache,
+      )).tracks.single;
+      expect(
+        changed.contentFingerprint,
+        'sha256:${sha256.convert([..._emptyPcmWave, 1, 2])}',
+      );
+      expect(changed.contentFingerprint, isNot(first.contentFingerprint));
+    },
+  );
   test('Linux 桌面扫描递归收集音频、歌词并使用 Linux 来源类型', () async {
     final root = await Directory.systemTemp.createTemp(
       'flutter_music_linux_scan_',

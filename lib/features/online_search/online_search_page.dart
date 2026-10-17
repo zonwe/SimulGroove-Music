@@ -178,7 +178,7 @@ class _OnlineSearchPageState extends ConsumerState<OnlineSearchPage> {
           ? '已下载 ${result.downloaded.length} 首歌曲到 ${downloadDestination.label}'
           : '下载完成：成功 ${result.downloaded.length} 首，失败 $failed 首。'
                 '${_errorMessage(result.failures.first.error)}';
-      _showMessage(message);
+      _showDownloadMessage(downloader, message, result.warnings);
     } catch (error) {
       if (mounted) _showError(_errorMessage(error));
     } finally {
@@ -189,6 +189,52 @@ class _OnlineSearchPageState extends ConsumerState<OnlineSearchPage> {
         });
       }
     }
+  }
+
+  void _showDownloadMessage(
+    OnlineTrackDownloader downloader,
+    String message,
+    List<OnlineDownloadWarning> warnings,
+  ) {
+    final retrier = downloader is OnlineDownloadAttachmentRetrier
+        ? downloader as OnlineDownloadAttachmentRetrier
+        : null;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            '$message${warnings.isEmpty ? '' : '；${warnings.length} 首歌曲的封面或歌词未完整保存，音频已入库。'}',
+          ),
+          action: warnings.isEmpty || retrier == null
+              ? null
+              : SnackBarAction(
+                  label: '重试附件',
+                  onPressed: () async {
+                    try {
+                      final remaining = await retrier.retryAttachments(
+                        warnings,
+                      );
+                      if (mounted) {
+                        _showDownloadMessage(
+                          downloader,
+                          remaining.isEmpty ? '封面和歌词已补齐' : '部分附件仍无法保存',
+                          remaining,
+                        );
+                      }
+                    } catch (error) {
+                      if (mounted) {
+                        _showDownloadMessage(
+                          downloader,
+                          _errorMessage(error),
+                          warnings,
+                        );
+                      }
+                    }
+                  },
+                ),
+        ),
+      );
   }
 
   Future<void> _createPlaylistFromSelection(List<OnlineTrack> tracks) async {

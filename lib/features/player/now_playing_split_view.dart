@@ -27,11 +27,15 @@ class NowPlayingSplitArtworkLyrics extends StatelessWidget {
     required this.item,
     required this.positionStream,
     required this.initialPosition,
+    this.onSeek,
+    this.confirmSeek = false,
   });
 
   final MediaItem item;
   final Stream<Duration> positionStream;
   final Duration initialPosition;
+  final ValueChanged<Duration>? onSeek;
+  final bool confirmSeek;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -63,6 +67,8 @@ class NowPlayingSplitArtworkLyrics extends StatelessWidget {
               lyrics: item.extras?['lyrics'] as String?,
               positionStream: positionStream,
               initialPosition: initialPosition,
+              onSeek: onSeek,
+              confirmSeek: confirmSeek,
             ),
           ),
         ],

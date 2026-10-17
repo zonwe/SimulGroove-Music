@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../player/music_audio_handler.dart';
@@ -14,6 +16,7 @@ class DefaultOnlineTrackPlayback implements OnlineTrackPlayback {
 
   final OnlineMusicSearchRepository _repository;
   final MusicAudioHandler _audioHandler;
+  int _request = 0;
 
   @override
   bool get supported => !kIsWeb;
@@ -23,11 +26,12 @@ class DefaultOnlineTrackPlayback implements OnlineTrackPlayback {
     if (!supported) {
       throw UnsupportedError('Web 暂不支持需要认证请求头的在线播放。');
     }
+    final request = ++_request;
+    final queueRevision = _audioHandler.queueRevision;
     final source = await _repository.preparePlayback(track);
-    final (lyrics, artwork) = await (
-      _optionalLyrics(track),
-      _optionalArtwork(track),
-    ).wait;
+    if (request != _request || queueRevision != _audioHandler.queueRevision) {
+      return;
+    }
     await _audioHandler.playOnlineTrack(
       id: track.id,
       title: track.title,
@@ -38,6 +42,18 @@ class DefaultOnlineTrackPlayback implements OnlineTrackPlayback {
       trackId: track.trackId,
       uri: source.url,
       headers: source.headers,
+    );
+    if (request == _request) unawaited(_loadMetadata(track, request));
+  }
+
+  Future<void> _loadMetadata(OnlineTrack track, int request) async {
+    final (lyrics, artwork) = await (
+      _optionalLyrics(track),
+      _optionalArtwork(track),
+    ).wait;
+    if (request != _request) return;
+    await _audioHandler.updateOnlineTrackMetadata(
+      id: track.id,
       lyrics: lyrics,
       artwork: artwork,
     );

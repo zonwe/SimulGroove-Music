@@ -1,5 +1,6 @@
 import 'library_scanner.dart';
 import 'scanned_track.dart';
+import 'scan_fingerprint.dart';
 
 LibraryScanner createLibraryScanner() => const UnsupportedLibraryScanner();
 
@@ -26,5 +27,6 @@ class UnsupportedLibraryScanner implements LibraryScanner {
     required String sourceUri,
     required String platform,
     required String sourceLabel,
+    List<ScanFingerprint> fingerprintCache = const [],
   }) async => null;
 }

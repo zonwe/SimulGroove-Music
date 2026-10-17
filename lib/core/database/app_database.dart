@@ -1,6 +1,8 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 
+import '../library/scan_fingerprint.dart';
+
 part 'app_database.g.dart';
 
 class Accounts extends Table {
@@ -191,6 +193,31 @@ class AppDatabase extends _$AppDatabase {
       if (from < 4) await m.createTable(syncTombstones);
       if (from < 5) await m.addColumn(tracks, tracks.contentFingerprint);
     },
+    beforeOpen: (details) async {
+      // Foreign-key declarations alone do not enable SQLite enforcement.
+      // Repair rows left by older builds once, without touching valid links.
+      const repairKey = 'database.foreign_key_repair_v1';
+      await customStatement('PRAGMA foreign_keys = ON');
+      if (await readSetting(repairKey) == null) {
+        await transaction(() async {
+          await customStatement('''
+            DELETE FROM playlist_entries
+            WHERE NOT EXISTS (
+              SELECT 1 FROM playlists WHERE id = playlist_entries.playlist_id
+            ) OR NOT EXISTS (
+              SELECT 1 FROM tracks WHERE id = playlist_entries.track_id
+            )
+          ''');
+          await customStatement('''
+            DELETE FROM liked_tracks
+            WHERE NOT EXISTS (
+              SELECT 1 FROM tracks WHERE id = liked_tracks.track_id
+            )
+          ''');
+          await setSetting(repairKey, 'done');
+        });
+      }
+    },
   );
 
   Stream<List<Track>> watchTracks() =>
@@ -213,6 +240,31 @@ class AppDatabase extends _$AppDatabase {
   Future<Track?> findTrackByUri(String uri) =>
       (select(tracks)..where((row) => row.uri.equals(uri))).getSingleOrNull();
 
+  Future<List<Track>> tracksByIds(Iterable<String> ids) async {
+    final values = ids.toSet().toList(growable: false);
+    final result = <Track>[];
+    for (var start = 0; start < values.length; start += 500) {
+      result.addAll(
+        await (select(tracks)..where(
+              (row) => row.id.isIn(
+                values.sublist(start, (start + 500).clamp(0, values.length)),
+              ),
+            ))
+            .get(),
+      );
+    }
+    return result;
+  }
+
+  Future<PlaybackSnapshot?> readPlaybackSnapshot() => (select(
+    playbackSnapshots,
+  )..where((row) => row.id.equals('current'))).getSingleOrNull();
+
+  Future<void> savePlaybackSnapshot(PlaybackSnapshotsCompanion value) =>
+      into(playbackSnapshots).insertOnConflictUpdate(value);
+
+  Future<void> clearPlaybackSnapshot() => delete(playbackSnapshots).go();
+
   Future<void> upsertTracks(Iterable<TracksCompanion> values) async {
     await batch((batch) {
       batch.insertAllOnConflictUpdate(tracks, values.toList());
@@ -223,6 +275,41 @@ class AppDatabase extends _$AppDatabase {
       into(scanSources).insertOnConflictUpdate(value);
 
   Stream<List<ScanSource>> watchScanSources() => select(scanSources).watch();
+
+  Future<List<ScanFingerprint>> fingerprintsForScanSource(
+    ScanSource source,
+  ) async {
+    final query = selectOnly(tracks)
+      ..addColumns([
+        tracks.filePath,
+        tracks.fileSize,
+        tracks.modifiedAt,
+        tracks.contentFingerprint,
+      ])
+      ..where(_tracksFromScanSource(source));
+    final rows = await query.get();
+    return [
+      for (final row in rows)
+        if ((
+              row.read(tracks.filePath),
+              row.read(tracks.fileSize),
+              row.read(tracks.modifiedAt),
+              row.read(tracks.contentFingerprint),
+            )
+            case (
+              final String path,
+              final int size,
+              final DateTime modified,
+              final String fingerprint,
+            ))
+          ScanFingerprint(
+            path: path,
+            fileSize: size,
+            modifiedAt: modified,
+            fingerprint: fingerprint,
+          ),
+    ];
+  }
 
   Future<void> replaceScanSourceTracks(
     ScanSource source,

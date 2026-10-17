@@ -7,6 +7,7 @@ import '../library/library_scan_settings_section.dart';
 import 'appearance_settings_section.dart';
 import 'desktop_shortcut_settings_section.dart';
 import 'equalizer_settings_section.dart';
+import 'lyrics_settings_section.dart';
 import 'now_playing_layout_settings_section.dart';
 import 'online_music_settings_section.dart';
 import 'settings_section.dart';
@@ -37,6 +38,8 @@ class SettingsPage extends ConsumerWidget {
           const SizedBox(height: 16),
           const NowPlayingLayoutSettingsSection(),
         ],
+        const SizedBox(height: 16),
+        const LyricsSettingsSection(),
         const SizedBox(height: 16),
         const EqualizerSettingsSection(),
         const SizedBox(height: 16),

@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 import '../log/app_log.dart';
 import 'library_scanner.dart';
 import 'scanned_track.dart';
+import 'scan_fingerprint.dart';
 
 LibraryScanner createLibraryScanner() => IoLibraryScanner();
 
@@ -51,6 +52,7 @@ class IoLibraryScanner implements LibraryScanner {
     required String sourceUri,
     required String platform,
     required String sourceLabel,
+    List<ScanFingerprint> fingerprintCache = const [],
   }) {
     if (sourceUri == 'media-store://external') {
       return _scanAndroidFullDevice();
@@ -60,7 +62,11 @@ class IoLibraryScanner implements LibraryScanner {
     }
     if (Platform.isWindows || Platform.isLinux) {
       return Isolate.run(
-        () => scanDesktopDirectory(sourceUri, isWindows: Platform.isWindows),
+        () => scanDesktopDirectory(
+          sourceUri,
+          isWindows: Platform.isWindows,
+          fingerprintCache: fingerprintCache,
+        ),
       );
     }
     return Future.value();
@@ -254,6 +260,7 @@ Map<String, String?> _readEmbeddedLyricsByPath(List<String> paths) {
 Future<ScanResult> scanDesktopDirectory(
   String selected, {
   required bool isWindows,
+  List<ScanFingerprint> fingerprintCache = const [],
 }) async {
   final uuid = const Uuid();
   final directory = Directory(selected);
@@ -265,6 +272,11 @@ Future<ScanResult> scanDesktopDirectory(
       .cast<File>()
       .toList();
   final tracks = <ScannedTrack>[];
+  String cacheKey(String path) =>
+      isWindows ? p.normalize(path).toLowerCase() : p.normalize(path);
+  final cached = {
+    for (final item in fingerprintCache) cacheKey(item.path): item,
+  };
   for (final file in files) {
     final stat = await file.stat();
     AudioMetadata? metadata;
@@ -276,6 +288,7 @@ Future<ScanResult> scanDesktopDirectory(
     }
     final canonicalPath = p.normalize(file.absolute.path);
     final stablePath = isWindows ? canonicalPath.toLowerCase() : canonicalPath;
+    final previous = cached[cacheKey(canonicalPath)];
     final sourceType = isWindows ? 'windows_file' : 'linux_file';
     tracks.add(
       ScannedTrack(
@@ -301,7 +314,9 @@ Future<ScanResult> scanDesktopDirectory(
             await _readDesktopSidecarLyrics(canonicalPath),
         fileSize: stat.size,
         modifiedAt: stat.modified,
-        contentFingerprint: await _contentFingerprint(file),
+        contentFingerprint: previous?.matches(stat.size, stat.modified) == true
+            ? previous!.fingerprint
+            : await _contentFingerprint(file),
       ),
     );
   }

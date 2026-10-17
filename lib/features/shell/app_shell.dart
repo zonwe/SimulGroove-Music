@@ -19,20 +19,27 @@ import '../playlists/playlists_page.dart';
 import 'app_destination.dart';
 import 'windows_title_bar.dart';
 
-class AppShell extends StatefulWidget {
+class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key});
 
   @override
-  State<AppShell> createState() => _AppShellState();
+  ConsumerState<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends ConsumerState<AppShell> {
   AppDestination _destination = AppDestination.playlists;
   Playlist? _selectedPlaylist;
   OnlineCollectionRequest? _selectedOnlineCollection;
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(playbackErrorsProvider, (_, next) {
+      next.whenData((message) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+      });
+    });
     return PopScope(
       canPop:
           _destination == AppDestination.playlists && _selectedPlaylist == null,

@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../core/player/lyrics_settings.dart';
 import '../../core/player/now_playing_layout.dart';
 import '../../core/window/desktop_window_controller.dart';
 import '../library/artwork_view.dart';
@@ -57,6 +60,16 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
     final handler = ref.watch(audioHandlerProvider);
     final configuredLayout =
         ref.watch(nowPlayingLayoutProvider).value ?? NowPlayingLayout.classic;
+    final lyricsTapToSeekEnabled =
+        ref.watch(lyricsTapToSeekEnabledProvider).value ??
+        lyricsTapToSeekEnabledByDefault;
+    final lyricsTapToSeekConfirm =
+        ref.watch(lyricsTapToSeekConfirmProvider).value ??
+        lyricsTapToSeekConfirmByDefault;
+    // 只有启用时才把 onSeek 传进歌词面板；null 表示歌词行不可点击。
+    final seekFromLyrics = lyricsTapToSeekEnabled
+        ? (Duration position) => unawaited(handler.seek(position))
+        : null;
     final isAndroid =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
     final isDesktop =
@@ -130,6 +143,8 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                                                 .playbackState
                                                 .value
                                                 .position,
+                                            onSeek: seekFromLyrics,
+                                            confirmSeek: lyricsTapToSeekConfirm,
                                           )
                                         : GestureDetector(
                                             behavior: HitTestBehavior.opaque,
@@ -158,6 +173,9 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                                                           .playbackState
                                                           .value
                                                           .position,
+                                                      onSeek: seekFromLyrics,
+                                                      confirmSeek:
+                                                          lyricsTapToSeekConfirm,
                                                     )
                                                   : LayoutBuilder(
                                                       builder: (context, constraints) {

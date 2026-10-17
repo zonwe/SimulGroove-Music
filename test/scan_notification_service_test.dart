@@ -6,6 +6,7 @@ import 'package:flutter_music/app/providers.dart';
 import 'package:flutter_music/core/database/app_database.dart';
 import 'package:flutter_music/core/library/library_scanner.dart';
 import 'package:flutter_music/core/library/scanned_track.dart';
+import 'package:flutter_music/core/library/scan_fingerprint.dart';
 import 'package:flutter_music/core/notifications/scan_notification_service.dart';
 import 'package:flutter_music/core/notifications/scan_notification_service_stub.dart';
 import 'package:flutter_music/features/library/library_scan_settings_section.dart';
@@ -88,6 +89,7 @@ class FakeLibraryScanner implements LibraryScanner {
     required String sourceUri,
     required String platform,
     required String sourceLabel,
+    List<ScanFingerprint> fingerprintCache = const [],
   }) async {
     if (shouldThrow) throw Exception('重新扫描失败');
     return scanResult;
