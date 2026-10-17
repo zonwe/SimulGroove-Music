@@ -18,18 +18,32 @@ double lyricsScrollAlignment(List<LyricLine> lines, int targetIndex) {
   return targetIndex >= 0 && targetIndex == lastTextIndex ? 1 : 0.5;
 }
 
+@visibleForTesting
+String formatLyricSeekTime(Duration duration) {
+  final minutes = duration.inMinutes;
+  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+  return '$minutes:$seconds';
+}
+
 /// 同步歌词面板：跟随播放进度滚动并高亮当前行。
+///
+/// 传入 [onSeek] 后每一行都可点击，并把该行的开始时间回调给播放器；
+/// [confirmSeek] 为 true 时先弹出确认对话框，避免误触改变播放进度。
 class LyricsPanel extends StatefulWidget {
   const LyricsPanel({
     super.key,
     required this.lyrics,
     required this.positionStream,
     required this.initialPosition,
+    this.onSeek,
+    this.confirmSeek = false,
   });
 
   final String? lyrics;
   final Stream<Duration> positionStream;
   final Duration initialPosition;
+  final ValueChanged<Duration>? onSeek;
+  final bool confirmSeek;
 
   @override
   State<LyricsPanel> createState() => _LyricsPanelState();
@@ -57,6 +71,32 @@ class _LyricsPanelState extends State<LyricsPanel> {
     }
   }
 
+  Future<void> _seekToLine(LyricLine line) async {
+    final onSeek = widget.onSeek;
+    if (onSeek == null) return;
+    if (widget.confirmSeek) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('跳转到这句歌词？'),
+          content: Text('播放进度将定位到 ${formatLyricSeekTime(line.time)}。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('跳转'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    onSeek(line.time);
+  }
+
   @override
   Widget build(BuildContext context) {
     final lines = parseLrc(widget.lyrics);
@@ -68,6 +108,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
         ..clear()
         ..addAll(List<GlobalKey>.generate(lines.length, (_) => GlobalKey()));
     }
+    final canSeek = widget.onSeek != null;
     return StreamBuilder<Duration>(
       key: const ValueKey('lyrics'),
       stream: widget.positionStream,
@@ -99,8 +140,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
           padding: const EdgeInsets.symmetric(vertical: 32),
           children: List<Widget>.generate(lines.length, (index) {
             final selected = index == currentIndex;
-            return AnimatedDefaultTextStyle(
-              key: _lineKeys[index],
+            Widget line = AnimatedDefaultTextStyle(
               duration: const Duration(milliseconds: 180),
               style:
                   (selected
@@ -117,6 +157,18 @@ class _LyricsPanelState extends State<LyricsPanel> {
                       ),
               child: Text(lines[index].text, textAlign: TextAlign.center),
             );
+            if (canSeek) {
+              final seekLine = lines[index];
+              line = InkWell(
+                onTap: () => _seekToLine(seekLine),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: line,
+                ),
+              );
+            }
+            return KeyedSubtree(key: _lineKeys[index], child: line);
           }),
         );
       },

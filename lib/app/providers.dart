@@ -22,6 +22,7 @@ import '../core/online_music/online_track.dart';
 import '../core/online_music/online_track_downloader.dart';
 import '../core/online_music/online_track_playback.dart';
 import '../core/player/equalizer_models.dart';
+import '../core/player/lyrics_settings.dart';
 import '../core/player/music_audio_handler.dart';
 import '../core/player/now_playing_layout.dart';
 
@@ -187,6 +188,18 @@ final nowPlayingLayoutProvider = StreamProvider<NowPlayingLayout>(
         (settings) =>
             parseNowPlayingLayout(settings[nowPlayingLayoutSettingKey]),
       ),
+);
+final lyricsTapToSeekEnabledProvider = StreamProvider<bool>(
+  (ref) => ref
+      .watch(databaseProvider)
+      .watchSettings()
+      .map(lyricsTapToSeekEnabledFromSettings),
+);
+final lyricsTapToSeekConfirmProvider = StreamProvider<bool>(
+  (ref) => ref
+      .watch(databaseProvider)
+      .watchSettings()
+      .map(lyricsTapToSeekConfirmFromSettings),
 );
 final trayMinimizeOnCloseProvider = StreamProvider<bool>(
   (ref) => ref
