@@ -1,0 +1,107 @@
+# SimulGroove Music API —— 宿主机 Nginx 站点配置模板
+# 用法：
+#   sudo cp deploy/nginx/music-api.conf.example /etc/nginx/sites-available/music-api.conf
+#   sudo ln -s /etc/nginx/sites-available/music-api.conf /etc/nginx/sites-enabled/music-api.conf
+#   替换下面全部 <占位符>，然后 sudo nginx -t && sudo systemctl reload nginx
+#
+# 证书：推荐用 certbot 自动签发（见文件末尾注释），签好后本文件引用
+# /etc/letsencrypt/live/<域名>/ 下的证书即可。
+
+upstream simulgroove_music_api {
+    # 与 compose.online-music.nginx.yml 的 127.0.0.1:${MUSIC_API_HOST_PORT} 对应。
+    server 127.0.0.1:5080;
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name <你的域名>;
+
+    # 仅放行 ACME 校验，其余一律跳转 HTTPS。
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name <你的域名>;
+
+    ssl_certificate     /etc/letsencrypt/live/<你的域名>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<你的域名>/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # 安全响应头。HSTS 建议先确认全站 HTTPS 正常再加 max-age。
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    # 管理控制台（/admin）默认经 HTTPS 对公网开放，仅靠管理员密码保护。
+    # 强烈建议改成 IP 白名单：把下面三行去掉注释并替换成你的固定出口 IP / VPN 网段。
+    # 注意 allow/deny 是顺序匹配，deny all 必须放在最后。
+    # location /admin/ {
+    #     allow 203.0.113.10;
+    #     deny all;
+    #     proxy_pass http://simulgroove_music_api;
+    #     limit_req zone=simulgroove_admin burst=20 nodelay;
+    # }
+
+    # 上传体积与本机代理参数：API 本身不接收文件上传，这里收紧即可。
+    client_max_body_size 2m;
+    client_body_timeout  30s;
+    keepalive_timeout    75s;
+    send_timeout         300s;
+
+    # 在线音乐与服务器扫描播放都是流式响应，禁止缓冲，
+    # 否则 Range 拖动会被 Nginx 攒在缓冲区里。
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host  $host;
+    proxy_set_header Connection        "";
+    proxy_request_buffering off;
+    proxy_buffering         off;
+    proxy_connect_timeout   10s;
+    proxy_send_timeout      300s;
+    proxy_read_timeout      300s;
+
+    # 搜索与上游客服端调用可能较慢，单独给 /api 更长一点的读超时。
+    location /api/ {
+        proxy_pass http://simulgroove_music_api;
+        proxy_read_timeout 120s;
+        limit_req zone=simulgroove_api burst=60 nodelay;
+    }
+
+    location /admin/ {
+        proxy_pass http://simulgroove_music_api;
+        limit_req zone=simulgroove_admin burst=20 nodelay;
+    }
+
+    # 存活与就绪检查：只允许本机与监控网段，不对外暴露依赖细节。
+    location /health {
+        allow 127.0.0.1;
+        allow ::1;
+        deny all;
+        proxy_pass http://simulgroove_music_api;
+    }
+
+    location / {
+        proxy_pass http://simulgroove_music_api;
+        limit_req zone=simulgroove_api burst=120 nodelay;
+    }
+}
+
+# 首次签发证书（签发前请先只保留上面的 80 端口 server 块）：
+#   sudo certbot certonly --webroot -w /var/www/html -d <你的域名>

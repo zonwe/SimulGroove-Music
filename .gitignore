@@ -43,6 +43,7 @@ migrate_working_dir/
 .env
 .env.*
 !.env.example
+!.env.nginx.example
 
 # .NET backend build and test artifacts
 backend/**/bin/

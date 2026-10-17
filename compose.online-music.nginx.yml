@@ -1,0 +1,105 @@
+# 使用宿主机自带 Nginx 作为 TLS 入口的单机编排（替代 compose.online-music.production.yml 中的 Caddy）。
+#
+# 与生产编排的差异：
+#   - 不启动 Caddy / OTLP Collector / Prometheus / Alertmanager。
+#   - music-api 只在宿主机回环地址发布端口，由宿主机 Nginx 反向代理；
+#     sidecar 仍然只加入 Compose 私有网络，不发布任何宿主机端口。
+#   - music-api 的 HEALTHCHECK 显式覆盖了镜像内定义，并使用 Host 头，
+#     以配合 AllowedHosts 的主机白名单（见 .env.nginx.example 的说明）。
+name: simulgroove-online-nginx
+
+services:
+  music-api:
+    build:
+      context: .
+      dockerfile: backend/Music.Api/Dockerfile
+    restart: unless-stopped
+    init: true
+    cpus: "${MUSIC_API_CPU_LIMIT:-1.0}"
+    mem_limit: "${MUSIC_API_MEMORY_LIMIT:-512m}"
+    ports:
+      # 只绑定回环：公网流量必须经过宿主机 Nginx，不能直连 5080。
+      - "127.0.0.1:${MUSIC_API_HOST_PORT:-5080}:8080"
+    environment:
+      # 转发头由应用内显式调用 UseForwardedHeaders 处理（见 backend/Music.Api/Program.cs）。
+      # 不要改用 ASPNETCORE_FORWARDEDHEADERS_ENABLED：它只配置选项类而不注册中间件，
+      # 单独设置没有任何效果，反而会让人误以为已经生效。
+      # 未设置时默认是 *（不做主机校验）。设置为域名时务必同时保留 127.0.0.1，
+      # 否则下面的 healthcheck 会被主机过滤拒绝。
+      AllowedHosts: "${MUSIC_ALLOWED_HOSTS:-*}"
+      Auth__JwtKey: "${MUSIC_API_JWT_KEY:?请在 .env 中设置 MUSIC_API_JWT_KEY}"
+      Administration__Username: "${MUSIC_API_ADMIN_USERNAME:-admin}"
+      Administration__Password: "${MUSIC_API_ADMIN_PASSWORD:?请在 .env 中设置 MUSIC_API_ADMIN_PASSWORD}"
+      Cors__AllowedOrigins__0: "${MUSIC_API_CORS_ORIGIN_0:-}"
+      Cors__AllowedOrigins__1: "${MUSIC_API_CORS_ORIGIN_1:-}"
+      Cors__AllowedOrigins__2: "${MUSIC_API_CORS_ORIGIN_2:-}"
+      Scanning__AllowedRoots__0: "/music"
+      OnlineMusic__Enabled: "${ONLINE_MUSIC_ENABLED:-false}"
+      OnlineMusic__SidecarBaseUrl: "http://music-sidecar:8080"
+      OnlineMusic__AllowedSources__0: "${ONLINE_MUSIC_SOURCE_0:-}"
+      OnlineMusic__AllowedSources__1: "${ONLINE_MUSIC_SOURCE_1:-}"
+      OnlineMusic__AllowedSources__2: "${ONLINE_MUSIC_SOURCE_2:-}"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        # 必须带一个被 AllowedHosts 放行的 Host 头，否则会返回 400，容器永远 unhealthy。
+        # 整个命令用引号包裹，避免 Host 后面的冒号被 YAML 解析成映射。
+        - "curl --fail --silent --show-error --header 'Host: 127.0.0.1' http://127.0.0.1:8080/health/ready || exit 1"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    volumes:
+      - type: bind
+        source: "${MUSIC_SERVER_LIBRARY_PATH:?请在 .env 中设置 MUSIC_SERVER_LIBRARY_PATH 为服务器上已存在的音乐目录}"
+        target: /music
+        read_only: true
+      - music-api-data:/data
+      - music-api-keys:/home/music-api/.aspnet/DataProtection-Keys
+    depends_on:
+      music-sidecar:
+        condition: service_healthy
+    networks:
+      - default
+      - online-private
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  music-sidecar:
+    build:
+      context: ./go-music-dl
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    cpus: "${MUSIC_SIDECAR_CPU_LIMIT:-2.0}"
+    mem_limit: "${MUSIC_SIDECAR_MEMORY_LIMIT:-1g}"
+    command: ["./music-dl", "integration", "--host", "0.0.0.0", "--port", "8080"]
+    expose:
+      - "8080"
+    volumes:
+      - music-sidecar-data:/home/appuser/data
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8080/integration/v1/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    networks:
+      - online-private
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  default:
+    driver: bridge
+  online-private:
+    driver: bridge
+
+volumes:
+  music-api-data:
+  music-api-keys:
+  music-sidecar-data:

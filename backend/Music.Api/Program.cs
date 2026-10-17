@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Music.Api.Data;
 using Music.Api.Endpoints;
 using Music.Api.Middleware;
@@ -121,6 +122,16 @@ _ = app.Services.GetRequiredService<IAuditLogStore>();
 _ = app.Services.GetRequiredService<IOnlineMusicSearchService>();
 _ = app.Services.GetRequiredService<IOnlineMusicPlaybackService>();
 _ = app.Services.GetRequiredService<IOnlineMusicAssetService>();
+// 反向代理（宿主机 Nginx / 容器入口）后面必须显式启用转发头中间件，
+// 否则 Connection.RemoteIpAddress 与 Request.Scheme 都是代理的地址和 http：
+// 在线搜索限流的按 IP 维度会退化成全站共享一个配额，审计日志也记不到真实客户端。
+// KnownProxies/KnownIPNetworks 保持默认值（仅信任回环地址），
+// 因此同机代理生效，而直接从公网送来的 X-Forwarded-For 会被忽略。
+// 只接受 For/Proto：应用用 AllowedHosts 做主机校验，不能信任客户端可伪造的 X-Forwarded-Host。
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+	ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseStaticFiles();
 app.Use(async (context, next) =>
