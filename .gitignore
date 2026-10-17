@@ -39,6 +39,9 @@ migrate_working_dir/
 /.dart-localappdata/
 /.nuget/
 
+# Local sandbox ACL recovery artifacts (backups and reports, not source)
+/.dsh-acl-recovery/
+
 # Local environment and secret overrides
 .env
 .env.*
