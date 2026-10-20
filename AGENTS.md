@@ -439,7 +439,7 @@ docker compose --env-file .env -f compose.online-music.nginx.yml config
 | --- | --- |
 | 音乐库 | 空库、扫描、搜索、三种视图、重扫、删除来源 |
 | 播放 | 首次播放、暂停/继续、切歌、拖动进度、队列、循环/随机 |
-| 歌词 | 无歌词、内嵌歌词、同名 LRC、时间同步、长歌词滚动、点击定位与跳转前确认 |
+| 歌词 | 无歌词、内嵌歌词、同名 LRC、时间同步、长歌词滚动、点击定位与二次点按确认（第一次点按只选中，不弹框） |
 | 歌单/喜欢/均衡器 | 新建、删除、加入、移除、空状态、级联删除、同步墓碑和较新修改恢复 |
 | 主题/设置 | 浅色、深色、跟随系统、重启后持久化 |
 | Windows | 标题栏、拖动、最小化托盘、紧凑窗、快捷键 |
@@ -459,7 +459,7 @@ docker compose --env-file .env -f compose.online-music.nginx.yml config
 ## 16. 现有测试说明
 
 - `test/lrc_parser_test.dart`：LRC 时间标签解析和排序。
-- `test/lyrics_settings_test.dart`：歌词点击定位、跳转前确认与设置持久化。
+- `test/lyrics_settings_test.dart`：歌词点击定位、二次点按确认与设置持久化。
 - `test/app_appearance_test.dart`：设置值到 `ThemeMode`/主题色的映射。
 - `test/playlists_page_test.dart`：歌单页面的 loading/error/empty 等 Widget 状态。
 - `test/playback_queue_logic_test.dart`、`test/equalizer_test.dart`、`test/equalizer_controller_test.dart`：播放器队列与均衡器纯逻辑。

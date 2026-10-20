@@ -34,7 +34,9 @@ class LyricsSettingsSection extends ConsumerWidget {
           value: confirm,
           title: const Text('跳转前确认'),
           subtitle: Text(
-            enabled ? '点按歌词后先确认，避免误触改变播放进度' : '启用“点击歌词定位播放进度”后可设置',
+            enabled
+                ? '第一次点按只选中歌词行，再次点按同一行才跳转，避免误触改变播放进度'
+                : '启用“点击歌词定位播放进度”后可设置',
           ),
           secondary: const Icon(Icons.touch_app_outlined),
           onChanged: enabled

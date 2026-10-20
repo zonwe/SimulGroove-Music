@@ -31,6 +31,41 @@ void main() {
     expect(formatLyricSeekTime(Duration.zero), '0:00');
   });
 
+  test('二次点按确认判定：同一行再次点按才算确认', () {
+    expect(
+      lyricsTapNeedsConfirmation(
+        confirmSeek: true,
+        pendingIndex: null,
+        tappedIndex: 2,
+      ),
+      isTrue,
+    );
+    expect(
+      lyricsTapNeedsConfirmation(
+        confirmSeek: true,
+        pendingIndex: 2,
+        tappedIndex: 2,
+      ),
+      isFalse,
+    );
+    expect(
+      lyricsTapNeedsConfirmation(
+        confirmSeek: true,
+        pendingIndex: 2,
+        tappedIndex: 3,
+      ),
+      isTrue,
+    );
+    expect(
+      lyricsTapNeedsConfirmation(
+        confirmSeek: false,
+        pendingIndex: 2,
+        tappedIndex: 2,
+      ),
+      isFalse,
+    );
+  });
+
   testWidgets('点击歌词会回调该行开始时间', (tester) async {
     final seeks = <Duration>[];
     await tester.pumpWidget(
@@ -83,7 +118,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('启用确认时取消对话框不会跳转，确认后才跳转', (tester) async {
+  testWidgets('开启确认后第一次点按只选中，再次点按同一行才跳转', (tester) async {
     final seeks = <Duration>[];
     await tester.pumpWidget(
       MaterialApp(
@@ -101,20 +136,81 @@ void main() {
     await tester.pump();
 
     await tester.tap(find.text('第二句'));
-    await tester.pumpAndSettle();
-    expect(find.text('跳转到这句歌词？'), findsOneWidget);
-    expect(find.text('播放进度将定位到 0:05。'), findsOneWidget);
+    await tester.pump();
 
-    await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle();
+    // 第一次点按不弹框、不跳转，只给出二次点按提示。
     expect(seeks, isEmpty);
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.text('再次点按跳转到 0:05'), findsOneWidget);
 
     await tester.tap(find.text('第二句'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('跳转'));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(seeks, [const Duration(seconds: 5)]);
+    expect(find.text('再次点按跳转到 0:05'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('二次点按确认时点按另一行会把待确认状态移动到新行', (tester) async {
+    final seeks = <Duration>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LyricsPanel(
+            lyrics: '[00:00.00]第一句\n[00:05.00]第二句',
+            positionStream: const Stream<Duration>.empty(),
+            initialPosition: Duration.zero,
+            onSeek: seeks.add,
+            confirmSeek: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('第二句'));
+    await tester.pump();
+    await tester.tap(find.text('第一句'));
+    await tester.pump();
+
+    expect(seeks, isEmpty);
+    expect(find.text('再次点按跳转到 0:00'), findsOneWidget);
+    expect(find.text('再次点按跳转到 0:05'), findsNothing);
+
+    await tester.tap(find.text('第一句'));
+    await tester.pump();
+
+    expect(seeks, [Duration.zero]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('切换歌词后不再保留待确认状态', (tester) async {
+    final seeks = <Duration>[];
+    Widget build(String lyrics) => MaterialApp(
+      home: Scaffold(
+        body: LyricsPanel(
+          lyrics: lyrics,
+          positionStream: const Stream<Duration>.empty(),
+          initialPosition: Duration.zero,
+          onSeek: seeks.add,
+          confirmSeek: true,
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(build('[00:00.00]第一句\n[00:05.00]第二句'));
+    await tester.pump();
+    await tester.tap(find.text('第二句'));
+    await tester.pump();
+    expect(find.text('再次点按跳转到 0:05'), findsOneWidget);
+
+    await tester.pumpWidget(build('[00:00.00]新的第一句\n[00:05.00]新的第二句'));
+    await tester.pump();
+
+    expect(find.text('再次点按跳转到 0:05'), findsNothing);
+    await tester.tap(find.text('新的第二句'));
+    await tester.pump();
+    expect(seeks, isEmpty);
     expect(tester.takeException(), isNull);
   });
 

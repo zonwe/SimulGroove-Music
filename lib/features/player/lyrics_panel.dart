@@ -25,10 +25,22 @@ String formatLyricSeekTime(Duration duration) {
   return '$minutes:$seconds';
 }
 
+/// 开启二次点按确认时，判断这次点按是否只是「选中待确认」的第一次点按。
+///
+/// 第一次点按某一行只进入待确认状态；再次点按同一行才真正跳转；
+/// 点按另一行则把待确认状态移动到新的行。
+@visibleForTesting
+bool lyricsTapNeedsConfirmation({
+  required bool confirmSeek,
+  required int? pendingIndex,
+  required int tappedIndex,
+}) => confirmSeek && pendingIndex != tappedIndex;
+
 /// 同步歌词面板：跟随播放进度滚动并高亮当前行。
 ///
 /// 传入 [onSeek] 后每一行都可点击，并把该行的开始时间回调给播放器；
-/// [confirmSeek] 为 true 时先弹出确认对话框，避免误触改变播放进度。
+/// [confirmSeek] 为 true 时使用二次点按确认：第一次点按只选中该行并给出提示，
+/// 再次点按同一行才跳转，避免误触改变播放进度，且不打断界面。
 class LyricsPanel extends StatefulWidget {
   const LyricsPanel({
     super.key,
@@ -55,6 +67,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
     keepScrollOffset: false,
   );
   int? _lastScrollTargetIndex;
+  int? _pendingSeekIndex;
 
   @override
   void dispose() {
@@ -68,33 +81,61 @@ class _LyricsPanelState extends State<LyricsPanel> {
     if (oldWidget.lyrics != widget.lyrics) {
       _lineKeys.clear();
       _lastScrollTargetIndex = null;
+      _pendingSeekIndex = null;
+    }
+    // 关闭二次确认后不应残留「已选中待确认」的视觉状态。
+    if (oldWidget.confirmSeek != widget.confirmSeek && !widget.confirmSeek) {
+      _pendingSeekIndex = null;
     }
   }
 
-  Future<void> _seekToLine(LyricLine line) async {
+  void _handleLineTap(int index, LyricLine line) {
     final onSeek = widget.onSeek;
     if (onSeek == null) return;
-    if (widget.confirmSeek) {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('跳转到这句歌词？'),
-          content: Text('播放进度将定位到 ${formatLyricSeekTime(line.time)}。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('跳转'),
+    if (lyricsTapNeedsConfirmation(
+      confirmSeek: widget.confirmSeek,
+      pendingIndex: _pendingSeekIndex,
+      tappedIndex: index,
+    )) {
+      setState(() => _pendingSeekIndex = index);
+      return;
+    }
+    setState(() => _pendingSeekIndex = null);
+    onSeek(line.time);
+  }
+
+  /// 待确认的歌词行：加一圈边框并把「再次点按」的提示放在行内，
+  /// 用二次点按代替对话框，避免打断播放界面。
+  Widget _buildPendingLine(
+    BuildContext context,
+    Widget line,
+    LyricLine seekLine,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: scheme.primary),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            line,
+            const SizedBox(height: 4),
+            Text(
+              '再次点按跳转到 ${formatLyricSeekTime(seekLine.time)}',
+              key: const ValueKey('lyrics-seek-pending-hint'),
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: scheme.primary),
             ),
           ],
         ),
-      );
-      if (confirmed != true || !mounted) return;
-    }
-    onSeek(line.time);
+      ),
+    );
   }
 
   @override
@@ -159,12 +200,15 @@ class _LyricsPanelState extends State<LyricsPanel> {
             );
             if (canSeek) {
               final seekLine = lines[index];
+              final pending = index == _pendingSeekIndex;
               line = InkWell(
-                onTap: () => _seekToLine(seekLine),
+                onTap: () => _handleLineTap(index, seekLine),
                 borderRadius: BorderRadius.circular(8),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: line,
+                  child: pending
+                      ? _buildPendingLine(context, line, seekLine)
+                      : line,
                 ),
               );
             }
