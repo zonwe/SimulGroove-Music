@@ -22,8 +22,9 @@ services:
       - "127.0.0.1:${MUSIC_API_HOST_PORT:-5080}:8080"
     environment:
       # 转发头由应用内显式调用 UseForwardedHeaders 处理（见 backend/Music.Api/Program.cs）。
-      # 不要改用 ASPNETCORE_FORWARDEDHEADERS_ENABLED：它只配置选项类而不注册中间件，
-      # 单独设置没有任何效果，反而会让人误以为已经生效。
+      # 不要改用 ASPNETCORE_FORWARDEDHEADERS_ENABLED：那会用默认选项再注册一次中间件，
+      # 等于信任任意来源的 X-Forwarded-For，并与显式配置重复。
+      # 本编排是宿主机 Nginx（回环代理），默认的 KnownProxies 已经覆盖，无需额外放开。
       # 未设置时默认是 *（不做主机校验）。设置为域名时务必同时保留 127.0.0.1，
       # 否则下面的 healthcheck 会被主机过滤拒绝。
       AllowedHosts: "${MUSIC_ALLOWED_HOSTS:-*}"

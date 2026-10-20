@@ -307,7 +307,7 @@ Windows 相关改动还要检查窗口生命周期、托盘释放、快捷键注
 - 只对传输层错误（连接被重置、DNS 失败）做一次重试，且仅在搜索路径上；HTTP 状态响应、业务错误和超时都不重试。
 - 生产环境必须覆盖默认 JWT 密钥；代码和文档中不得加入真实密钥。
 - 数据库文件、WAL/SHM、`bin/` 和 `obj/` 不应纳入功能改动。
-- 反向代理部署必须由应用显式注册转发头中间件（`Program.cs` 的 `UseForwardedHeaders`），且只信任回环代理；不要改用 `ASPNETCORE_FORWARDEDHEADERS_ENABLED`，它只配置选项类而不注册中间件。只接受 `X-Forwarded-For`/`X-Forwarded-Proto`，不信任客户端可伪造的 `X-Forwarded-Host`。
+- 反向代理部署必须由应用显式注册转发头中间件（`Program.cs` 的 `UseForwardedHeaders`），默认只信任回环代理；不要改用 `ASPNETCORE_FORWARDEDHEADERS_ENABLED`——它同样会注册中间件，但使用默认选项、接受任意来源的 `X-Forwarded-For`，并与显式配置重复。容器化入口代理不在回环网段，需设置 `ForwardedHeaders:TrustNonLoopbackProxy=true`，且仅在外部无法直达 API 时开启。只接受 `X-Forwarded-For`/`X-Forwarded-Proto`，不信任客户端可伪造的 `X-Forwarded-Host`。
 - 配置 `AllowedHosts` 时必须保留 `127.0.0.1`，否则容器内 healthcheck 的 Host 头会被拒绝；Nginx 侧需转发 `Host`、`X-Real-IP`、`X-Forwarded-For` 与 `X-Forwarded-Proto`。
 - Compose 编排只发布 `Music.Api` 端口，sidecar 不映射宿主机端口；`.env`、数据卷导出、Data Protection 密钥和 sidecar Cookie 不得提交。
 

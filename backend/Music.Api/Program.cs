@@ -125,13 +125,26 @@ _ = app.Services.GetRequiredService<IOnlineMusicAssetService>();
 // 反向代理（宿主机 Nginx / 容器入口）后面必须显式启用转发头中间件，
 // 否则 Connection.RemoteIpAddress 与 Request.Scheme 都是代理的地址和 http：
 // 在线搜索限流的按 IP 维度会退化成全站共享一个配额，审计日志也记不到真实客户端。
-// KnownProxies/KnownIPNetworks 保持默认值（仅信任回环地址），
-// 因此同机代理生效，而直接从公网送来的 X-Forwarded-For 会被忽略。
+//
+// 默认的 KnownProxies/KnownIPNetworks 只信任回环地址，适合同机 Nginx 部署，
+// 直接从公网送来的 X-Forwarded-For 会被忽略。容器编排里入口代理位于私有桥接网段，
+// 不是回环地址，需要由 ForwardedHeaders:TrustNonLoopbackProxy 显式放开；只有在网络
+// 边界已保证外部无法直达 API（编排里只 expose 端口、不发布到宿主机）时才可开启。
+//
+// 不要改用 ASPNETCORE_FORWARDEDHEADERS_ENABLED：那个开关会用默认选项额外注册一次
+// 中间件（实测会接受任意来源的 X-Forwarded-For），并与这里的显式配置重复。
 // 只接受 For/Proto：应用用 AllowedHosts 做主机校验，不能信任客户端可伪造的 X-Forwarded-Host。
-app.UseForwardedHeaders(new ForwardedHeadersOptions
+var forwardedHeadersOptions = new ForwardedHeadersOptions
 {
 	ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
-});
+};
+if (builder.Configuration.GetValue<bool>("ForwardedHeaders:TrustNonLoopbackProxy"))
+{
+	forwardedHeadersOptions.KnownNetworks.Clear();
+	forwardedHeadersOptions.KnownProxies.Clear();
+}
+
+app.UseForwardedHeaders(forwardedHeadersOptions);
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseStaticFiles();
 app.Use(async (context, next) =>

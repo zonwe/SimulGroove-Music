@@ -51,7 +51,7 @@ docker compose --env-file .env -f compose.online-music.yml up --detach --build
 docker compose --env-file .env -f compose.online-music.nginx.yml up --detach --build
 ```
 
-该编排把 `Music.Api` 只发布到 `127.0.0.1:${MUSIC_API_HOST_PORT:-5080}`，公网流量必须经过宿主机 Nginx，sidecar 仍只在 Compose 私有网络。环境变量模板见 `.env.nginx.example`，站点、限流和证书占位配置见 `deploy/nginx/music-api.conf.example`。应用内显式启用 `UseForwardedHeaders` 并只信任回环代理，因此真实客户端 IP 与 `https` 协议能正确传入限流和审计日志；不要改用 `ASPNETCORE_FORWARDEDHEADERS_ENABLED`，它不会注册中间件。
+该编排把 `Music.Api` 只发布到 `127.0.0.1:${MUSIC_API_HOST_PORT:-5080}`，公网流量必须经过宿主机 Nginx，sidecar 仍只在 Compose 私有网络。环境变量模板见 `.env.nginx.example`，站点、限流和证书占位配置见 `deploy/nginx/music-api.conf.example`。应用内显式启用 `UseForwardedHeaders` 并只信任回环代理，因此真实客户端 IP 与 `https` 协议能正确传入限流和审计日志；不要改用 `ASPNETCORE_FORWARDEDHEADERS_ENABLED`，那会用默认选项再注册一次中间件并信任任意来源。容器入口（如 `compose.online-music.production.yml` 里的 Caddy）不在回环网段，需要显式设置 `ForwardedHeaders__TrustNonLoopbackProxy=true`。
 
 ## 技术结构
 

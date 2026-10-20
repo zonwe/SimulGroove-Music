@@ -42,7 +42,12 @@ services:
     expose:
       - "8080"
     environment:
-      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      # 入口 Caddy 在私有桥接网段而不是回环地址，默认只信任回环就会丢掉真实客户端 IP
+      # （在线搜索的按 IP 限流会退化成全站共用一个配额）。Music.Api 只 expose 端口、
+      # 外部无法直达，因此放开非回环代理是安全的。
+      # 不要改用 ASPNETCORE_FORWARDEDHEADERS_ENABLED：那会用默认选项重复注册中间件，
+      # 并等同于信任任意来源。
+      ForwardedHeaders__TrustNonLoopbackProxy: "true"
       AllowedHosts: "${MUSIC_DOMAIN:?Set MUSIC_DOMAIN in .env}"
       Auth__JwtKey: "${MUSIC_API_JWT_KEY:?Set MUSIC_API_JWT_KEY in .env}"
       Administration__Username: "${MUSIC_API_ADMIN_USERNAME:-admin}"
