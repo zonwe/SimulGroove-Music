@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../core/lyrics/lrc_parser.dart';
 
@@ -138,6 +139,35 @@ class _LyricsPanelState extends State<LyricsPanel> {
     );
   }
 
+  /// 只滚动歌词面板自己的视口，把目标行滚到播放位置对应的对齐处。
+  ///
+  /// 不能用 [Scrollable.ensureVisible]：它会继续处理所有祖先 Scrollable，
+  /// 正在播放页用 [PageView] 承载封面/歌词时，切页动画期间会把整页横向拖走，
+  /// 表现为刚滑一点就整页跳过去。这里直接对自己的滚动视口求偏移。
+  bool _scrollToLine(
+    BuildContext lineContext,
+    List<LyricLine> lines,
+    int index,
+  ) {
+    final renderObject = lineContext.findRenderObject();
+    if (renderObject == null || !renderObject.attached) return false;
+    final viewport = RenderAbstractViewport.maybeOf(renderObject);
+    if (viewport == null || !_scrollController.hasClients) return false;
+    final position = _scrollController.position;
+    final target = viewport
+        .getOffsetToReveal(renderObject, lyricsScrollAlignment(lines, index))
+        .offset
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    if ((target - position.pixels).abs() >= 0.5) {
+      _scrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      );
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final lines = parseLrc(widget.lyrics);
@@ -160,60 +190,61 @@ class _LyricsPanelState extends State<LyricsPanel> {
         final scrollTargetIndex = lyricsScrollTargetIndex(lines, currentIndex);
         if (scrollTargetIndex >= 0 &&
             scrollTargetIndex != _lastScrollTargetIndex) {
-          _lastScrollTargetIndex = scrollTargetIndex;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted || scrollTargetIndex >= _lineKeys.length) return;
+            // 同一帧内的多次进度回调只滚动一次。
+            if (scrollTargetIndex == _lastScrollTargetIndex) return;
             final lineContext = _lineKeys[scrollTargetIndex].currentContext;
-            if (lineContext != null) {
-              Scrollable.ensureVisible(
-                lineContext,
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOutCubic,
-                alignment: lyricsScrollAlignment(lines, scrollTargetIndex),
-              );
-            }
+            // 目标行尚未布局时先不记录，等下一次进度回调重试。
+            if (lineContext == null) return;
+            // 面板还没完成布局时不记录，避免之后不再尝试定位。
+            if (!_scrollToLine(lineContext, lines, scrollTargetIndex)) return;
+            _lastScrollTargetIndex = scrollTargetIndex;
           });
         }
-        // Build all lines so a distant current line has a context on the first
-        // frame and can be centered immediately when the cover is switched.
-        return ListView(
+        // 用 Column 一次性构建全部歌词行：ListView 是懒加载的，视口外的行没有
+        // Element/RenderObject，GlobalKey.currentContext 为 null，导致切到歌词页
+        // 或长歌词滚动时定位拿不到目标行而静默失效。
+        return SingleChildScrollView(
           controller: _scrollController,
           padding: const EdgeInsets.symmetric(vertical: 32),
-          children: List<Widget>.generate(lines.length, (index) {
-            final selected = index == currentIndex;
-            Widget line = AnimatedDefaultTextStyle(
-              duration: const Duration(milliseconds: 180),
-              style:
-                  (selected
-                          ? Theme.of(context).textTheme.titleLarge
-                          : Theme.of(context).textTheme.bodyLarge)!
-                      .copyWith(
-                        color: selected
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontWeight: selected
-                            ? FontWeight.w500
-                            : FontWeight.w400,
-                        height: 1.8,
-                      ),
-              child: Text(lines[index].text, textAlign: TextAlign.center),
-            );
-            if (canSeek) {
-              final seekLine = lines[index];
-              final pending = index == _pendingSeekIndex;
-              line = InkWell(
-                onTap: () => _handleLineTap(index, seekLine),
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: pending
-                      ? _buildPendingLine(context, line, seekLine)
-                      : line,
-                ),
+          child: Column(
+            children: List<Widget>.generate(lines.length, (index) {
+              final selected = index == currentIndex;
+              Widget line = AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 180),
+                style:
+                    (selected
+                            ? Theme.of(context).textTheme.titleLarge
+                            : Theme.of(context).textTheme.bodyLarge)!
+                        .copyWith(
+                          color: selected
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontWeight: selected
+                              ? FontWeight.w500
+                              : FontWeight.w400,
+                          height: 1.8,
+                        ),
+                child: Text(lines[index].text, textAlign: TextAlign.center),
               );
-            }
-            return KeyedSubtree(key: _lineKeys[index], child: line);
-          }),
+              if (canSeek) {
+                final seekLine = lines[index];
+                final pending = index == _pendingSeekIndex;
+                line = InkWell(
+                  onTap: () => _handleLineTap(index, seekLine),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: pending
+                        ? _buildPendingLine(context, line, seekLine)
+                        : line,
+                  ),
+                );
+              }
+              return KeyedSubtree(key: _lineKeys[index], child: line);
+            }),
+          ),
         );
       },
     );

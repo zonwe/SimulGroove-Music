@@ -9,10 +9,9 @@ import '../../app/providers.dart';
 import '../../core/player/lyrics_settings.dart';
 import '../../core/player/now_playing_layout.dart';
 import '../../core/window/desktop_window_controller.dart';
-import '../library/artwork_view.dart';
 import '../shell/windows_title_bar.dart';
 import 'compact_player.dart';
-import 'lyrics_panel.dart';
+import 'now_playing_artwork_lyrics_pager.dart';
 import 'now_playing_controls_row.dart';
 import 'now_playing_split_view.dart';
 import 'now_playing_track_header.dart';
@@ -52,9 +51,6 @@ class NowPlayingPage extends ConsumerStatefulWidget {
 }
 
 class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
-  bool _showLyrics = false;
-  int _lyricsViewGeneration = 0;
-
   @override
   Widget build(BuildContext context) {
     final handler = ref.watch(audioHandlerProvider);
@@ -146,61 +142,16 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                                             onSeek: seekFromLyrics,
                                             confirmSeek: lyricsTapToSeekConfirm,
                                           )
-                                        : GestureDetector(
-                                            behavior: HitTestBehavior.opaque,
-                                            onTap: () => setState(() {
-                                              _showLyrics = !_showLyrics;
-                                              if (_showLyrics) {
-                                                _lyricsViewGeneration++;
-                                              }
-                                            }),
-                                            child: AnimatedSwitcher(
-                                              duration: const Duration(
-                                                milliseconds: 220,
-                                              ),
-                                              child: _showLyrics
-                                                  ? LyricsPanel(
-                                                      key: ValueKey((
-                                                        item.id,
-                                                        _lyricsViewGeneration,
-                                                      )),
-                                                      lyrics:
-                                                          item.extras?['lyrics']
-                                                              as String?,
-                                                      positionStream: handler
-                                                          .positionStream,
-                                                      initialPosition: handler
-                                                          .playbackState
-                                                          .value
-                                                          .position,
-                                                      onSeek: seekFromLyrics,
-                                                      confirmSeek:
-                                                          lyricsTapToSeekConfirm,
-                                                    )
-                                                  : LayoutBuilder(
-                                                      builder: (context, constraints) {
-                                                        final size = constraints
-                                                            .biggest
-                                                            .shortestSide
-                                                            .clamp(
-                                                              180.0,
-                                                              320.0,
-                                                            );
-                                                        return Center(
-                                                          child: ArtworkView(
-                                                            key: const ValueKey(
-                                                              'cover',
-                                                            ),
-                                                            bytes:
-                                                                item.extras?['artwork']
-                                                                    as Uint8List?,
-                                                            size: size,
-                                                            borderRadius: 12,
-                                                          ),
-                                                        );
-                                                      },
-                                                    ),
-                                            ),
+                                        : NowPlayingArtworkLyricsPager(
+                                            item: item,
+                                            positionStream:
+                                                handler.positionStream,
+                                            initialPosition: handler
+                                                .playbackState
+                                                .value
+                                                .position,
+                                            onSeek: seekFromLyrics,
+                                            confirmSeek: lyricsTapToSeekConfirm,
                                           ),
                                   ),
                                   const SizedBox(height: 16),
