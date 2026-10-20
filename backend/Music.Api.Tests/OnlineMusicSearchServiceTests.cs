@@ -28,7 +28,7 @@ public sealed class OnlineMusicSearchServiceTests
     }
 
     [TestMethod]
-    public async Task SearchTreatsAllSourceWarningsAsUnavailable()
+    public async Task SearchTreatsAllSourceWarningsAsSourcesUnavailable()
     {
         var gateway = new FakeGateway(new OnlineMusicSearchResponse(
             [],
@@ -43,7 +43,29 @@ public sealed class OnlineMusicSearchServiceTests
                 new OnlineMusicSearchQuery("Song", ["source-a"], 20, null),
                 CancellationToken.None));
 
-        Assert.AreEqual(OnlineMusicSearchFailure.Unavailable, exception.Failure);
+        // 来源全挂是"来源"层面的结果，必须与"sidecar 不可用"区分开，
+        // 否则用户无法判断该重试还是该换关键词。
+        Assert.AreEqual(OnlineMusicSearchFailure.SourcesUnavailable, exception.Failure);
+    }
+
+    [TestMethod]
+    public async Task SearchReportsCircuitOpenSeparatelyFromServiceFailure()
+    {
+        var gateway = new FakeGateway(new OnlineMusicSearchResponse([], false, [], null))
+        {
+            Failure = new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.CircuitOpen,
+                "go-music-dl sidecar circuit is open.")
+        };
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = CreateService(gateway, cache);
+
+        var exception = await Assert.ThrowsAsync<OnlineMusicSearchException>(() =>
+            service.SearchAsync(
+                new OnlineMusicSearchQuery("Song", ["source-a"], 20, null),
+                CancellationToken.None));
+
+        Assert.AreEqual(OnlineMusicSearchFailure.CircuitOpen, exception.Failure);
     }
 
     private static OnlineMusicSearchService CreateService(
@@ -63,12 +85,16 @@ public sealed class OnlineMusicSearchServiceTests
     {
         public int CallCount { get; private set; }
 
+        public OnlineMusicGatewayException? Failure { get; init; }
+
         public Task<OnlineMusicSearchResponse> SearchAsync(
             OnlineMusicSearchQuery query,
             CancellationToken cancellationToken)
         {
             CallCount++;
-            return Task.FromResult(response);
+            return Failure is null
+                ? Task.FromResult(response)
+                : Task.FromException<OnlineMusicSearchResponse>(Failure);
         }
 
         public Task<OnlineMusicResolvedStream> ResolveAsync(

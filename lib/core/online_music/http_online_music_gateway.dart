@@ -213,6 +213,12 @@ class HttpOnlineMusicGateway
       'online_music_invalid_request' => '搜索内容或来源无效。',
       'online_music_rate_limited' => '搜索太频繁，请稍后再试。',
       'online_music_source_unavailable' => '在线音乐服务暂时不可用。',
+      // 服务端把"熔断恢复中"和"来源全挂"单独区分出来：前者只需等一会儿，
+      // 后者可以换关键词，笼统的"服务不可用"会让用户无从判断。
+      'online_music_circuit_open' => '在线音乐服务正在恢复中，请稍后重试。',
+      'online_music_sources_unavailable' => '所选音乐来源暂时都不可用，请稍后重试。',
+      'online_music_track_unavailable' => '该歌曲暂时没有可播放的音源。',
+      'online_music_playback_unavailable' => '该歌曲音源已失效，请重新选择。',
       'online_music_upstream_timeout' => '在线音乐来源响应超时，请稍后重试。',
       'online_music_playback_expired' => '播放票据已过期，请重新播放。',
       'online_music_playback_not_found' => '播放票据不存在，请重新播放。',
@@ -220,11 +226,20 @@ class HttpOnlineMusicGateway
       _ => message,
     };
     throw OnlineMusicException(
-      localizedMessage ?? '在线音乐请求失败（HTTP ${response.statusCode}）。',
+      localizedMessage ??
+          _unauthorizedMessage(response) ??
+          '在线音乐请求失败（HTTP ${response.statusCode}）。',
       statusCode: response.statusCode,
       code: code,
     );
   }
+
+  /// 401/403 通常没有 JSON 响应体，兜底给出可操作的中文提示。
+  static String? _unauthorizedMessage(http.Response response) =>
+      switch (response.statusCode) {
+        401 || 403 => '登录状态已失效，请重新登录。',
+        _ => null,
+      };
 
   static Map<String, dynamic> _jsonObject(http.Response response) =>
       (jsonDecode(utf8.decode(response.bodyBytes)) as Map)

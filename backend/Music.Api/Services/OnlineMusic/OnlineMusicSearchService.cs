@@ -7,7 +7,16 @@ namespace Music.Api.Services.OnlineMusic;
 public enum OnlineMusicSearchFailure
 {
     Disabled,
-    Unavailable,
+
+    /// <summary>sidecar 不可用、返回非成功状态或响应非法。</summary>
+    ServiceUnavailable,
+
+    /// <summary>sidecar 正常响应，但所选来源都没有可用结果。</summary>
+    SourcesUnavailable,
+
+    /// <summary>熔断器正在拒绝 search 操作，需要等待恢复窗口。</summary>
+    CircuitOpen,
+
     Timeout
 }
 
@@ -82,16 +91,19 @@ public sealed class OnlineMusicSearchService : IOnlineMusicSearchService
         }
         catch (OnlineMusicGatewayException exception)
         {
-            var failure = exception.Failure == OnlineMusicGatewayFailure.Timeout
-                ? OnlineMusicSearchFailure.Timeout
-                : OnlineMusicSearchFailure.Unavailable;
+            var failure = exception.Failure switch
+            {
+                OnlineMusicGatewayFailure.Timeout => OnlineMusicSearchFailure.Timeout,
+                OnlineMusicGatewayFailure.CircuitOpen => OnlineMusicSearchFailure.CircuitOpen,
+                _ => OnlineMusicSearchFailure.ServiceUnavailable
+            };
             throw new OnlineMusicSearchException(failure, exception.Message);
         }
 
         if (result.Items.Count == 0 && result.Warnings.Count > 0)
         {
             throw new OnlineMusicSearchException(
-                OnlineMusicSearchFailure.Unavailable,
+                OnlineMusicSearchFailure.SourcesUnavailable,
                 "所选在线音乐来源暂时均不可用。");
         }
 

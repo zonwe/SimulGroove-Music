@@ -171,6 +171,12 @@ Authorization: Bearer {{access_token}}
 Accept: application/json
 
 ### Search online music
+# 失败响应都带 { "code": ..., "message": ... }，必须按 code 分支而不是只看状态码：
+#   503 online_music_circuit_open        熔断恢复窗口，稍等数秒重试
+#   503 online_music_sources_unavailable sidecar 正常但所选来源都没有结果
+#   503 online_music_source_unavailable  sidecar 不可用
+#   504 online_music_upstream_timeout    来源整体超时
+#   429 online_music_rate_limited        触发每分钟限流
 POST {{baseUrl}}/api/online-music/search
 Authorization: Bearer {{access_token}}
 Content-Type: application/json
@@ -183,6 +189,7 @@ Content-Type: application/json
 }
 
 ### Issue online playback ticket
+# 404 online_music_track_unavailable 表示这首曲目确实没有可播放音源（稳定结果，不是服务故障）。
 POST {{baseUrl}}/api/online-music/tracks/netease/496869422/playback
 Authorization: Bearer {{access_token}}
 Accept: application/json

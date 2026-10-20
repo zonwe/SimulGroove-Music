@@ -55,15 +55,28 @@ public enum OnlineMusicGatewayFailure
     Timeout,
     InvalidResponse,
     InvalidRange,
-    TooLarge
+    TooLarge,
+
+    /// <summary>传输层故障（连接被重置、DNS 失败等），是唯一值得立刻重试的类别。</summary>
+    Transport,
+
+    /// <summary>熔断器正在拒绝该操作的请求，需要等待恢复窗口。</summary>
+    CircuitOpen
 }
 
 public sealed class OnlineMusicGatewayException(
     OnlineMusicGatewayFailure failure,
     string message,
-    Exception? innerException = null) : Exception(message, innerException)
+    Exception? innerException = null,
+    string? upstreamCode = null) : Exception(message, innerException)
 {
     public OnlineMusicGatewayFailure Failure { get; } = failure;
+
+    /// <summary>
+    /// sidecar 错误响应里的稳定错误码（例如 resolve_unavailable）。仅用于把
+    /// "这首曲目没有可用音源"这类业务结果翻译成精确的用户提示，不对外暴露原始报文。
+    /// </summary>
+    public string? UpstreamCode { get; } = upstreamCode;
 }
 
 public interface IOnlineMusicGateway

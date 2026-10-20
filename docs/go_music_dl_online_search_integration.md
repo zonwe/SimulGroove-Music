@@ -154,6 +154,30 @@ GET  /integration/v1/tracks/{source}/{trackId}/cover
 GET  /integration/v1/streams/{streamToken}
 ```
 
+### 6.1 状态码契约（修改前必读）
+
+`Music.Api` 的进程内熔断器**直接依赖**下面的划分，改动 sidecar 的状态码会改变熔断行为：
+
+- **4xx**：稳定的业务结果。"这首曲目没有封面/歌词/可播放音源"这类结论在重试后不会改变。`Music.Api` 不会把它计入瞬时故障熔断。
+- **5xx**：值得重试的故障，只用于网络错误、超时和上游 5xx。
+
+| 场景 | 状态码 | `code` |
+| --- | --- | --- |
+| 来源不支持或参数非法 | `400` | `unsupported_track` |
+| 曲目拿不到可播放音源（无源 / VIP / 已下架） | `422` | `resolve_unavailable` |
+| 解析超时等瞬时故障 | `502` | `resolve_upstream_error` |
+| 曲目没有封面 / 歌词 | `404` | `asset_not_found` |
+| 封面 / 歌词确实不可用（上游 4xx、地址非法、内容不是图片） | `422` | `asset_unavailable` |
+| 封面 / 歌词拉取的网络错误或上游 5xx | `502` | `asset_upstream_error` |
+| 资源超过大小限制 | `413` | `asset_too_large` |
+| 下载不可用 / 下载瞬时故障 | `422` / `502` | `download_unavailable` / `download_upstream_error` |
+| 流票据不存在 / 过期 / Range 非法 | `404` / `410` / `416` | `stream_not_found` / `stream_expired` / `invalid_range` |
+| 上游音频地址失效 / 连接上游的瞬时故障 | `422` / `502` | `stream_unavailable` / `stream_upstream_error` |
+
+历史上 `resolve_failed`、`asset_unavailable`、`upstream_stream_failed` 全部使用 `502`，导致一次批量封面拉取失败就把共享熔断器打开，紧接着的**搜索**返回"在线音乐服务暂时不可用"。这是必须避免的回归。
+
+封面内容类型的判定以字节嗅探为准、响应头只作兜底：部分 CDN（例如 netease 的 `p1.music.126.net`）返回非标准的 `image/jpg`，直接按白名单校验响应头会把每张 netease 封面都判成失败。
+
 内部搜索请求示例：
 
 ```json

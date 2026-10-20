@@ -302,7 +302,9 @@ Windows 相关改动还要检查窗口生命周期、托盘释放、快捷键注
 - `/health` 只表示 API 进程存活；`/health/ready` 在在线音乐启用时探测 sidecar。就绪检查使用独立客户端绕过业务熔断，避免依赖恢复后仍被旧熔断状态遮蔽。
 - 入站 `X-Correlation-ID` 必须限制长度和字符集；响应、审计记录与 sidecar 请求复用同一安全 ID，不接受可造成日志注入的任意文本。
 - 在线音乐指标只使用规范操作名、失败类型等低基数标签，不记录搜索词、来源、曲目 ID、账号、Token、Cookie、`streamRef` 或 URL。
-- sidecar 业务调用的熔断只统计网络错误、超时、HTTP 408/429/5xx 等瞬时失败；404、资源超限等稳定业务响应不得错误打开熔断。
+- sidecar 业务调用的熔断**按操作隔离**（`search`/`resolve`/`stream`/`lyrics`/`artwork`/`download` 各自计数），只统计网络错误、超时、HTTP 408/429/5xx 等瞬时失败；404、422 等稳定业务响应不得错误打开熔断。共用单一全局熔断会让一次批量封面失败连坐搜索。
+- sidecar 的状态码是熔断器的输入：4xx 表示"这首曲目没有可用资源"这类稳定结果，5xx 只留给值得重试的故障。把稳定业务结果映射成 5xx 属于契约破坏。
+- 只对传输层错误（连接被重置、DNS 失败）做一次重试，且仅在搜索路径上；HTTP 状态响应、业务错误和超时都不重试。
 - 生产环境必须覆盖默认 JWT 密钥；代码和文档中不得加入真实密钥。
 - 数据库文件、WAL/SHM、`bin/` 和 `obj/` 不应纳入功能改动。
 - 反向代理部署必须由应用显式注册转发头中间件（`Program.cs` 的 `UseForwardedHeaders`），且只信任回环代理；不要改用 `ASPNETCORE_FORWARDEDHEADERS_ENABLED`，它只配置选项类而不注册中间件。只接受 `X-Forwarded-For`/`X-Forwarded-Proto`，不信任客户端可伪造的 `X-Forwarded-Host`。

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Music.Api.Services.OnlineMusic;
@@ -63,10 +64,65 @@ public sealed class GoMusicDlGatewayTests
     }
 
     [TestMethod]
-    public async Task SearchMapsNetworkFailureToStableGatewayFailure()
+    public async Task SearchMapsNetworkFailureToTransportFailure()
     {
-        var gateway = CreateGateway(new StubHttpMessageHandler(
-            _ => throw new HttpRequestException("sensitive upstream details")));
+        var attempts = 0;
+        var gateway = CreateGateway(new StubHttpMessageHandler(_ =>
+        {
+            attempts++;
+            throw new HttpRequestException("sensitive upstream details");
+        }));
+
+        var exception = await Assert.ThrowsAsync<OnlineMusicGatewayException>(() =>
+            gateway.SearchAsync(
+                new OnlineMusicSearchQuery("Song", ["source-a"], 20, null),
+                CancellationToken.None));
+
+        Assert.AreEqual(OnlineMusicGatewayFailure.Transport, exception.Failure);
+        Assert.AreEqual("go-music-dl sidecar is unavailable.", exception.Message);
+        Assert.AreEqual(2, attempts, "transport failures must be retried exactly once");
+    }
+
+    [TestMethod]
+    public async Task SearchRetriesTransportFailureOnceAndReturnsTheSecondAttempt()
+    {
+        var attempts = 0;
+        var gateway = CreateGateway(new StubHttpMessageHandler(_ =>
+        {
+            attempts++;
+            if (attempts == 1) throw new HttpRequestException("stale pooled connection");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"items":[],"warnings":[],"nextCursor":null}""",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        }));
+
+        var result = await gateway.SearchAsync(
+            new OnlineMusicSearchQuery("Song", ["source-a"], 20, null),
+            CancellationToken.None);
+
+        Assert.AreEqual(2, attempts);
+        Assert.AreEqual(0, result.Items.Count);
+    }
+
+    [TestMethod]
+    public async Task SearchDoesNotRetryStableBusinessResponses()
+    {
+        var attempts = 0;
+        var gateway = CreateGateway(new StubHttpMessageHandler(_ =>
+        {
+            attempts++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                Content = new StringContent(
+                    """{"code":"service_unavailable"}""",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        }));
 
         var exception = await Assert.ThrowsAsync<OnlineMusicGatewayException>(() =>
             gateway.SearchAsync(
@@ -74,7 +130,39 @@ public sealed class GoMusicDlGatewayTests
                 CancellationToken.None));
 
         Assert.AreEqual(OnlineMusicGatewayFailure.Unavailable, exception.Failure);
-        Assert.AreEqual("go-music-dl sidecar is unavailable.", exception.Message);
+        Assert.AreEqual("service_unavailable", exception.UpstreamCode);
+        Assert.AreEqual(1, attempts, "HTTP status failures must not be retried");
+    }
+
+    [TestMethod]
+    public async Task ResolveSurfacesStableTrackUnavailableCode()
+    {
+        var gateway = CreateGateway(new StubHttpMessageHandler(_ => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.UnprocessableEntity)
+            {
+                Content = new StringContent(
+                    """{"code":"resolve_unavailable"}""",
+                    Encoding.UTF8,
+                    "application/json")
+            })));
+
+        var exception = await Assert.ThrowsAsync<OnlineMusicGatewayException>(() =>
+            gateway.ResolveAsync("source-a", "track-1", CancellationToken.None));
+
+        Assert.AreEqual(OnlineMusicGatewayFailure.Unavailable, exception.Failure);
+        Assert.AreEqual("resolve_unavailable", exception.UpstreamCode);
+    }
+
+    [TestMethod]
+    public async Task ResolveMapsOpenCircuitToCircuitOpenFailure()
+    {
+        var gateway = CreateGateway(new StubHttpMessageHandler(
+            _ => throw new OnlineMusicCircuitOpenException("resolve", TimeSpan.FromSeconds(10))));
+
+        var exception = await Assert.ThrowsAsync<OnlineMusicGatewayException>(() =>
+            gateway.ResolveAsync("source-a", "track-1", CancellationToken.None));
+
+        Assert.AreEqual(OnlineMusicGatewayFailure.CircuitOpen, exception.Failure);
     }
 
     [TestMethod]
@@ -211,7 +299,8 @@ public sealed class GoMusicDlGatewayTests
         {
             SidecarBaseUrl = "http://127.0.0.1:8080",
             RequestTimeoutSeconds = 2
-        }));
+        }),
+        NullLogger<GoMusicDlGateway>.Instance);
 
     private sealed class StubHttpMessageHandler(
         Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler

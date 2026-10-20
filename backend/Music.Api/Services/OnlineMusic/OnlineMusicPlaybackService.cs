@@ -14,7 +14,16 @@ public enum OnlineMusicPlaybackFailure
     NotFound,
     Expired,
     Forbidden,
-    InvalidRange
+    InvalidRange,
+
+    /// <summary>熔断器正在拒绝该操作的请求。</summary>
+    CircuitOpen,
+
+    /// <summary>这首曲目确实没有可播放音源，属于稳定业务结果，不是服务故障。</summary>
+    TrackUnavailable,
+
+    /// <summary>上游音源地址已失效，需要重新选择歌曲。</summary>
+    SourceExpired
 }
 
 public sealed class OnlineMusicPlaybackException(
@@ -86,6 +95,17 @@ public sealed class OnlineMusicPlaybackService : IOnlineMusicPlaybackService
         {
             throw new OnlineMusicPlaybackException(OnlineMusicPlaybackFailure.Timeout, "Track resolve timed out.", exception);
         }
+        catch (OnlineMusicGatewayException exception) when (exception.Failure == OnlineMusicGatewayFailure.CircuitOpen)
+        {
+            throw new OnlineMusicPlaybackException(OnlineMusicPlaybackFailure.CircuitOpen, "Sidecar circuit is open.", exception);
+        }
+        catch (OnlineMusicGatewayException exception) when (IsTrackUnavailable(exception))
+        {
+            throw new OnlineMusicPlaybackException(
+                OnlineMusicPlaybackFailure.TrackUnavailable,
+                "Sidecar has no playable source for this track.",
+                exception);
+        }
         catch (OnlineMusicGatewayException exception)
         {
             throw new OnlineMusicPlaybackException(OnlineMusicPlaybackFailure.Unavailable, "Track resolve failed.", exception);
@@ -141,11 +161,30 @@ public sealed class OnlineMusicPlaybackService : IOnlineMusicPlaybackService
         {
             throw new OnlineMusicPlaybackException(OnlineMusicPlaybackFailure.Timeout, "Online stream timed out.", exception);
         }
+        catch (OnlineMusicGatewayException exception) when (exception.Failure == OnlineMusicGatewayFailure.CircuitOpen)
+        {
+            throw new OnlineMusicPlaybackException(OnlineMusicPlaybackFailure.CircuitOpen, "Sidecar circuit is open.", exception);
+        }
+        catch (OnlineMusicGatewayException exception) when (IsSourceExpired(exception))
+        {
+            throw new OnlineMusicPlaybackException(
+                OnlineMusicPlaybackFailure.SourceExpired,
+                "Sidecar reports the upstream stream is no longer available.",
+                exception);
+        }
         catch (OnlineMusicGatewayException exception)
         {
             throw new OnlineMusicPlaybackException(OnlineMusicPlaybackFailure.Unavailable, "Online stream failed.", exception);
         }
     }
+
+    // sidecar 用 422 + 稳定错误码表达"这首曲目没有可用音源"，
+    // 不能把它当成服务故障，否则用户会看到误导性的"服务不可用"。
+    private static bool IsTrackUnavailable(OnlineMusicGatewayException exception) =>
+        exception.UpstreamCode is "resolve_unavailable";
+
+    private static bool IsSourceExpired(OnlineMusicGatewayException exception) =>
+        exception.UpstreamCode is "stream_unavailable";
 
     private void RemoveExpired(DateTimeOffset now)
     {

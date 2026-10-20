@@ -81,6 +81,19 @@ public static class OnlineMusicEndpoints
                     new ProblemResponse("online_music_upstream_timeout", "在线音乐来源响应超时，请稍后重试。"),
                     statusCode: StatusCodes.Status504GatewayTimeout);
             }
+            catch (OnlineMusicSearchException exception) when (exception.Failure == OnlineMusicSearchFailure.CircuitOpen)
+            {
+                // 熔断是暂时的：明确告诉客户端"稍后重试"，而不是笼统的"服务不可用"。
+                return Results.Json(
+                    new ProblemResponse("online_music_circuit_open", "在线音乐服务正在恢复中，请稍后重试。"),
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+            catch (OnlineMusicSearchException exception) when (exception.Failure == OnlineMusicSearchFailure.SourcesUnavailable)
+            {
+                return Results.Json(
+                    new ProblemResponse("online_music_sources_unavailable", "所选在线音乐来源暂时都不可用，请稍后重试。"),
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
             catch (OnlineMusicSearchException)
             {
                 return Results.Json(
@@ -213,6 +226,9 @@ public static class OnlineMusicEndpoints
                     OnlineMusicGatewayFailure.Timeout => Results.Json(
                         new ProblemResponse("online_music_upstream_timeout", "在线音乐来源响应超时，请稍后重试。"),
                         statusCode: StatusCodes.Status504GatewayTimeout),
+                    OnlineMusicGatewayFailure.CircuitOpen => Results.Json(
+                        new ProblemResponse("online_music_circuit_open", "在线音乐服务正在恢复中，请稍后重试。"),
+                        statusCode: StatusCodes.Status503ServiceUnavailable),
                     _ => Results.Json(
                         new ProblemResponse("online_music_source_unavailable", "在线音乐下载暂时不可用。"),
                         statusCode: StatusCodes.Status502BadGateway)
@@ -231,9 +247,17 @@ public static class OnlineMusicEndpoints
         {
             OnlineMusicPlaybackFailure.InvalidTrack => Results.BadRequest(
                 new ProblemResponse("online_music_invalid_request", "歌曲来源或标识无效。")),
+            // "这首曲目没有可用音源"是稳定的按曲目结果，用 404 表达，
+            // 不要用 503 让用户以为整个服务挂了。
+            OnlineMusicPlaybackFailure.TrackUnavailable => Results.Json(
+                new ProblemResponse("online_music_track_unavailable", "该歌曲暂时没有可播放的音源。"),
+                statusCode: StatusCodes.Status404NotFound),
             OnlineMusicPlaybackFailure.Timeout => Results.Json(
                 new ProblemResponse("online_music_upstream_timeout", "在线音乐来源响应超时，请稍后重试。"),
                 statusCode: StatusCodes.Status504GatewayTimeout),
+            OnlineMusicPlaybackFailure.CircuitOpen => Results.Json(
+                new ProblemResponse("online_music_circuit_open", "在线音乐服务正在恢复中，请稍后重试。"),
+                statusCode: StatusCodes.Status503ServiceUnavailable),
             _ => Results.Json(
                 new ProblemResponse("online_music_source_unavailable", "在线音乐服务暂时不可用。"),
                 statusCode: StatusCodes.Status503ServiceUnavailable)
@@ -248,12 +272,18 @@ public static class OnlineMusicEndpoints
             OnlineMusicPlaybackFailure.Expired => Results.Json(
                 new ProblemResponse("online_music_playback_expired", "播放票据已过期，请重新播放。"),
                 statusCode: StatusCodes.Status410Gone),
+            OnlineMusicPlaybackFailure.SourceExpired => Results.Json(
+                new ProblemResponse("online_music_playback_unavailable", "该歌曲音源已失效，请重新选择。"),
+                statusCode: StatusCodes.Status404NotFound),
             OnlineMusicPlaybackFailure.InvalidRange => Results.Json(
                 new ProblemResponse("online_music_invalid_range", "请求的音频范围无效。"),
                 statusCode: StatusCodes.Status416RangeNotSatisfiable),
             OnlineMusicPlaybackFailure.Timeout => Results.Json(
                 new ProblemResponse("online_music_upstream_timeout", "在线音乐来源响应超时，请稍后重试。"),
                 statusCode: StatusCodes.Status504GatewayTimeout),
+            OnlineMusicPlaybackFailure.CircuitOpen => Results.Json(
+                new ProblemResponse("online_music_circuit_open", "在线音乐服务正在恢复中，请稍后重试。"),
+                statusCode: StatusCodes.Status503ServiceUnavailable),
             _ => Results.Json(
                 new ProblemResponse("online_music_source_unavailable", "在线音乐服务暂时不可用。"),
                 statusCode: StatusCodes.Status502BadGateway)
@@ -273,11 +303,14 @@ public static class OnlineMusicEndpoints
             OnlineMusicAssetFailure.Timeout => Results.Json(
                 new ProblemResponse("online_music_upstream_timeout", "在线音乐来源响应超时，请稍后重试。"),
                 statusCode: StatusCodes.Status504GatewayTimeout),
+            OnlineMusicAssetFailure.CircuitOpen => Results.Json(
+                new ProblemResponse("online_music_circuit_open", "在线音乐服务正在恢复中，请稍后重试。"),
+                statusCode: StatusCodes.Status503ServiceUnavailable),
             OnlineMusicAssetFailure.Disabled => Results.Json(
                 new ProblemResponse("online_music_source_unavailable", "在线音乐服务暂时不可用。"),
                 statusCode: StatusCodes.Status503ServiceUnavailable),
             _ => Results.Json(
-                new ProblemResponse("online_music_source_unavailable", "在线音乐资源暂时不可用。"),
+                new ProblemResponse("online_music_resource_unavailable", "在线音乐资源暂时不可用。"),
                 statusCode: StatusCodes.Status502BadGateway)
         };
 

@@ -79,6 +79,76 @@ public sealed class OnlineMusicResilienceHandlerTests
     }
 
     [TestMethod]
+    public async Task StableUnprocessableBusinessResultsDoNotOpenCircuit()
+    {
+        // sidecar 用 422 表达"这首歌没有封面/没有可播放音源"这类稳定结果。
+        // 它必须被当作正常业务响应，否则一次批量封面失败就会连坐搜索。
+        var breaker = CreateCircuitBreaker(
+            new MutableTimeProvider(DateTimeOffset.UtcNow),
+            failureThreshold: 2,
+            breakSeconds: 5);
+        var innerCalls = 0;
+        using var client = CreateClient(breaker, _ =>
+        {
+            innerCalls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.UnprocessableEntity));
+        });
+
+        for (var index = 0; index < 6; index++)
+        {
+            using var response = await client.GetAsync("integration/v1/tracks/source/track/cover");
+            Assert.AreEqual(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        }
+
+        Assert.AreEqual(6, innerCalls, "422 must never trip the circuit");
+    }
+
+    [TestMethod]
+    public async Task ArtworkFailuresDoNotOpenTheSearchCircuit()
+    {
+        // 回归：封面连续 5xx 曾经打开全局熔断，导致紧接着的搜索返回"服务不可用"。
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 8, 8, 0, 0, 0, TimeSpan.Zero));
+        var breaker = CreateCircuitBreaker(clock, failureThreshold: 5, breakSeconds: 30);
+        using var client = CreateClient(breaker, _ => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.BadGateway)));
+
+        for (var index = 0; index < 5; index++)
+        {
+            using var cover = await client.GetAsync("integration/v1/tracks/source/track/cover");
+            Assert.AreEqual(HttpStatusCode.BadGateway, cover.StatusCode);
+        }
+
+        // artwork 熔断已经打开……
+        await Assert.ThrowsAsync<OnlineMusicCircuitOpenException>(() =>
+            client.GetAsync("integration/v1/tracks/source/track/cover"));
+
+        // ……但搜索是独立操作，必须仍然可用。
+        using var search = await client.GetAsync("integration/v1/search");
+        Assert.AreEqual(HttpStatusCode.BadGateway, search.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task SearchFailuresDoNotOpenTheArtworkCircuit()
+    {
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 8, 8, 0, 0, 0, TimeSpan.Zero));
+        var breaker = CreateCircuitBreaker(clock, failureThreshold: 5, breakSeconds: 30);
+        using var client = CreateClient(breaker, _ => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.BadGateway)));
+
+        for (var index = 0; index < 5; index++)
+        {
+            using var search = await client.GetAsync("integration/v1/search");
+            Assert.AreEqual(HttpStatusCode.BadGateway, search.StatusCode);
+        }
+
+        await Assert.ThrowsAsync<OnlineMusicCircuitOpenException>(() =>
+            client.GetAsync("integration/v1/search"));
+
+        using var cover = await client.GetAsync("integration/v1/tracks/source/track/cover");
+        Assert.AreEqual(HttpStatusCode.BadGateway, cover.StatusCode);
+    }
+
+    [TestMethod]
     public async Task MetricsUseNormalizedOperationInsteadOfTrackIdentity()
     {
         var measurements = new List<KeyValuePair<string, object?>[]>();

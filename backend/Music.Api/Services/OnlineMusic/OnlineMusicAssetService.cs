@@ -13,7 +13,10 @@ public enum OnlineMusicAssetFailure
     NotFound,
     TooLarge,
     Timeout,
-    Unavailable
+    Unavailable,
+
+    /// <summary>熔断器正在拒绝该操作的请求。</summary>
+    CircuitOpen
 }
 
 public sealed class OnlineMusicAssetException(
@@ -178,6 +181,11 @@ public sealed class OnlineMusicAssetService : IOnlineMusicAssetService, IDisposa
             OnlineMusicGatewayFailure.NotFound => OnlineMusicAssetFailure.NotFound,
             OnlineMusicGatewayFailure.TooLarge => OnlineMusicAssetFailure.TooLarge,
             OnlineMusicGatewayFailure.Timeout => OnlineMusicAssetFailure.Timeout,
+            OnlineMusicGatewayFailure.CircuitOpen => OnlineMusicAssetFailure.CircuitOpen,
+            // sidecar 的 asset_unavailable 表示"这首歌确实没有可用封面/歌词"
+            // （上游 4xx、地址非法、内容不是图片）。它等价于没有资源，
+            // 因此按 NotFound 处理：客户端显示占位图，并按稳定失败缓存较长时间。
+            _ when exception.UpstreamCode == "asset_unavailable" => OnlineMusicAssetFailure.NotFound,
             _ => OnlineMusicAssetFailure.Unavailable
         },
         exception.Message);

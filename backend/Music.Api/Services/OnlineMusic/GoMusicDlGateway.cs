@@ -8,13 +8,22 @@ namespace Music.Api.Services.OnlineMusic;
 public sealed class GoMusicDlGateway : IOnlineMusicGateway
 {
     private const long MaxResponseBytes = 2 * 1024 * 1024;
+    private const int MaxSearchAttempts = 2;
+
+    // 重试只覆盖"还没发出请求就失败"的传输层抖动，因此固定短延迟即可，
+    // 不需要指数退避；再长会把总耗时推过 Flutter 客户端的 15 秒超时。
+    private static readonly TimeSpan SearchRetryDelay = TimeSpan.FromMilliseconds(200);
 
     private readonly HttpClient _client;
+    private readonly ILogger<GoMusicDlGateway> _logger;
     private readonly TimeSpan _requestTimeout;
     private readonly int _maxLyricsBytes;
     private readonly int _maxArtworkBytes;
 
-    public GoMusicDlGateway(HttpClient client, IOptions<OnlineMusicOptions> options)
+    public GoMusicDlGateway(
+        HttpClient client,
+        IOptions<OnlineMusicOptions> options,
+        ILogger<GoMusicDlGateway> logger)
     {
         var settings = options.Value;
         if (!Uri.TryCreate(settings.SidecarBaseUrl, UriKind.Absolute, out var baseAddress) ||
@@ -24,6 +33,7 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         }
 
         _client = client;
+        _logger = logger;
         _client.BaseAddress = new Uri($"{baseAddress.ToString().TrimEnd('/')}/");
         _client.Timeout = Timeout.InfiniteTimeSpan;
         _requestTimeout = TimeSpan.FromSeconds(Math.Clamp(settings.RequestTimeoutSeconds, 1, 60));
@@ -32,6 +42,27 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
     }
 
     public async Task<OnlineMusicSearchResponse> SearchAsync(
+        OnlineMusicSearchQuery query,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await SearchOnceAsync(query, cancellationToken);
+            }
+            catch (OnlineMusicGatewayException exception)
+                when (attempt < MaxSearchAttempts && exception.Failure == OnlineMusicGatewayFailure.Transport)
+            {
+                // 空闲一段时间后的第一次调用最容易撞上已被对端关闭的池化连接。
+                // 只重试传输层错误：业务响应重试没有意义，超时重试会把总耗时推过客户端超时。
+                _logger.LogDebug(exception, "Retrying online music search after a transport failure.");
+                await Task.Delay(SearchRetryDelay, cancellationToken);
+            }
+        }
+    }
+
+    private async Task<OnlineMusicSearchResponse> SearchOnceAsync(
         OnlineMusicSearchQuery query,
         CancellationToken cancellationToken)
     {
@@ -51,7 +82,8 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
             {
                 throw new OnlineMusicGatewayException(
                     OnlineMusicGatewayFailure.Unavailable,
-                    $"go-music-dl sidecar returned HTTP {(int)response.StatusCode}.");
+                    $"go-music-dl sidecar returned HTTP {(int)response.StatusCode}.",
+                    upstreamCode: await TryReadErrorCodeAsync(response, requestToken));
             }
 
             if (response.Content.Headers.ContentLength is > MaxResponseBytes)
@@ -119,10 +151,17 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
                 "go-music-dl sidecar request timed out.",
                 exception);
         }
+        catch (OnlineMusicCircuitOpenException exception)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.CircuitOpen,
+                "go-music-dl sidecar circuit is open.",
+                exception);
+        }
         catch (HttpRequestException exception)
         {
             throw new OnlineMusicGatewayException(
-                OnlineMusicGatewayFailure.Unavailable,
+                OnlineMusicGatewayFailure.Transport,
                 "go-music-dl sidecar is unavailable.",
                 exception);
         }
@@ -150,7 +189,8 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
             {
                 throw new OnlineMusicGatewayException(
                     OnlineMusicGatewayFailure.Unavailable,
-                    $"go-music-dl sidecar resolve returned HTTP {(int)response.StatusCode}.");
+                    $"go-music-dl sidecar resolve returned HTTP {(int)response.StatusCode}.",
+                    upstreamCode: await TryReadErrorCodeAsync(response, requestToken));
             }
 
             var payload = await response.Content.ReadFromJsonAsync<SidecarResolveResponse>(
@@ -173,10 +213,17 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
                 "go-music-dl sidecar resolve timed out.",
                 exception);
         }
+        catch (OnlineMusicCircuitOpenException exception)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.CircuitOpen,
+                "go-music-dl sidecar circuit is open.",
+                exception);
+        }
         catch (HttpRequestException exception)
         {
             throw new OnlineMusicGatewayException(
-                OnlineMusicGatewayFailure.Unavailable,
+                OnlineMusicGatewayFailure.Transport,
                 "go-music-dl sidecar is unavailable.",
                 exception);
         }
@@ -221,11 +268,14 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
             if (response.StatusCode is not (System.Net.HttpStatusCode.OK or System.Net.HttpStatusCode.PartialContent))
             {
                 var statusCode = response.StatusCode;
+                // 先取错误码再释放响应，否则拿不到 sidecar 的业务错误分类。
+                var upstreamCode = await TryReadErrorCodeAsync(response, requestToken);
                 response.Dispose();
                 response = null;
                 throw new OnlineMusicGatewayException(
                     OnlineMusicGatewayFailure.Unavailable,
-                    $"go-music-dl sidecar stream returned HTTP {(int)statusCode}.");
+                    $"go-music-dl sidecar stream returned HTTP {(int)statusCode}.",
+                    upstreamCode: upstreamCode);
             }
 
             var content = await response.Content.ReadAsStreamAsync(requestToken);
@@ -239,11 +289,19 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
                 "go-music-dl sidecar stream timed out.",
                 exception);
         }
+        catch (OnlineMusicCircuitOpenException exception)
+        {
+            response?.Dispose();
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.CircuitOpen,
+                "go-music-dl sidecar circuit is open.",
+                exception);
+        }
         catch (HttpRequestException exception)
         {
             response?.Dispose();
             throw new OnlineMusicGatewayException(
-                OnlineMusicGatewayFailure.Unavailable,
+                OnlineMusicGatewayFailure.Transport,
                 "go-music-dl sidecar is unavailable.",
                 exception);
         }
@@ -275,11 +333,13 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
             if (!response.IsSuccessStatusCode)
             {
                 var statusCode = response.StatusCode;
+                var upstreamCode = await TryReadErrorCodeAsync(response, requestToken);
                 response.Dispose();
                 response = null;
                 throw new OnlineMusicGatewayException(
                     OnlineMusicGatewayFailure.Unavailable,
-                    $"go-music-dl sidecar download returned HTTP {(int)statusCode}.");
+                    $"go-music-dl sidecar download returned HTTP {(int)statusCode}.",
+                    upstreamCode: upstreamCode);
             }
             var contentType = response.Content.Headers.ContentType?.MediaType;
             if (string.IsNullOrWhiteSpace(contentType) ||
@@ -302,11 +362,19 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
                 "go-music-dl sidecar download timed out.",
                 exception);
         }
+        catch (OnlineMusicCircuitOpenException exception)
+        {
+            response?.Dispose();
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.CircuitOpen,
+                "go-music-dl sidecar circuit is open.",
+                exception);
+        }
         catch (HttpRequestException exception)
         {
             response?.Dispose();
             throw new OnlineMusicGatewayException(
-                OnlineMusicGatewayFailure.Unavailable,
+                OnlineMusicGatewayFailure.Transport,
                 "go-music-dl sidecar is unavailable.",
                 exception);
         }
@@ -323,7 +391,7 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         {
             var path = AssetPath(source, trackId, "lyrics");
             using var response = await _client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, requestToken);
-            EnsureAssetStatus(response, "lyrics");
+            await EnsureAssetStatusAsync(response, "lyrics", requestToken);
             var bytes = await ReadLimitedBytesAsync(response.Content, _maxLyricsBytes, requestToken);
             var payload = JsonSerializer.Deserialize<SidecarLyricsResponse>(
                 bytes,
@@ -345,10 +413,17 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
                 "go-music-dl sidecar lyrics request timed out.",
                 exception);
         }
+        catch (OnlineMusicCircuitOpenException exception)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.CircuitOpen,
+                "go-music-dl sidecar circuit is open.",
+                exception);
+        }
         catch (HttpRequestException exception)
         {
             throw new OnlineMusicGatewayException(
-                OnlineMusicGatewayFailure.Unavailable,
+                OnlineMusicGatewayFailure.Transport,
                 "go-music-dl sidecar is unavailable.",
                 exception);
         }
@@ -372,7 +447,7 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         {
             var path = AssetPath(source, trackId, "cover");
             using var response = await _client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, requestToken);
-            EnsureAssetStatus(response, "cover");
+            await EnsureAssetStatusAsync(response, "cover", requestToken);
             var contentType = response.Content.Headers.ContentType?.MediaType?.Trim();
             if (string.IsNullOrWhiteSpace(contentType) ||
                 !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
@@ -397,10 +472,17 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
                 "go-music-dl sidecar artwork request timed out.",
                 exception);
         }
+        catch (OnlineMusicCircuitOpenException exception)
+        {
+            throw new OnlineMusicGatewayException(
+                OnlineMusicGatewayFailure.CircuitOpen,
+                "go-music-dl sidecar circuit is open.",
+                exception);
+        }
         catch (HttpRequestException exception)
         {
             throw new OnlineMusicGatewayException(
-                OnlineMusicGatewayFailure.Unavailable,
+                OnlineMusicGatewayFailure.Transport,
                 "go-music-dl sidecar is unavailable.",
                 exception);
         }
@@ -427,7 +509,37 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
     private static string AssetPath(string source, string trackId, string asset) =>
         $"integration/v1/tracks/{Uri.EscapeDataString(source)}/{Uri.EscapeDataString(trackId)}/{asset}";
 
-    private static void EnsureAssetStatus(HttpResponseMessage response, string asset)
+    /// <summary>
+    /// 读取 sidecar 错误响应里的稳定错误码，用于把"这首曲目没有可用音源"之类的
+    /// 业务结果翻译成精确的用户提示。任何解析问题都只返回 null，绝不掩盖原始失败。
+    /// </summary>
+    private static async Task<string?> TryReadErrorCodeAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (mediaType is null || !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        try
+        {
+            var payload = await response.Content.ReadFromJsonAsync<SidecarErrorResponse>(
+                cancellationToken: cancellationToken);
+            var code = payload?.Code?.Trim();
+            return string.IsNullOrWhiteSpace(code) ? null : code;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task EnsureAssetStatusAsync(
+        HttpResponseMessage response,
+        string asset,
+        CancellationToken cancellationToken)
     {
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -445,7 +557,8 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
         {
             throw new OnlineMusicGatewayException(
                 OnlineMusicGatewayFailure.Unavailable,
-                $"go-music-dl sidecar {asset} returned HTTP {(int)response.StatusCode}.");
+                $"go-music-dl sidecar {asset} returned HTTP {(int)response.StatusCode}.",
+                upstreamCode: await TryReadErrorCodeAsync(response, cancellationToken));
         }
     }
 
@@ -510,4 +623,6 @@ public sealed class GoMusicDlGateway : IOnlineMusicGateway
     private sealed record SidecarLyricsResponse(
         string? Lyrics,
         string? Format);
+
+    private sealed record SidecarErrorResponse(string? Code);
 }

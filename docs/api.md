@@ -68,7 +68,11 @@ OpenAPI：`GET /openapi.json`。存活检查：`GET /health`。就绪检查：`G
 
 所有请求响应都会带有 `X-Correlation-ID`。客户端可传入最多 64 个字符、仅包含 ASCII 字母、数字、点、下划线和连字符的值；其他值会被替换。该 ID 同时写入账号审计记录并转发给 sidecar，便于跨进程排障，且不包含 Token、Cookie 或上游 URL。
 
-在线音乐 sidecar 调用使用 .NET `Meter` `FlutterMusic.OnlineMusic` 发布 `requests`、`failures`、`duration` 和 `circuit_rejections` 指标。完整指标名以 `flutter_music.online_music.sidecar.` 开头；标签仅包含低基数的规范操作名和失败类型，不包含搜索词、来源、曲目 ID、Token 或 URL。连续的 HTTP 408、429、5xx 或网络错误会触发进程内熔断；恢复窗口只允许一个探测请求。`/health/ready` 使用独立客户端绕过熔断，以便依赖恢复后仍能被就绪检查准确发现。
+在线音乐 sidecar 调用使用 .NET `Meter` `FlutterMusic.OnlineMusic` 发布 `requests`、`failures`、`duration` 和 `circuit_rejections` 指标。完整指标名以 `flutter_music.online_music.sidecar.` 开头；标签仅包含低基数的规范操作名和失败类型，不包含搜索词、来源、曲目 ID、Token 或 URL。
+
+熔断状态**按操作隔离**（`search`、`resolve`、`stream`、`lyrics`、`artwork`、`download` 各自独立计数）。这一点是硬性要求：这些操作共用同一个 sidecar，但失败原因互不相关，一次批量封面失败不得让搜索功能停摆。只有瞬时故障（HTTP 408、429、5xx 或网络错误）才计入失败次数；404、422 等稳定业务结果不计入。恢复窗口只允许一个探测请求。`/health/ready` 使用独立客户端绕过熔断，以便依赖恢复后仍能被就绪检查准确发现。
+
+sidecar 的调用方只对**传输层错误**（连接被重置、DNS 失败）重试一次，且仅在搜索路径上；HTTP 状态响应、业务错误和超时都不重试。空转一段时间后的第一次调用最容易撞上已被对端关闭的池化连接，这一层重试专门用于吸收该抖动。
 
 服务器扫描管理页面由 Razor Pages 提供：`GET /admin/login` 和 `GET /admin/scanning`。页面使用独立管理员 Cookie，并由 PageModel 直接调用扫描 Service；它不复用下述 Flutter JWT 接口，Flutter 客户端也不包含服务器扫描入口。
 
@@ -414,7 +418,17 @@ Development 配置默认启用 `netease`、`kugou`、`kuwo`。生产部署需要
 }
 ```
 
-`sources` 为空时搜索全部允许来源。成功响应包含稳定身份 `provider + trackId`、展示字段、可播放状态和来源级警告。单个来源失败时返回 `200` 且 `partial: true`；全部来源不可用返回 `503`，整体超时返回 `504`，限流返回 `429`。
+`sources` 为空时搜索全部允许来源。成功响应包含稳定身份 `provider + trackId`、展示字段、可播放状态和来源级警告。单个来源失败时返回 `200` 且 `partial: true`；整体超时返回 `504 online_music_upstream_timeout`，限流返回 `429 online_music_rate_limited`。
+
+失败响应刻意区分了三种此前会混为一谈的情况，客户端据此给出不同提示：
+
+| 状态码 | `code` | 含义 | 建议动作 |
+| --- | --- | --- | --- |
+| `503` | `online_music_circuit_open` | 该操作的熔断器正在恢复窗口内 | 稍等数秒后重试 |
+| `503` | `online_music_sources_unavailable` | sidecar 正常，但所选来源都没有可用结果 | 换关键词或稍后重试 |
+| `503` | `online_music_source_unavailable` | sidecar 不可用或返回了非成功状态 | 稍后重试 |
+
+三者都是 `503`，因此**不能只看状态码**，必须按 `code` 分支。
 
 ### 8.3 获取播放票据
 
@@ -430,13 +444,13 @@ Development 配置默认启用 `netease`、`kugou`、`kuwo`。生产部署需要
 }
 ```
 
-来源不在白名单或曲目 ID 无效返回 `400`；sidecar 不可用返回 `503`；解析超时返回 `504`。响应不包含 sidecar 私有 `streamRef` 或第三方 URL。
+来源不在白名单或曲目 ID 无效返回 `400 online_music_invalid_request`；这首曲目确实拿不到可播放音源（上游无源、VIP、已下架）返回 `404 online_music_track_unavailable`，这是稳定的按曲目结果，客户端应提示"该歌曲暂时没有可播放的音源"而不是服务故障；sidecar 不可用返回 `503 online_music_source_unavailable`，熔断恢复窗口返回 `503 online_music_circuit_open`；解析超时返回 `504 online_music_upstream_timeout`。响应不包含 sidecar 私有 `streamRef` 或第三方 URL。
 
 ### 8.4 播放在线音频
 
 `GET /api/online-music/playback/{ticket}`
 
-请求必须继续携带签发账号的 Bearer Token，可携带 `Range: bytes=...`。服务端返回 `200` 或 `206`，只转发 `Content-Type`、`Content-Length`、`Accept-Ranges`、`Content-Range`、`ETag`。票据过期返回 `410 online_music_playback_expired`，不存在或属于其他账号统一返回 `404 online_music_playback_not_found`，无效或越界 Range 返回 `416 online_music_invalid_range`。
+请求必须继续携带签发账号的 Bearer Token，可携带 `Range: bytes=...`。服务端返回 `200` 或 `206`，只转发 `Content-Type`、`Content-Length`、`Accept-Ranges`、`Content-Range`、`ETag`。票据过期返回 `410 online_music_playback_expired`，不存在或属于其他账号统一返回 `404 online_music_playback_not_found`，上游音源地址已失效返回 `404 online_music_playback_unavailable`（客户端应重新选择歌曲），无效或越界 Range 返回 `416 online_music_invalid_range`，熔断恢复窗口返回 `503 online_music_circuit_open`。
 
 票据允许在有效期内发起多个 Range 请求；已经建立的流不会因票据随后到期而被主动截断。过期后的新请求必须重新获取票据。Flutter 的 Windows/Android 播放使用同一个 `MusicAudioHandler`；Web 音频元素无法可靠附加 Bearer 请求头，因此当前不显示可用播放操作。
 
@@ -444,13 +458,19 @@ Development 配置默认启用 `netease`、`kugou`、`kuwo`。生产部署需要
 
 `GET /api/online-music/tracks/{source}/{trackId}/lyrics`
 
-请求必须携带 Bearer Token。成功返回 `{ "lyrics": "...", "format": "lrc" }`，Flutter 在播放前获取并交给现有 LRC 解析与同步歌词界面。曲目未注册、来源没有歌词或歌词为空时返回 `404 online_music_asset_not_found`；超时返回 `504`。单份歌词默认最多 512 KiB。
+请求必须携带 Bearer Token。成功返回 `{ "lyrics": "...", "format": "lrc" }`，Flutter 在播放前获取并交给现有 LRC 解析与同步歌词界面。曲目未注册、来源没有歌词或歌词为空时返回 `404 online_music_asset_not_found`；超时返回 `504`；熔断恢复窗口返回 `503 online_music_circuit_open`。单份歌词默认最多 512 KiB。
+
+歌词是可选增强：sidecar 判定"这首歌没有歌词"时返回稳定错误码 `asset_unavailable`，API 会把它翻译成 `404 online_music_asset_not_found`，客户端按"暂无歌词"降级处理。
 
 ### 8.6 获取封面
 
 `GET /api/online-music/tracks/{source}/{trackId}/cover`
 
-请求必须携带 Bearer Token。成功返回经过 MIME 校验的图片字节，并附带私有缓存策略、`ETag` 和 `X-Content-Type-Options: nosniff`；客户端可用 `If-None-Match` 获取 `304`。无封面返回 `404 online_music_asset_not_found`，损坏、超限或上游失败返回稳定的 `502`。单张封面默认最多 2 MiB。
+请求必须携带 Bearer Token。成功返回经过 MIME 校验的图片字节，并附带私有缓存策略、`ETag` 和 `X-Content-Type-Options: nosniff`；客户端可用 `If-None-Match` 获取 `304`。无封面返回 `404 online_music_asset_not_found`，损坏或超过大小限制返回 `502 online_music_asset_too_large`，上游瞬时故障返回 `502 online_music_resource_unavailable`，熔断恢复窗口返回 `503 online_music_circuit_open`。单张封面默认最多 2 MiB。
+
+封面同样是可选增强：sidecar 判定"这首歌确实没有可用封面"（上游 4xx、地址非法、内容不是图片）时返回稳定错误码 `asset_unavailable`，API 会把它翻译成 `404 online_music_asset_not_found`，并按稳定失败缓存 5 分钟，避免客户端反复重试同一张不存在的封面。
+
+封面内容的类型判定以字节嗅探为准，响应头只作为兜底：部分 CDN（例如 netease 的 `p1.music.126.net`）会返回非标准的 `image/jpg`，也有 CDN 会把图片标成 `application/octet-stream`。响应头谎称图片但字节不是图片时会被拒绝，避免把上游错误页写进缓存。
 
 歌词与封面共享一个独立、按字节计量的内存缓存，总容量默认 32 MiB；歌词默认缓存 15 分钟，封面默认缓存 6 小时。缓存不保存第三方 Cookie、原始封面 URL 或 sidecar 私有字段。
 
