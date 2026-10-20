@@ -75,16 +75,9 @@ class _OnlineSearchPageState extends ConsumerState<OnlineSearchPage> {
     _controller.clear();
   }
 
-  Future<void> _previousPage() async {
+  Future<void> _loadMore() async {
     if (_batchBusy) return;
-    if (_selectionMode) _exitSelection();
-    await _controller.previousPage();
-  }
-
-  Future<void> _nextPage() async {
-    if (_batchBusy) return;
-    if (_selectionMode) _exitSelection();
-    await _controller.nextPage();
+    await _controller.loadMore();
   }
 
   void _exitSelection() {
@@ -330,7 +323,7 @@ class _OnlineSearchPageState extends ConsumerState<OnlineSearchPage> {
         return Padding(
           padding: EdgeInsets.fromLTRB(
             horizontalPadding,
-            20,
+            12,
             horizontalPadding,
             0,
           ),
@@ -340,13 +333,6 @@ class _OnlineSearchPageState extends ConsumerState<OnlineSearchPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    '在线搜索',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 18),
                   AnimatedBuilder(
                     animation: _controller,
                     builder: (context, _) =>
@@ -398,15 +384,14 @@ class _OnlineSearchPageState extends ConsumerState<OnlineSearchPage> {
                           },
                         ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Expanded(
                     child: AnimatedBuilder(
                       animation: _controller,
                       builder: (context, _) => OnlineSearchBody(
                         state: _controller.state,
                         onRetry: _controller.retry,
-                        onPreviousPage: _previousPage,
-                        onNextPage: _nextPage,
+                        onLoadMore: _loadMore,
                         onPlay: _play,
                         resolvingTrackIds: _resolvingTrackIds,
                         selectedTrackIds: _selectedTrackIds,

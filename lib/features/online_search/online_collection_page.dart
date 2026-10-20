@@ -16,6 +16,7 @@ import '../player/mini_player_bar.dart';
 import '../playlists/playlists_page.dart';
 import '../shell/windows_title_bar.dart';
 import 'online_artwork_view.dart';
+import 'online_load_more.dart';
 import 'online_track_tile.dart';
 
 enum OnlineCollectionKind { artist, album }
@@ -50,11 +51,18 @@ class OnlineCollectionPage extends ConsumerStatefulWidget {
 }
 
 class _OnlineCollectionPageState extends ConsumerState<OnlineCollectionPage> {
+  /// 单次滚动到底最多连续补取的服务端页数，避免整页结果都不属于当前集合时长时间空转。
+  static const _maxLoadMoreRounds = 3;
+
   final Set<String> _resolvingTrackIds = {};
   final Set<String> _selectedTrackIds = {};
   late List<OnlineTrack> _tracks;
   String? _refreshMessage;
+  String? _nextCursor;
+  String? _loadMoreMessage;
+  var _loadMoreMessageIsError = false;
   var _loading = true;
+  var _loadingMore = false;
   var _selectionMode = false;
   var _batchBusy = false;
   var _generation = 0;
@@ -70,7 +78,10 @@ class _OnlineCollectionPageState extends ConsumerState<OnlineCollectionPage> {
     final generation = ++_generation;
     setState(() {
       _loading = true;
+      _loadingMore = false;
       _refreshMessage = null;
+      _loadMoreMessage = null;
+      _loadMoreMessageIsError = false;
     });
     try {
       final result = await ref
@@ -83,6 +94,7 @@ class _OnlineCollectionPageState extends ConsumerState<OnlineCollectionPage> {
       };
       setState(() {
         _tracks = List.unmodifiable(byId.values);
+        _nextCursor = _nextCursorOf(result, cursor: null);
         _loading = false;
         if (result.partial) {
           _refreshMessage = '部分音乐来源暂时不可用，已显示可用结果。';
@@ -97,6 +109,63 @@ class _OnlineCollectionPageState extends ConsumerState<OnlineCollectionPage> {
             : '暂时无法加载更多歌曲，已保留当前搜索结果。';
       });
     }
+  }
+
+  /// 滚动到底部时继续取下一页；整页都不属于当前歌手/专辑时会继续补取。
+  Future<void> _loadMore() async {
+    if (_loading || _loadingMore) return;
+    var cursor = _nextCursor;
+    if (cursor == null || cursor.trim().isEmpty) return;
+    final generation = ++_generation;
+    setState(() {
+      _loadingMore = true;
+      _loadMoreMessage = null;
+      _loadMoreMessageIsError = false;
+    });
+    try {
+      var tracks = _tracks;
+      var message = '';
+      for (var round = 0; round < _maxLoadMoreRounds; round++) {
+        final result = await ref
+            .read(onlineMusicRepositoryProvider)
+            .search(widget.request.value, cursor: cursor);
+        if (!mounted || generation != _generation) return;
+        final byId = <String, OnlineTrack>{
+          for (final track in tracks) track.id: track,
+          for (final track in _matchingTracks(result.items)) track.id: track,
+        };
+        final appended = byId.length - tracks.length;
+        tracks = List.unmodifiable(byId.values);
+        if (result.partial) message = '部分音乐来源暂时不可用，已显示可用结果。';
+        cursor = _nextCursorOf(result, cursor: cursor);
+        if (appended > 0 || cursor == null) break;
+      }
+      setState(() {
+        _tracks = tracks;
+        _nextCursor = cursor;
+        _loadingMore = false;
+        _loadMoreMessage = message.isEmpty ? null : message;
+      });
+    } catch (error) {
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _loadingMore = false;
+        _loadMoreMessage = '加载更多失败：${_errorMessage(error)}';
+        _loadMoreMessageIsError = true;
+      });
+    }
+  }
+
+  /// 空页、空游标或游标没有前进都视为到底，避免在坏数据上反复请求。
+  String? _nextCursorOf(OnlineMusicSearchResult result, {String? cursor}) {
+    final next = result.nextCursor?.trim();
+    if (result.items.isEmpty ||
+        next == null ||
+        next.isEmpty ||
+        next == cursor) {
+      return null;
+    }
+    return next;
   }
 
   List<OnlineTrack> _matchingTracks(Iterable<OnlineTrack> tracks) {
@@ -285,140 +354,162 @@ class _OnlineCollectionPageState extends ConsumerState<OnlineCollectionPage> {
           final firstPlayable = _tracks
               .where((track) => track.playable)
               .firstOrNull;
-          return CustomScrollView(
-            slivers: [
-              SliverAppBar(
-                pinned: true,
-                automaticallyImplyLeading: false,
-                leading: BackButton(
-                  onPressed: _selectionMode ? _exitSelection : widget.onBack,
-                ),
-                title: _CollapsedCollectionTitle(widget.request.value),
-                actions: [
-                  if (!_selectionMode)
-                    IconButton(
-                      tooltip: '批量选择',
-                      onPressed: _tracks.isEmpty ? null : _startSelection,
-                      icon: const Icon(Icons.library_add_check_outlined),
-                    )
-                  else
-                    IconButton(
-                      tooltip: '退出批量选择',
-                      onPressed: _batchBusy ? null : _exitSelection,
-                      icon: const Icon(Icons.close),
+          return OnlineLoadMoreListener(
+            onLoadMore: _loadMore,
+            threshold: 400,
+            child: CustomScrollView(
+              slivers: [
+                SliverAppBar(
+                  pinned: true,
+                  automaticallyImplyLeading: false,
+                  leading: BackButton(
+                    onPressed: _selectionMode ? _exitSelection : widget.onBack,
+                  ),
+                  title: _CollapsedCollectionTitle(widget.request.value),
+                  actions: [
+                    if (!_selectionMode)
+                      IconButton(
+                        tooltip: '批量选择',
+                        onPressed: _tracks.isEmpty ? null : _startSelection,
+                        icon: const Icon(Icons.library_add_check_outlined),
+                      )
+                    else
+                      IconButton(
+                        tooltip: '退出批量选择',
+                        onPressed: _batchBusy ? null : _exitSelection,
+                        icon: const Icon(Icons.close),
+                      ),
+                    const SizedBox(width: 8),
+                  ],
+                  expandedHeight: expandedHeight,
+                  flexibleSpace: FlexibleSpaceBar(
+                    background: _CollectionHeader(
+                      request: widget.request,
+                      tracks: _tracks,
+                      compact: compact,
+                      onPlay: firstPlayable == null || _selectionMode
+                          ? null
+                          : () => _play(firstPlayable),
                     ),
-                  const SizedBox(width: 8),
-                ],
-                expandedHeight: expandedHeight,
-                flexibleSpace: FlexibleSpaceBar(
-                  background: _CollectionHeader(
-                    request: widget.request,
-                    tracks: _tracks,
-                    compact: compact,
-                    onPlay: firstPlayable == null || _selectionMode
-                        ? null
-                        : () => _play(firstPlayable),
                   ),
                 ),
-              ),
-              if (_loading)
-                const SliverToBoxAdapter(child: LinearProgressIndicator()),
-              if (_refreshMessage case final message?)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    child: Material(
-                      color: Theme.of(context).colorScheme.tertiaryContainer,
-                      borderRadius: BorderRadius.circular(8),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.info_outline),
-                            const SizedBox(width: 10),
-                            Expanded(child: Text(message)),
-                            if (_tracks.isEmpty)
-                              TextButton(
-                                onPressed: _loading ? null : _refresh,
-                                child: const Text('重试'),
-                              ),
-                          ],
+                if (_loading)
+                  const SliverToBoxAdapter(child: LinearProgressIndicator()),
+                if (_refreshMessage case final message?)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                      child: Material(
+                        color: Theme.of(context).colorScheme.tertiaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.info_outline),
+                              const SizedBox(width: 10),
+                              Expanded(child: Text(message)),
+                              if (_tracks.isEmpty)
+                                TextButton(
+                                  onPressed: _loading ? null : _refresh,
+                                  child: const Text('重试'),
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              if (_selectionMode)
+                if (_selectionMode)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        compact ? 16 : 24,
+                        12,
+                        compact ? 16 : 24,
+                        0,
+                      ),
+                      child: _CollectionSelectionToolbar(
+                        selected: _selectedTrackIds.length,
+                        total: _tracks.length,
+                        busy: _batchBusy,
+                        onToggleAll: _toggleAll,
+                        onAddToPlaylist: _selectedTrackIds.isEmpty
+                            ? null
+                            : _addSelectedToPlaylist,
+                      ),
+                    ),
+                  ),
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(
                       compact ? 16 : 24,
-                      12,
+                      20,
+                      compact ? 16 : 24,
+                      8,
+                    ),
+                    child: Text(
+                      '歌曲  ${_tracks.length}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                if (_tracks.isEmpty && !_loading)
+                  const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _EmptyCollection(),
+                  )
+                else
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
                       compact ? 16 : 24,
                       0,
+                      compact ? 16 : 24,
+                      24,
                     ),
-                    child: _CollectionSelectionToolbar(
-                      selected: _selectedTrackIds.length,
-                      total: _tracks.length,
-                      busy: _batchBusy,
-                      onToggleAll: _toggleAll,
-                      onAddToPlaylist: _selectedTrackIds.isEmpty
-                          ? null
-                          : _addSelectedToPlaylist,
+                    sliver: SliverList.separated(
+                      itemCount: _tracks.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 6),
+                      itemBuilder: (context, index) {
+                        final track = _tracks[index];
+                        return OnlineTrackTile(
+                          key: ValueKey(track.id),
+                          track: track,
+                          playbackSupported: playbackSupported,
+                          resolving: _resolvingTrackIds.contains(track.id),
+                          showArtwork: showArtwork,
+                          selectionEnabled: _selectionMode,
+                          selected: _selectedTrackIds.contains(track.id),
+                          onSelected: _batchBusy
+                              ? null
+                              : (selected) => _setSelected(track, selected),
+                          onPlay: () => _play(track),
+                        );
+                      },
+                    ),
+                  ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      compact ? 16 : 24,
+                      0,
+                      compact ? 16 : 24,
+                      16,
+                    ),
+                    child: OnlineLoadMoreFooter(
+                      hasMore: _nextCursor != null,
+                      loading: _loadingMore,
+                      onLoadMore: _loadMore,
+                      message: _loadMoreMessage,
+                      messageIsError: _loadMoreMessageIsError,
+                      endLabel: _tracks.isEmpty ? null : '已经到底啦',
                     ),
                   ),
                 ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    compact ? 16 : 24,
-                    20,
-                    compact ? 16 : 24,
-                    8,
-                  ),
-                  child: Text(
-                    '歌曲  ${_tracks.length}',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ),
-              if (_tracks.isEmpty && !_loading)
-                const SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _EmptyCollection(),
-                )
-              else
-                SliverPadding(
-                  padding: EdgeInsets.fromLTRB(
-                    compact ? 16 : 24,
-                    0,
-                    compact ? 16 : 24,
-                    24,
-                  ),
-                  sliver: SliverList.separated(
-                    itemCount: _tracks.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 6),
-                    itemBuilder: (context, index) {
-                      final track = _tracks[index];
-                      return OnlineTrackTile(
-                        key: ValueKey(track.id),
-                        track: track,
-                        playbackSupported: playbackSupported,
-                        resolving: _resolvingTrackIds.contains(track.id),
-                        showArtwork: showArtwork,
-                        selectionEnabled: _selectionMode,
-                        selected: _selectedTrackIds.contains(track.id),
-                        onSelected: _batchBusy
-                            ? null
-                            : (selected) => _setSelected(track, selected),
-                        onPlay: () => _play(track),
-                      );
-                    },
-                  ),
-                ),
-            ],
+              ],
+            ),
           );
         },
       ),

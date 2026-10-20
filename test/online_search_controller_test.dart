@@ -91,40 +91,65 @@ void main() {
     controller.dispose();
   });
 
-  test('使用服务端游标前后翻页并维护页码', () async {
+  test('滚动到底部会追加下一页并保留已加载结果', () async {
     final repository = _PagingRepository();
     final controller = OnlineSearchController(repository);
 
     await controller.searchNow('Song');
-    expect(controller.state.page, 1);
     expect(controller.state.items.single.title, 'Page 1');
-    expect(controller.state.hasPreviousPage, isFalse);
-    expect(controller.state.hasNextPage, isTrue);
+    expect(controller.state.hasMore, isTrue);
 
-    await controller.nextPage();
-    expect(controller.state.page, 2);
-    expect(controller.state.items.single.title, 'Page 2');
-    expect(controller.state.hasPreviousPage, isTrue);
-    expect(controller.state.hasNextPage, isTrue);
+    await controller.loadMore();
+    expect(_titles(controller), ['Page 1', 'Page 2']);
+    expect(controller.state.hasMore, isTrue);
 
-    await controller.nextPage();
-    expect(controller.state.page, 3);
-    expect(controller.state.hasNextPage, isFalse);
+    await controller.loadMore();
+    expect(_titles(controller), ['Page 1', 'Page 2', 'Page 3']);
+    expect(controller.state.hasMore, isFalse);
 
-    await controller.previousPage();
-    await controller.previousPage();
-    expect(controller.state.page, 1);
-    expect(repository.cursors, <String?>[
-      null,
-      'cursor-2',
-      'cursor-3',
-      'cursor-2',
-      null,
-    ]);
+    // 已经到底后重复触发不会再次请求服务端。
+    await controller.loadMore();
+    expect(repository.cursors, <String?>[null, 'cursor-2', 'cursor-3']);
+
+    // 新的搜索会清空已累计的结果。
+    await controller.searchNow('Song');
+    expect(controller.state.items.single.title, 'Page 1');
+    expect(controller.state.hasMore, isTrue);
+
+    controller.dispose();
+  });
+
+  test('加载下一页失败时保留已加载结果并提示重试', () async {
+    final repository = _PagingRepository(failOn: 'cursor-2');
+    final controller = OnlineSearchController(repository);
+
+    await controller.searchNow('Song');
+    await controller.loadMore();
+
+    expect(controller.state.items.single.title, 'Page 1');
+    expect(controller.state.hasMore, isTrue);
+    expect(controller.state.isLoadingMore, isFalse);
+    expect(controller.state.loadMoreMessage, contains('Service unavailable'));
+    expect(controller.state.loadMoreMessageIsError, isTrue);
+
+    controller.dispose();
+  });
+
+  test('跨页重复的歌曲只保留一份', () async {
+    final controller = OnlineSearchController(_OverlappingRepository());
+
+    await controller.searchNow('Song');
+    await controller.loadMore();
+
+    expect(_titles(controller), ['Shared Song', 'Second Song']);
+    expect(controller.state.hasMore, isFalse);
 
     controller.dispose();
   });
 }
+
+List<String> _titles(OnlineSearchController controller) =>
+    controller.state.items.map((track) => track.title).toList();
 
 OnlineMusicSearchResult _result(String title) => OnlineMusicSearchResult(
   items: [
@@ -205,11 +230,17 @@ class _FailingRepository implements OnlineMusicSearchRepository {
 }
 
 class _PagingRepository implements OnlineMusicSearchRepository {
+  _PagingRepository({this.failOn});
+
+  final String? failOn;
   final cursors = <String?>[];
 
   @override
   Future<OnlineMusicSearchResult> search(String query, {String? cursor}) async {
     cursors.add(cursor);
+    if (cursor != null && cursor == failOn) {
+      throw StateError('Service unavailable');
+    }
     return switch (cursor) {
       null => _pageResult('Page 1', 'cursor-2'),
       'cursor-2' => _pageResult('Page 2', 'cursor-3'),
@@ -228,6 +259,45 @@ class _PagingRepository implements OnlineMusicSearchRepository {
   Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
       throw UnimplementedError();
 }
+
+class _OverlappingRepository implements OnlineMusicSearchRepository {
+  @override
+  Future<OnlineMusicSearchResult> search(String query, {String? cursor}) async {
+    if (cursor == null) {
+      return OnlineMusicSearchResult(
+        items: [_track('shared', 'Shared Song')],
+        partial: false,
+        warnings: const [],
+        nextCursor: 'cursor-2',
+      );
+    }
+    return OnlineMusicSearchResult(
+      items: [_track('shared', 'Shared Song'), _track('second', 'Second Song')],
+      partial: false,
+      warnings: const [],
+    );
+  }
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async => null;
+
+  @override
+  Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
+      throw UnimplementedError();
+}
+
+OnlineTrack _track(String id, String title) => OnlineTrack(
+  provider: 'source-a',
+  trackId: id,
+  title: title,
+  artists: const ['Artist'],
+  album: 'Album',
+  playable: true,
+  capabilities: const {'playback'},
+);
 
 OnlineMusicSearchResult _pageResult(String title, String? nextCursor) =>
     OnlineMusicSearchResult(

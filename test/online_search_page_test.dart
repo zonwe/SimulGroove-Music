@@ -185,7 +185,7 @@ void main() {
     expect(repository.artworkCalls, 0);
   });
 
-  testWidgets('搜索结果可使用上一页和下一页翻页', (tester) async {
+  testWidgets('首屏不足一屏时自动补取下一页并提示到底', (tester) async {
     tester.view.physicalSize = const Size(375, 780);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -210,18 +210,51 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Page 1 Song'), findsOneWidget);
-    expect(find.text('第 1 页'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, '下一页'));
-    await tester.pumpAndSettle();
-
     expect(find.text('Page 2 Song'), findsOneWidget);
-    expect(find.text('第 2 页'), findsOneWidget);
     expect(repository.cursors, <String?>[null, 'next-page']);
+    expect(find.text('已经到底啦 · 共 2 首'), findsOneWidget);
+    expect(find.text('上一页'), findsNothing);
+    expect(find.text('下一页'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
-    await tester.tap(find.widgetWithText(OutlinedButton, '上一页'));
+  testWidgets('首屏填满时滚动到底部才加载下一页', (tester) async {
+    tester.view.physicalSize = const Size(375, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final repository = _LongPagedResultRepository();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          onlineMusicRepositoryProvider.overrideWithValue(repository),
+          onlineTrackPlaybackProvider.overrideWithValue(_FakePlayback()),
+          onlineSearchShowArtworkProvider.overrideWithValue(
+            const AsyncData(true),
+          ),
+        ],
+        child: const MaterialApp(home: Scaffold(body: OnlineSearchPage())),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'Song');
+    await tester.tap(find.byTooltip('立即搜索'));
     await tester.pumpAndSettle();
-    expect(find.text('Page 1 Song'), findsOneWidget);
-    expect(repository.cursors, <String?>[null, 'next-page', null]);
+
+    expect(find.text('Song 1'), findsOneWidget);
+    expect(find.text('Song 21'), findsNothing);
+    expect(repository.cursors, <String?>[null]);
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(0, -2400),
+    );
+    await tester.pumpAndSettle();
+
+    expect(repository.cursors, <String?>[null, 'next-page']);
+    expect(find.text('Song 21'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }
 
@@ -338,6 +371,44 @@ class _PagedResultRepository implements OnlineMusicSearchRepository {
           playable: true,
           capabilities: const {'playback'},
         ),
+      ],
+      partial: false,
+      warnings: const [],
+      nextCursor: firstPage ? 'next-page' : null,
+    );
+  }
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async => null;
+
+  @override
+  Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
+      throw UnimplementedError();
+}
+
+class _LongPagedResultRepository implements OnlineMusicSearchRepository {
+  final cursors = <String?>[];
+
+  @override
+  Future<OnlineMusicSearchResult> search(String query, {String? cursor}) async {
+    cursors.add(cursor);
+    final firstPage = cursor == null;
+    final start = firstPage ? 1 : 21;
+    return OnlineMusicSearchResult(
+      items: [
+        for (var index = start; index < start + 20; index++)
+          OnlineTrack(
+            provider: 'source-a',
+            trackId: 'track-$index',
+            title: 'Song $index',
+            artists: const ['Artist'],
+            album: 'Album',
+            playable: true,
+            capabilities: const {'playback'},
+          ),
       ],
       partial: false,
       warnings: const [],

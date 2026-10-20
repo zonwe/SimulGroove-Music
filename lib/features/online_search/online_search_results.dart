@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/online_music/online_track_downloader.dart';
 import '../../core/online_music/online_track.dart';
+import 'online_load_more.dart';
 import 'online_search_controller.dart';
 import 'online_track_tile.dart';
 
@@ -14,8 +15,7 @@ class OnlineSearchBody extends StatelessWidget {
     super.key,
     required this.state,
     required this.onRetry,
-    required this.onPreviousPage,
-    required this.onNextPage,
+    required this.onLoadMore,
     required this.onPlay,
     required this.resolvingTrackIds,
     required this.selectedTrackIds,
@@ -35,8 +35,7 @@ class OnlineSearchBody extends StatelessWidget {
 
   final OnlineSearchState state;
   final VoidCallback onRetry;
-  final VoidCallback onPreviousPage;
-  final VoidCallback onNextPage;
+  final VoidCallback onLoadMore;
   final ValueChanged<OnlineTrack> onPlay;
   final Set<String> resolvingTrackIds;
   final Set<String> selectedTrackIds;
@@ -84,8 +83,7 @@ class OnlineSearchBody extends StatelessWidget {
     ),
     OnlineSearchStatus.data => _ResultsList(
       state: state,
-      onPreviousPage: onPreviousPage,
-      onNextPage: onNextPage,
+      onLoadMore: onLoadMore,
       onPlay: onPlay,
       resolvingTrackIds: resolvingTrackIds,
       selectedTrackIds: selectedTrackIds,
@@ -105,8 +103,7 @@ class OnlineSearchBody extends StatelessWidget {
     OnlineSearchStatus.partial => _ResultsList(
       state: state,
       partial: true,
-      onPreviousPage: onPreviousPage,
-      onNextPage: onNextPage,
+      onLoadMore: onLoadMore,
       onPlay: onPlay,
       resolvingTrackIds: resolvingTrackIds,
       selectedTrackIds: selectedTrackIds,
@@ -156,8 +153,7 @@ class _LoadingState extends StatelessWidget {
 class _ResultsList extends StatelessWidget {
   const _ResultsList({
     required this.state,
-    required this.onPreviousPage,
-    required this.onNextPage,
+    required this.onLoadMore,
     required this.onPlay,
     required this.resolvingTrackIds,
     required this.selectedTrackIds,
@@ -178,8 +174,7 @@ class _ResultsList extends StatelessWidget {
 
   final OnlineSearchState state;
   final bool partial;
-  final VoidCallback onPreviousPage;
-  final VoidCallback onNextPage;
+  final VoidCallback onLoadMore;
   final ValueChanged<OnlineTrack> onPlay;
   final Set<String> resolvingTrackIds;
   final Set<String> selectedTrackIds;
@@ -205,210 +200,94 @@ class _ResultsList extends StatelessWidget {
         .map((warning) => warning.provider)
         .toSet()
         .join('、');
-    return SingleChildScrollView(
-      key: PageStorageKey<String>(
-        'online-search-results-${state.query}-${state.page}',
-      ),
-      padding: const EdgeInsetsDirectional.only(end: 16, bottom: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (selectionMode)
-            _SelectionToolbar(
-              total: state.items.length,
-              selected: selectedCount,
-              busy: batchBusy,
-              downloadSupported: downloadSupported,
-              onToggleAll: () => onToggleAll(state.items),
-              onExitSelection: onExitSelection,
-              onDownload: () => onDownload(state.items),
-              onCreatePlaylist: () => onCreatePlaylist(state.items),
-            ),
-          if (downloadProgress case final progress?) ...[
-            const SizedBox(height: 8),
-            Semantics(
-              liveRegion: true,
-              label: progress.currentTrackId == null
-                  ? '已完成 ${progress.completed} 首，共 ${progress.total} 首'
-                  : '正在下载，第 ${progress.completed + 1} 首，共 ${progress.total} 首',
-              child: LinearProgressIndicator(
-                value: progress.total == 0
-                    ? null
-                    : progress.completed / progress.total,
+    return OnlineLoadMoreListener(
+      onLoadMore: onLoadMore,
+      child: SingleChildScrollView(
+        key: PageStorageKey<String>('online-search-results-${state.query}'),
+        padding: const EdgeInsetsDirectional.only(end: 16, bottom: 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (selectionMode)
+              _SelectionToolbar(
+                total: state.items.length,
+                selected: selectedCount,
+                busy: batchBusy,
+                downloadSupported: downloadSupported,
+                onToggleAll: () => onToggleAll(state.items),
+                onExitSelection: onExitSelection,
+                onDownload: () => onDownload(state.items),
+                onCreatePlaylist: () => onCreatePlaylist(state.items),
               ),
-            ),
-          ],
-          if (selectionMode || downloadProgress != null)
-            const SizedBox(height: 10),
-          if (partial) ...[
-            Semantics(
-              liveRegion: true,
-              child: Material(
-                color: Theme.of(context).colorScheme.tertiaryContainer,
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.warning_amber_rounded),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          providers.isEmpty
-                              ? '部分来源暂时不可用，已显示其余搜索结果。'
-                              : '$providers 暂时不可用，已显示其余搜索结果。',
-                        ),
-                      ),
-                    ],
-                  ),
+            if (downloadProgress case final progress?) ...[
+              const SizedBox(height: 8),
+              Semantics(
+                liveRegion: true,
+                label: progress.currentTrackId == null
+                    ? '已完成 ${progress.completed} 首，共 ${progress.total} 首'
+                    : '正在下载，第 ${progress.completed + 1} 首，共 ${progress.total} 首',
+                child: LinearProgressIndicator(
+                  value: progress.total == 0
+                      ? null
+                      : progress.completed / progress.total,
                 ),
               ),
-            ),
-            const SizedBox(height: 10),
-          ],
-          for (final track in state.items) ...[
-            OnlineTrackTile(
-              key: ValueKey(track.id),
-              track: track,
-              playbackSupported: playbackSupported,
-              resolving: resolvingTrackIds.contains(track.id),
-              selected: selectedTrackIds.contains(track.id),
-              selectionEnabled: selectionMode,
-              showArtwork: showArtwork,
-              onContextMenuRequested: (position) =>
-                  onContextMenuRequested(track, state.items, position),
-              onSelected: batchBusy
-                  ? null
-                  : (selected) => onSelected(track, selected),
-              onPlay: () => onPlay(track),
-            ),
-            const SizedBox(height: 6),
-          ],
-          if (state.hasPreviousPage ||
-              state.hasNextPage ||
-              state.isPageLoading ||
-              state.pageMessage != null) ...[
-            const SizedBox(height: 10),
-            _PaginationBar(
-              page: state.page,
-              hasPreviousPage: state.hasPreviousPage,
-              hasNextPage: state.hasNextPage,
-              loading: state.isPageLoading,
-              enabled: !batchBusy,
-              message: state.pageMessage,
-              messageIsError: state.pageMessageIsError,
-              onPreviousPage: onPreviousPage,
-              onNextPage: onNextPage,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _PaginationBar extends StatelessWidget {
-  const _PaginationBar({
-    required this.page,
-    required this.hasPreviousPage,
-    required this.hasNextPage,
-    required this.loading,
-    required this.enabled,
-    required this.onPreviousPage,
-    required this.onNextPage,
-    this.message,
-    this.messageIsError = false,
-  });
-
-  final int page;
-  final bool hasPreviousPage;
-  final bool hasNextPage;
-  final bool loading;
-  final bool enabled;
-  final String? message;
-  final bool messageIsError;
-  final VoidCallback onPreviousPage;
-  final VoidCallback onNextPage;
-
-  @override
-  Widget build(BuildContext context) {
-    final controlsEnabled = enabled && !loading;
-    final buttonStyle = OutlinedButton.styleFrom(
-      minimumSize: const Size(0, 48),
-    );
-    return Semantics(
-      container: true,
-      liveRegion: loading || message != null,
-      label: loading ? '正在加载其他页搜索结果' : '搜索结果第 $page 页',
-      child: Material(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            children: [
-              Wrap(
-                alignment: WrapAlignment.center,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 12,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    style: buttonStyle,
-                    onPressed: controlsEnabled && hasPreviousPage
-                        ? onPreviousPage
-                        : null,
-                    icon: const Icon(Icons.chevron_left_rounded),
-                    label: const Text('上一页'),
-                  ),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 76),
-                    child: Text(
-                      '第 $page 页',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                  ),
-                  FilledButton.tonalIcon(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 48),
-                    ),
-                    onPressed: controlsEnabled && hasNextPage
-                        ? onNextPage
-                        : null,
-                    icon: const Icon(Icons.chevron_right_rounded),
-                    label: const Text('下一页'),
-                  ),
-                ],
-              ),
-              if (loading) ...[
-                const SizedBox(height: 8),
-                const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    SizedBox(width: 8),
-                    Text('正在翻页…'),
-                  ],
-                ),
-              ],
-              if (message case final message?) ...[
-                const SizedBox(height: 8),
-                Text(
-                  message,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: messageIsError
-                        ? Theme.of(context).colorScheme.error
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
             ],
-          ),
+            if (selectionMode || downloadProgress != null)
+              const SizedBox(height: 10),
+            if (partial) ...[
+              Semantics(
+                liveRegion: true,
+                child: Material(
+                  color: Theme.of(context).colorScheme.tertiaryContainer,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.warning_amber_rounded),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            providers.isEmpty
+                                ? '部分来源暂时不可用，已显示其余搜索结果。'
+                                : '$providers 暂时不可用，已显示其余搜索结果。',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+            for (final track in state.items) ...[
+              OnlineTrackTile(
+                key: ValueKey(track.id),
+                track: track,
+                playbackSupported: playbackSupported,
+                resolving: resolvingTrackIds.contains(track.id),
+                selected: selectedTrackIds.contains(track.id),
+                selectionEnabled: selectionMode,
+                showArtwork: showArtwork,
+                onContextMenuRequested: (position) =>
+                    onContextMenuRequested(track, state.items, position),
+                onSelected: batchBusy
+                    ? null
+                    : (selected) => onSelected(track, selected),
+                onPlay: () => onPlay(track),
+              ),
+              const SizedBox(height: 6),
+            ],
+            OnlineLoadMoreFooter(
+              hasMore: state.hasMore,
+              loading: state.isLoadingMore,
+              onLoadMore: onLoadMore,
+              message: state.loadMoreMessage,
+              messageIsError: state.loadMoreMessageIsError,
+              endLabel: '已经到底啦 · 共 ${state.items.length} 首',
+            ),
+          ],
         ),
       ),
     );

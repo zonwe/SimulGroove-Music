@@ -13,34 +13,34 @@ class OnlineSearchState {
     this.warnings = const [],
     this.message,
     this.nextCursor,
-    this.page = 1,
-    this.isPageLoading = false,
-    this.pageMessage,
-    this.pageMessageIsError = false,
+    this.isLoadingMore = false,
+    this.loadMoreMessage,
+    this.loadMoreMessageIsError = false,
   });
 
   const OnlineSearchState.idle() : this(status: OnlineSearchStatus.idle);
 
   final OnlineSearchStatus status;
   final String query;
+
+  /// 已经累计加载的结果：滚动到底部后继续追加，而不是替换整页。
   final List<OnlineTrack> items;
   final List<OnlineMusicWarning> warnings;
   final String? message;
-  final String? nextCursor;
-  final int page;
-  final bool isPageLoading;
-  final String? pageMessage;
-  final bool pageMessageIsError;
 
-  bool get hasPreviousPage => page > 1;
-  bool get hasNextPage => nextCursor?.trim().isNotEmpty ?? false;
+  /// 服务端返回的下一页游标；为空表示已经到底。
+  final String? nextCursor;
+  final bool isLoadingMore;
+  final String? loadMoreMessage;
+  final bool loadMoreMessageIsError;
+
+  bool get hasMore => nextCursor?.trim().isNotEmpty ?? false;
 }
 
 class OnlineSearchController extends ChangeNotifier {
   OnlineSearchController(this._repository);
 
   final OnlineMusicSearchRepository _repository;
-  final List<String?> _pageCursors = [null];
   var _generation = 0;
   var _disposed = false;
   OnlineSearchState _state = const OnlineSearchState.idle();
@@ -49,7 +49,6 @@ class OnlineSearchController extends ChangeNotifier {
 
   void clear() {
     _generation++;
-    _resetPages();
     _setState(const OnlineSearchState.idle());
   }
 
@@ -57,87 +56,80 @@ class OnlineSearchController extends ChangeNotifier {
     final generation = ++_generation;
     final query = value.trim();
     if (query.isEmpty) {
-      _resetPages();
       _setState(const OnlineSearchState.idle());
       return;
     }
-    _resetPages();
-    await _search(query, generation, cursor: null, page: 1, initial: true);
+    await _loadFirstPage(query, generation);
   }
 
   Future<void> retry() => searchNow(_state.query);
 
-  Future<void> nextPage() async {
-    if (_state.isPageLoading || !_state.hasNextPage) return;
-    final cursor = _state.nextCursor;
+  /// 滚动到底部时加载下一页，并把新结果追加到现有列表。
+  ///
+  /// 重复触发是安全的：加载中或已经到底时直接返回。
+  Future<void> loadMore() async {
+    final current = _state;
+    if (current.isLoadingMore || !current.hasMore) return;
+    final cursor = current.nextCursor;
     if (cursor == null) return;
     final generation = ++_generation;
-    await _search(
-      _state.query,
-      generation,
-      cursor: cursor,
-      page: _state.page + 1,
-      initial: false,
+    _setState(
+      OnlineSearchState(
+        status: current.status,
+        query: current.query,
+        items: current.items,
+        warnings: current.warnings,
+        message: current.message,
+        nextCursor: current.nextCursor,
+        isLoadingMore: true,
+      ),
     );
-  }
-
-  Future<void> previousPage() async {
-    if (_state.isPageLoading || !_state.hasPreviousPage) return;
-    final page = _state.page - 1;
-    final generation = ++_generation;
-    await _search(
-      _state.query,
-      generation,
-      cursor: _pageCursors[page - 1],
-      page: page,
-      initial: false,
-    );
-  }
-
-  Future<void> _search(
-    String query,
-    int generation, {
-    required String? cursor,
-    required int page,
-    required bool initial,
-  }) async {
-    if (!_isCurrent(generation)) return;
-    final previous = _state;
-    if (initial) {
-      _setState(
-        OnlineSearchState(status: OnlineSearchStatus.loading, query: query),
-      );
-    } else {
+    try {
+      final result = await _repository.search(current.query, cursor: cursor);
+      if (!_isCurrent(generation)) return;
+      final items = _appendUnique(current.items, result.items);
+      // 空页或游标没有前进都视为到底，避免在坏数据上反复请求。
+      final reachedEnd = result.items.isEmpty || result.nextCursor == cursor;
+      final warnings = _mergeWarnings(current.warnings, result.warnings);
       _setState(
         OnlineSearchState(
-          status: previous.status,
-          query: previous.query,
-          items: previous.items,
-          warnings: previous.warnings,
-          message: previous.message,
-          nextCursor: previous.nextCursor,
-          page: previous.page,
-          isPageLoading: true,
+          status: items.isEmpty
+              ? OnlineSearchStatus.empty
+              : warnings.isEmpty
+              ? OnlineSearchStatus.data
+              : OnlineSearchStatus.partial,
+          query: current.query,
+          items: items,
+          warnings: warnings,
+          nextCursor: reachedEnd ? null : result.nextCursor,
+          loadMoreMessage: reachedEnd ? '没有更多搜索结果了。' : null,
+        ),
+      );
+    } catch (error) {
+      if (!_isCurrent(generation)) return;
+      _setState(
+        OnlineSearchState(
+          status: current.status,
+          query: current.query,
+          items: current.items,
+          warnings: current.warnings,
+          message: current.message,
+          nextCursor: current.nextCursor,
+          loadMoreMessage: '加载更多失败：$error',
+          loadMoreMessageIsError: true,
         ),
       );
     }
+  }
+
+  Future<void> _loadFirstPage(String query, int generation) async {
+    if (!_isCurrent(generation)) return;
+    _setState(
+      OnlineSearchState(status: OnlineSearchStatus.loading, query: query),
+    );
     try {
-      final result = await _repository.search(query, cursor: cursor);
+      final result = await _repository.search(query);
       if (!_isCurrent(generation)) return;
-      if (!initial && result.items.isEmpty) {
-        _setState(
-          OnlineSearchState(
-            status: previous.status,
-            query: previous.query,
-            items: previous.items,
-            warnings: previous.warnings,
-            message: previous.message,
-            page: previous.page,
-            pageMessage: '没有更多搜索结果。',
-          ),
-        );
-        return;
-      }
       final status = result.items.isEmpty
           ? OnlineSearchStatus.empty
           : result.partial || result.warnings.isNotEmpty
@@ -149,29 +141,11 @@ class OnlineSearchController extends ChangeNotifier {
           query: query,
           items: result.items,
           warnings: result.warnings,
-          nextCursor: result.nextCursor,
-          page: page,
+          nextCursor: result.items.isEmpty ? null : result.nextCursor,
         ),
       );
-      _rememberCursor(page, cursor);
     } catch (error) {
       if (!_isCurrent(generation)) return;
-      if (!initial) {
-        _setState(
-          OnlineSearchState(
-            status: previous.status,
-            query: previous.query,
-            items: previous.items,
-            warnings: previous.warnings,
-            message: previous.message,
-            nextCursor: previous.nextCursor,
-            page: previous.page,
-            pageMessage: '翻页失败：$error',
-            pageMessageIsError: true,
-          ),
-        );
-        return;
-      }
       _setState(
         OnlineSearchState(
           status: OnlineSearchStatus.error,
@@ -182,19 +156,31 @@ class OnlineSearchController extends ChangeNotifier {
     }
   }
 
-  void _resetPages() {
-    _pageCursors
-      ..clear()
-      ..add(null);
+  List<OnlineTrack> _appendUnique(
+    List<OnlineTrack> existing,
+    List<OnlineTrack> incoming,
+  ) {
+    final seen = {for (final track in existing) track.id};
+    final merged = List<OnlineTrack>.of(existing);
+    for (final track in incoming) {
+      if (seen.add(track.id)) merged.add(track);
+    }
+    return List.unmodifiable(merged);
   }
 
-  void _rememberCursor(int page, String? cursor) {
-    final index = page - 1;
-    if (_pageCursors.length > index) {
-      _pageCursors[index] = cursor;
-    } else {
-      _pageCursors.add(cursor);
+  List<OnlineMusicWarning> _mergeWarnings(
+    List<OnlineMusicWarning> existing,
+    List<OnlineMusicWarning> incoming,
+  ) {
+    if (incoming.isEmpty) return existing;
+    final keys = {
+      for (final warning in existing) '${warning.provider}:${warning.code}',
+    };
+    final merged = List<OnlineMusicWarning>.of(existing);
+    for (final warning in incoming) {
+      if (keys.add('${warning.provider}:${warning.code}')) merged.add(warning);
     }
+    return List.unmodifiable(merged);
   }
 
   bool _isCurrent(int generation) => !_disposed && generation == _generation;
