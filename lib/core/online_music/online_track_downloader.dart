@@ -199,18 +199,12 @@ class DefaultOnlineTrackDownloader
         // Commit the playable audio before attempting optional resources.
         await _saveDownloadedTrack(downloadedOnlineTrack(track, file));
         downloaded.add(track);
-        final warning = await _saveAttachments(
-          target,
-          track,
-          file,
-          {
-            if (!file.artworkEmbedded && track.capabilities.contains('artwork'))
-              OnlineDownloadAsset.artwork,
-            if (!file.lyricsEmbedded && track.capabilities.contains('lyrics'))
-              OnlineDownloadAsset.lyrics,
-          },
-          fallbackName: _fileName(track, source.mimeType, filenameFormat),
-        );
+        final warning = await _saveAttachments(target, track, file, {
+          if (!file.artworkEmbedded && track.capabilities.contains('artwork'))
+            OnlineDownloadAsset.artwork,
+          if (!file.lyricsEmbedded && track.capabilities.contains('lyrics'))
+            OnlineDownloadAsset.lyrics,
+        }, fallbackName: _fileName(track, source.mimeType, filenameFormat));
         if (warning != null) warnings.add(warning);
       } catch (error) {
         failures.add(OnlineDownloadFailure(track, error));
