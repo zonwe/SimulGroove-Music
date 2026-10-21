@@ -15,6 +15,7 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 - 通用功能：歌曲/专辑/艺术家视图、搜索、封面、歌词、播放队列、歌单、喜欢、10 段均衡器、扫描通知、主题外观和设置持久化。
 - 实验性后端：`backend/Music.Api` 提供 ASP.NET Core + SQLite 的认证、歌单/喜欢/均衡器预设与删除墓碑同步、服务器目录扫描、在线音乐 BFF 和审计日志接口；在线音乐链路已具备存活/就绪检查、关联 ID、低基数指标和进程内熔断。
 - 应用更新：Windows 安装版支持 SHA-256 校验后的静默升级，Android 下载 APK 后交给系统安装界面；更新源为 GitHub Release 的 `latest.json`。Linux/Web 暂不支持应用内更新。
+- 发布状态：`v1.1.0`（tag `v1.1.0`）已通过 GitHub Release 工作流发布；Android 从 v1.0.0 的 debug 证书切换到固定发布密钥，v1.0.0 → v1.1.0 需要卸载一次（清除应用数据），之后必须保持同一密钥。
 
 以下内容尚未视为完整产品能力：
 
@@ -22,6 +23,7 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 - 服务器扫描管理位于 `backend/Music.Api/Pages/Admin/` Razor Pages，不放入 Flutter 客户端；扫描的是后端机器目录，已索引曲目可在管理页试听，也可通过账号隔离且支持 Range 的 API 播放。
 - 在线搜索、歌词/封面、下载与 Windows/Linux/Android 在线播放已通过 `Music.Api` 接入受控 sidecar 契约；播放使用账号绑定短期票据与 Range 代理，Web 因认证请求头限制暂不开放在线播放和下载。仓库提供非 root API 镜像与单机 Compose 编排模板，但生产指标导出、告警和 HTTPS 入口仍由部署环境提供；听歌识曲仍是占位页。
 - Web 本地文件扫描和播放未实现。
+- Android 实机与 Windows 界面上的应用内更新尚未手工验收；Release 工作流已跑通，但“已发布旧版 → 应用内升级”的真实链路还需要设备验证。
 - `ios/`、`macos/` 保留 Flutter 平台脚手架，但不是 README 声明的主要交付目标。涉及这些平台时必须单独验证，不能根据 Android/Windows/Linux 的结果推断可用。
 
 ## 2. 修改前必须做的事
@@ -61,8 +63,8 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 | `build_command/installer/` | Inno Setup 安装器脚本（按用户安装） | `AppId` 固定；升级必须原地覆盖；不要随意改 `Runner.rc` 的 `CompanyName`/`ProductName`（影响应用支持目录，Drift 数据库在 Documents） |
 | `build_command/build_installer.ps1` | Windows 安装器构建入口 | 需要 Inno Setup 6；脚本用 UTF-8 BOM 保存以兼容 Windows PowerShell 5.1 |
 | `tool/build_update_manifest.ps1` | 生成 `latest.json` | 资产名、URL、SHA-256 必须与 Release 实际文件一致 |
-| `tool/generate_android_keystore.ps1` | 生成 Android 发布密钥并输出 CI secrets | 绝不提交 keystore、密码或 base64 输出 |
-| `.github/workflows/release.yml` | tag/手动发布安装器、APK、`latest.json` 与校验和 | Android 签名 secrets 缺失时必须失败 |
+| `tool/generate_android_keystore.ps1` | 生成 Android 发布密钥并输出 CI secrets | 现有发布密钥已生成；仅在首次配置或明确轮换时使用，不要覆盖 |
+| `.github/workflows/release.yml` | tag/手动发布安装器、APK、`latest.json` 与校验和 | `v1.1.0` 已实际跑通；Android 签名 secrets 缺失时必须失败 |
 | `android/` | Android 宿主、权限、MediaStore 与更新安装 MethodChannel | 修改 Kotlin 后至少做 Android 编译或实机验证；APK 安装必须经 FileProvider + 系统安装界面 |
 | `windows/` | Windows Runner、CMake、图标和生成的插件注册 | 生成的 registrant 不手改；CMake 有 MSVC 兼容设置 |
 | `linux/` | Linux GTK Runner、CMake 与生成的插件注册 | 在 Linux 主机验证 GTK、libmpv、MPRIS、X11/Wayland 和桌面环境差异 |
@@ -367,11 +369,19 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 
 ### 发布一个新版本
 
+> **当前 Android 发布密钥（2026-10-21，勿覆盖）**
+>
+> - keystore：`android/app/simulgroove-release.jks`；alias：`simulgroove`
+> - 证书 SHA-256：`9333616c5867d1a4872a5102584b8895cf33473338edaff1bb9c812ae94e9129`
+> - 密码：`android/key.properties`（与 keystore 一起离线备份，二者均被 Git 忽略）
+> - GitHub Secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`、`ANDROID_STORE_PASSWORD` 已配置
+> - v1.0.0 使用旧的 debug 证书；升级到 v1.1.0 需要先卸载（清除应用数据）。v1.1.0 起必须保持同一密钥，**不要重新运行生成脚本覆盖**。
+
 1. 确认 `pubspec.yaml` 的 `version: x.y.z+build`，**每次发布递增 build**（Android `versionName` 的 `+build` 与 Windows 版本资源都取自它；Flutter 还会给 Android `versionCode` 加 ABI 千位偏移）。
-2. 确认 Android 发布密钥仍可用；需要重新生成时使用 `tool/generate_android_keystore.ps1`，并把四个值写入 GitHub Secrets。绝不把 keystore 或密码提交到仓库。
+2. 确认本机 keystore / `android/key.properties` 和离线备份仍可用；**不要重新生成密钥**。只有明确轮换（会要求所有已安装用户卸载重装）时才使用 `tool/generate_android_keystore.ps1`。
 3. 同步 `README.md` 的功能/安装说明与 `docs/release_and_updates.md` 的契约或流程变化。
 4. 本地至少运行 `dart format --output=none --set-exit-if-changed lib test`、`flutter analyze`、`flutter test`、`flutter build windows --release` 和 `powershell -ExecutionPolicy Bypass -File build_command/build_installer.ps1`。
-5. 推送 `v<version>` tag 或手动运行 `Release` 工作流；工作流会校验 pubspec 与 tag 一致，生成安装器、便携包、三个 ABI 的 APK、`latest.json` 和 `SHA256SUMS.txt`。
+5. 推送 `v<version>` tag 或手动运行 `Release` 工作流；`v1.1.0` 已由该流程发布（run 39596997713），后续沿用。工作流会校验 pubspec 与 tag 一致，生成安装器、便携包、三个 ABI 的 APK、`latest.json` 和 `SHA256SUMS.txt`。
 6. 验证 Release 资产文件名与 `latest.json` 中的 URL 完全一致；`latest.json` 必须在该 Release 中，客户端才能通过 `releases/latest/download/latest.json` 取到。
 7. 用旧版本实际走一遍“检查更新 → 下载 → 校验 → 安装”，并确认升级后数据库仍在。
 
@@ -449,7 +459,7 @@ powershell -ExecutionPolicy Bypass -File build_command/build_installer.ps1
 flutter build apk --release --split-per-abi
 ```
 
-安装器构建需要 Inno Setup 6；Android Release 若要用于自更新，必须配置 `android/key.properties`（稳定签名）。
+安装器构建需要 Inno Setup 6；本机已配置 `android/key.properties`（固定发布密钥），不要用 debug 签名构建对外发布的更新包。
 
 不要把所有平台构建都当成每个文案改动的硬性要求，但平台层、依赖、条件导出、初始化和数据库变更通常值得做相关平台构建。
 
@@ -536,7 +546,7 @@ docker compose --env-file .env -f compose.online-music.nginx.yml config
 - Android 权限只在功能需要时请求；当前麦克风权限为识曲预留，未实现功能不应主动录音。
 - 不把音频文件上传到后端，除非未来需求明确改变产品语义并经过专门设计。
 - 对 `third_party/` 的修改要保留上游来源、补丁原因和验证平台，方便后续升级。
-- Android 发布 keystore、密码和 GitHub Secrets 不得提交；`android/key.properties`、`*.jks`、`*.keystore` 必须保持忽略。丢失密钥等于失去应用内更新能力。
+- Android 发布 keystore、密码和 GitHub Secrets 不得提交；`android/key.properties`、`*.jks`、`*.keystore` 必须保持忽略。当前发布密钥为 `android/app/simulgroove-release.jks`（alias `simulgroove`），证书指纹与备份要求见“发布一个新版本”；丢失密钥等于失去应用内更新能力。
 - 应用内更新必须保留 HTTPS、受信任主机、大小上限与 SHA-256 校验；不得为了调试方便关闭或绕过。
 - Windows PowerShell 5.1 会把无 BOM 的 UTF-8 中文脚本按 ANSI 解码；修改 `build_command/`/`tool/` 下含中文的脚本时要确认编码（本次新增的发布脚本使用 UTF-8 BOM），且不要假设开发机一定有 `pwsh`。
 
