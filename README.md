@@ -81,7 +81,7 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 
 再启动 Windows 客户端。客户端不再内置任何默认服务器地址，可通过以下两种方式指定：
 
-1. 运行时在「账号」页填写服务器地址（例如 `http://localhost:5080`），地址会持久化到本地数据库，改动立即生效；
+1. 运行时在「账号」页点开「高级设置」填写服务器地址（例如 `http://localhost:5080`），地址会持久化到本地数据库，改动立即生效；登录页默认不展示已保存的后端地址；
 2. 编译期注入，适合开发调试或分发固定部署环境：
 
 ```powershell
