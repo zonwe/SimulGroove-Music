@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/theme/app_appearance.dart';
 import '../features/shell/app_shell.dart';
+import '../features/update/startup_update_gate.dart';
 import 'providers.dart';
 
 class MusicApp extends ConsumerWidget {
@@ -22,7 +23,7 @@ class MusicApp extends ConsumerWidget {
       themeMode: appearance?.themeMode ?? ThemeMode.system,
       theme: _theme(Brightness.light, seedColor),
       darkTheme: _theme(Brightness.dark, seedColor),
-      home: const AppShell(),
+      home: const StartupUpdateGate(child: AppShell()),
     );
   }
 }

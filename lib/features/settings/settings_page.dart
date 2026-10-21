@@ -12,6 +12,7 @@ import 'now_playing_layout_settings_section.dart';
 import 'online_music_settings_section.dart';
 import 'settings_section.dart';
 import 'tray_settings_section.dart';
+import 'update_settings_section.dart';
 
 /// 设置页：按平台组装各设置区块。
 class SettingsPage extends ConsumerWidget {
@@ -57,6 +58,12 @@ class SettingsPage extends ConsumerWidget {
         if (isDesktop) ...[
           const SizedBox(height: 16),
           const DesktopShortcutSettingsSection(),
+        ],
+        if (!kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.windows ||
+                defaultTargetPlatform == TargetPlatform.android)) ...[
+          const SizedBox(height: 16),
+          const UpdateSettingsSection(),
         ],
       ],
     );

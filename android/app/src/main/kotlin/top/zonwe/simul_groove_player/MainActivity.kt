@@ -4,8 +4,9 @@ import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.ContentUris
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -14,12 +15,15 @@ import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Size
 import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -29,6 +33,7 @@ import kotlin.math.min
 
 class MainActivity : AudioServiceActivity() {
     private val channelName = "top.zonwe.simul_groove_player/media_store"
+    private val updaterChannelName = "top.zonwe.simul_groove_player/updater"
     private val pickDirectoryRequest = 4812
     private val pickDownloadDirectoryRequest = 4813
     private val scanExecutor = Executors.newSingleThreadExecutor()
@@ -89,6 +94,95 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, updaterChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "installApk" -> installApk(
+                        path = call.argument<String>("path"),
+                        result = result,
+                    )
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /// 把更新缓存目录中的 APK 交给系统安装器。
+    ///
+    /// Android 不允许普通应用静默安装；这里只负责生成 content:// URI 并打开
+    /// 系统确认界面。签名校验、降级拒绝和用户授权都由系统完成。
+    private fun installApk(path: String?, result: MethodChannel.Result) {
+        if (path.isNullOrBlank()) {
+            result.error("INVALID_APK", "缺少安装包路径。", null)
+            return
+        }
+        val apk = File(path)
+        if (!apk.isFile) {
+            result.error("APK_NOT_FOUND", "安装包不存在，请重新下载。", null)
+            return
+        }
+        if (!apk.name.endsWith(".apk", ignoreCase = true)) {
+            result.error("INVALID_APK", "下载内容不是有效的 APK。", null)
+            return
+        }
+
+        // 只允许安装应用自身更新缓存中的文件，避免被任意路径利用。
+        val updateRoot = File(cacheDir, "SimulGrooveMusic/updates").canonicalFile
+        val canonical = apk.canonicalFile
+        val insideUpdateRoot = canonical.path == updateRoot.path ||
+            canonical.path.startsWith(updateRoot.path + File.separator)
+        if (!insideUpdateRoot) {
+            result.error("INVALID_APK_PATH", "安装包不在更新缓存目录内。", null)
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !packageManager.canRequestPackageInstalls()
+        ) {
+            openUnknownSourcesSettings(result)
+            return
+        }
+
+        try {
+            val uri = FileProvider.getUriForFile(
+                this,
+                "$packageName.fileprovider",
+                canonical,
+            )
+            startActivity(
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+            )
+            result.success(null)
+        } catch (_: ActivityNotFoundException) {
+            result.error("INSTALLER_UNAVAILABLE", "系统没有可用的安装程序。", null)
+        } catch (error: Exception) {
+            result.error("INSTALL_FAILED", error.message ?: "无法启动安装界面。", null)
+        }
+    }
+
+    private fun openUnknownSourcesSettings(result: MethodChannel.Result) {
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName"),
+                ),
+            )
+            result.error(
+                "INSTALL_PERMISSION_REQUIRED",
+                "请允许 SimulGroove Music 安装未知应用，然后返回重试。",
+                null,
+            )
+        } catch (_: Exception) {
+            result.error(
+                "INSTALL_PERMISSION_REQUIRED",
+                "需要在系统设置中允许本应用安装未知应用。",
+                null,
+            )
+        }
     }
 
     private val scanNotificationChannelId = "top.zonwe.simul_groove_player.library_scan"

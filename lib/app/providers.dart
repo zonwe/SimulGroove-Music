@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,6 +28,9 @@ import '../core/player/music_audio_handler.dart';
 import '../core/player/now_playing_layout.dart';
 
 import '../core/theme/app_appearance.dart';
+import '../core/update/update_service.dart';
+import '../core/update/update_service_factory.dart';
+import '../core/update/update_settings.dart';
 import '../core/window/window_settings.dart';
 import '../features/online_search/online_search_controller.dart';
 
@@ -206,6 +210,20 @@ final trayMinimizeOnCloseProvider = StreamProvider<bool>(
       .watch(databaseProvider)
       .watchSettings()
       .map((settings) => settings[trayMinimizeOnCloseSettingKey] != 'false'),
+);
+
+/// 应用内更新：Windows 安装版使用静默安装；其他平台返回不支持。
+final appUpdateServiceProvider = Provider<AppUpdateService>((ref) {
+  final service = createAppUpdateService();
+  ref.onDispose(() => unawaited(service.dispose()));
+  return service;
+});
+
+final updateCheckOnStartupProvider = StreamProvider<bool>(
+  (ref) => ref
+      .watch(databaseProvider)
+      .watchSettings()
+      .map(updateCheckOnStartupFromSettings),
 );
 
 final scanNotificationEnabledProvider = StreamProvider<bool>(
