@@ -4,7 +4,7 @@
 
 截至 2026-09-07，本次核对已确认 `flutter analyze`、120 项 Flutter 测试、60 项后端测试和最新 Android Debug/ARM64 Release 构建通过；K80 Ultra 模拟器已通过 APK 安装启动、通知/媒体权限拒绝与允许、MediaStore 扫描落库、扫描完成通知和本机后端登录同步冒烟。隔离分支的线上 CI 已通过 Flutter 格式/分析/测试、Web 构建、后端测试、Android Debug 构建、生产部署配置校验、非 root API 镜像构建与容器就绪冒烟、API→OTLP Collector 的真实指标和敏感字段检查，以及告警阈值、持续时间和恢复测试。Windows Debug 构建最近一次通过记录为 2026-09-03，Linux 构建与实机回归按当前安排暂缓，Android 深度实机回归仍需连接真实设备确认。
 
-2026-10-21：Windows 安装器/应用内更新与 Android APK 自更新已接入。本地已通过 `flutter analyze`、191 项 Flutter 测试、Windows/Android/Web Release 构建、Inno Setup 安装器静默安装/卸载冒烟、更新助手端到端冒烟（真实 `cmd.exe` + 假安装器），以及 `latest.json` 生成与 Dart 回读。GitHub Release 工作流尚未在 Actions 实际运行，真实设备上的应用内更新也尚未验收。
+2026-10-21：Windows 安装器/应用内更新与 Android APK 自更新已接入。本地已通过 `flutter analyze`、191 项 Flutter 测试、Windows/Android/Web Release 构建、Inno Setup 安装器静默安装/卸载冒烟、更新助手端到端冒烟（真实 `cmd.exe` + 假安装器），以及 `latest.json` 生成与 Dart 回读。GitHub Release 工作流已由 `v1.1.0` tag 实际运行并通过（[run 39596997713](https://github.com/zonwe/SimulGroove-Music/actions/runs/39596997713)），[v1.1.0](https://github.com/zonwe/SimulGroove-Music/releases/tag/v1.1.0) 已发布安装器、便携包、三个 ABI APK、`latest.json` 与 `SHA256SUMS.txt`；真实设备上的应用内更新尚待验收。
 
 ## 当前功能
 
