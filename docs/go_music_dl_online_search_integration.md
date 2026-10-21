@@ -184,7 +184,8 @@ GET  /integration/v1/streams/{streamToken}
 {
   "query": "夜曲",
   "sources": ["source-a", "source-b"],
-  "limit": 20
+  "limit": 20,
+  "cursor": null
 }
 ```
 
@@ -209,11 +210,14 @@ GET  /integration/v1/streams/{streamToken}
       "source": "source-b",
       "code": "upstream_timeout"
     }
-  ]
+  ],
+  "nextCursor": "opaque-search-page-cursor"
 }
 ```
 
 内部 DTO 也不应包含可被客户端长期复用的上游 URL。若底层解析必须产生 URL，应只留在 sidecar 内存或短期票据中。
+
+`cursor` 是 sidecar 生成的短期结果页游标：首屏请求省略或传空，响应带回 `nextCursor` 后原样传回即可取下一页，`nextCursor` 为空表示没有更多。上游各来源的搜索接口都不支持翻页，因此 sidecar 首次请求就把所有来源的结果聚合成一个池子并缓存（默认 10 分钟），游标只在这个池子里切片，不会为下一页重新请求上游。缓存过期或游标与 `query`/`sources` 不匹配时返回 `200` 空页，而不是 `400`，避免客户端反复重试同一个失效游标；只有格式非法的游标才返回 `400 invalid_request`。
 
 clone 中已新增独立目录，避免把集成逻辑散落在原有页面处理器中：
 
