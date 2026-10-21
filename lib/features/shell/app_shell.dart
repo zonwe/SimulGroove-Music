@@ -110,7 +110,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                     ),
                   ],
                 ),
-                bottomNavigationBar: MiniPlayerBar(onReturn: _goToPlaylists),
+                bottomNavigationBar: const MiniPlayerBar(),
               );
             },
           );

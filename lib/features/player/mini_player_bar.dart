@@ -11,9 +11,7 @@ import 'queue_sheet.dart';
 import 'volume_control.dart';
 
 class MiniPlayerBar extends ConsumerWidget {
-  const MiniPlayerBar({super.key, this.onReturn});
-
-  final VoidCallback? onReturn;
+  const MiniPlayerBar({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -33,11 +31,12 @@ class MiniPlayerBar extends ConsumerWidget {
             return Material(
               color: Theme.of(context).colorScheme.surfaceContainerHigh,
               child: InkWell(
+                // 关闭正在播放页应回到进入前的页面；这里不要强制跳转到歌单，
+                // 否则从音乐库、在线搜索或设置页点进播放页都会丢失上下文。
                 onTap: () async {
                   await Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const NowPlayingPage()),
                   );
-                  onReturn?.call();
                 },
                 child: SafeArea(
                   top: false,
