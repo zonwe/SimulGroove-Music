@@ -14,6 +14,7 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 - Web：响应式界面、Drift Web 数据库、真实后端账号和在线搜索；不支持本地目录扫描与本地音乐播放。
 - 通用功能：歌曲/专辑/艺术家视图、搜索、封面、歌词、播放队列、歌单、喜欢、10 段均衡器、扫描通知、主题外观和设置持久化。
 - 实验性后端：`backend/Music.Api` 提供 ASP.NET Core + SQLite 的认证、歌单/喜欢/均衡器预设与删除墓碑同步、服务器目录扫描、在线音乐 BFF 和审计日志接口；在线音乐链路已具备存活/就绪检查、关联 ID、低基数指标和进程内熔断。
+- 应用更新：Windows 安装版支持 SHA-256 校验后的静默升级，Android 下载 APK 后交给系统安装界面；更新源为 GitHub Release 的 `latest.json`。Linux/Web 暂不支持应用内更新。
 
 以下内容尚未视为完整产品能力：
 
@@ -55,7 +56,14 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 | `lib/features/placeholders/` | 听歌识曲占位页 | 识曲功能仍未实现，不应主动调用麦克风 |
 | `lib/features/settings/` | 实际设置页：外观、播放界面、音效、扫描、在线音乐、托盘与快捷键区块 | 各区块独立成文件；新增设置优先加区块而不是往 `settings_page.dart` 堆叠 |
 | `lib/features/online_search/` | 在线音乐搜索状态、页面和结果项 | 只调用 `Music.Api`；不得直连 sidecar 或保存第三方 URL/Cookie |
-| `android/` | Android 宿主、权限和 MediaStore MethodChannel | 修改 Kotlin 后至少做 Android 编译或实机验证 |
+| `lib/core/update/` | 更新清单/版本模型、检查与下载、SHA-256 校验、Windows 更新助手和 Android 安装桥 | 清单契约、信任主机和路径校验不能放宽；公共文件不得导入 `dart:io` |
+| `lib/features/update/` | 启动更新检查闸门和更新对话框 | 自动检查只提示，不自动下载；下载/安装期间禁止重复提交 |
+| `build_command/installer/` | Inno Setup 安装器脚本（按用户安装） | `AppId` 固定；升级必须原地覆盖；不要随意改 `Runner.rc` 的 `CompanyName`/`ProductName`（影响应用支持目录，Drift 数据库在 Documents） |
+| `build_command/build_installer.ps1` | Windows 安装器构建入口 | 需要 Inno Setup 6；脚本用 UTF-8 BOM 保存以兼容 Windows PowerShell 5.1 |
+| `tool/build_update_manifest.ps1` | 生成 `latest.json` | 资产名、URL、SHA-256 必须与 Release 实际文件一致 |
+| `tool/generate_android_keystore.ps1` | 生成 Android 发布密钥并输出 CI secrets | 绝不提交 keystore、密码或 base64 输出 |
+| `.github/workflows/release.yml` | tag/手动发布安装器、APK、`latest.json` 与校验和 | Android 签名 secrets 缺失时必须失败 |
+| `android/` | Android 宿主、权限、MediaStore 与更新安装 MethodChannel | 修改 Kotlin 后至少做 Android 编译或实机验证；APK 安装必须经 FileProvider + 系统安装界面 |
 | `windows/` | Windows Runner、CMake、图标和生成的插件注册 | 生成的 registrant 不手改；CMake 有 MSVC 兼容设置 |
 | `linux/` | Linux GTK Runner、CMake 与生成的插件注册 | 在 Linux 主机验证 GTK、libmpv、MPRIS、X11/Wayland 和桌面环境差异 |
 | `web/` | Web 启动页、PWA 资源、Drift worker 和 SQLite WASM | 不要遗漏 `sqlite3.wasm`、`drift_worker.js` 的部署路径 |
@@ -272,8 +280,17 @@ Android 原生桥接还必须同步检查：
 - Manifest 权限适配 Android 版本。
 - 长耗时扫描不阻塞主线程。
 - Document Tree 的持久授权和 MediaStore URI 语义不被破坏。
+- 应用内更新桥（`top.zonwe.simul_groove_player/updater`）的 APK 路径必须限制在 `cache/SimulGrooveMusic/updates` 内，并通过 FileProvider 授予一次性读权限；`REQUEST_INSTALL_PACKAGES` 与 Android 8+ 的“安装未知应用”授权必须单独处理。不要尝试绕过系统安装确认界面。
 
 Windows 相关改动还要检查窗口生命周期、托盘释放、快捷键注销和 CMake/MSVC 兼容性。
+
+应用内更新的平台边界：
+
+- `lib/core/update/` 的公共文件不得导入 `dart:io`；Windows/Android 实现在 `_io.dart`，Web 使用 `_stub.dart`。
+- Windows 静默升级依赖安装版目录中的 `unins000.exe` 判断；解压版只能引导用户手动下载安装器。
+- 更新助手脚本由 `update_install_script.dart` 生成；路径通过环境变量传给 `cmd.exe`（避免中文路径被批处理代码页解码），必须继续校验绝对路径与扩展名，并拒绝引号、换行和 NUL。
+- 更新包下载后必须校验清单中的大小与 SHA-256，再交给安装器；不得跳过校验。
+- 清单资产地址只允许 HTTPS 和受信任主机（GitHub 资产域名或清单自身主机）。
 
 ## 12. 后端约定
 
@@ -348,6 +365,23 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 4. 添加新建数据库与旧版本升级测试。
 5. 运行分析、测试和至少一个目标平台构建。
 
+### 发布一个新版本
+
+1. 确认 `pubspec.yaml` 的 `version: x.y.z+build`，**每次发布递增 build**（Android `versionName` 的 `+build` 与 Windows 版本资源都取自它；Flutter 还会给 Android `versionCode` 加 ABI 千位偏移）。
+2. 确认 Android 发布密钥仍可用；需要重新生成时使用 `tool/generate_android_keystore.ps1`，并把四个值写入 GitHub Secrets。绝不把 keystore 或密码提交到仓库。
+3. 同步 `README.md` 的功能/安装说明与 `docs/release_and_updates.md` 的契约或流程变化。
+4. 本地至少运行 `dart format --output=none --set-exit-if-changed lib test`、`flutter analyze`、`flutter test`、`flutter build windows --release` 和 `powershell -ExecutionPolicy Bypass -File build_command/build_installer.ps1`。
+5. 推送 `v<version>` tag 或手动运行 `Release` 工作流；工作流会校验 pubspec 与 tag 一致，生成安装器、便携包、三个 ABI 的 APK、`latest.json` 和 `SHA256SUMS.txt`。
+6. 验证 Release 资产文件名与 `latest.json` 中的 URL 完全一致；`latest.json` 必须在该 Release 中，客户端才能通过 `releases/latest/download/latest.json` 取到。
+7. 用旧版本实际走一遍“检查更新 → 下载 → 校验 → 安装”，并确认升级后数据库仍在。
+
+### 修改应用内更新
+
+- 更新清单字段变化必须同时修改 `lib/core/update/update_manifest.dart`、`tool/build_update_manifest.ps1`、`docs/release_and_updates.md` 和测试。
+- Windows 与 Android 的资产类型不同（`installer`/`apk`），不要让一个平台下载另一个平台的包。
+- Windows 更新助手脚本必须保持“等待旧进程退出 → 静默安装 → 重启/失败标记”的顺序；不要在应用进程内直接替换正在使用的 exe/DLL。
+- 任何新增的下载路径都必须校验 HTTPS、主机白名单、大小上限和 SHA-256。
+
 ### 新增音频格式
 
 同步检查 Flutter Windows 扫描、Android 文件判断、后端扫描扩展名、实际解码器支持和文档。能被扫描到不等于能被每个平台解码。
@@ -407,6 +441,16 @@ flutter build apk --debug
 flutter build web
 ```
 
+涉及安装器或应用内更新时，额外运行：
+
+```powershell
+flutter build windows --release
+powershell -ExecutionPolicy Bypass -File build_command/build_installer.ps1
+flutter build apk --release --split-per-abi
+```
+
+安装器构建需要 Inno Setup 6；Android Release 若要用于自更新，必须配置 `android/key.properties`（稳定签名）。
+
 不要把所有平台构建都当成每个文案改动的硬性要求，但平台层、依赖、条件导出、初始化和数据库变更通常值得做相关平台构建。
 
 ### 后端验证
@@ -444,9 +488,10 @@ docker compose --env-file .env -f compose.online-music.nginx.yml config
 | 歌词 | 无歌词、内嵌歌词、同名 LRC、时间同步、长歌词滚动、点击定位与二次点按确认（第一次点按只选中，不弹框） |
 | 歌单/喜欢/均衡器 | 新建、删除、加入、移除、空状态、级联删除、同步墓碑和较新修改恢复 |
 | 主题/设置 | 浅色、深色、跟随系统、重启后持久化 |
-| Windows | 标题栏、拖动、最小化托盘、紧凑窗、快捷键 |
+| Windows | 标题栏、拖动、最小化托盘、紧凑窗、快捷键；安装器静默安装/卸载与解压版提示 |
 | Linux | 目录选择、递归扫描、本地/在线播放、MPRIS 媒体键、原生标题栏、紧凑窗、快捷键 |
-| Android | 权限拒绝/允许、目录授权、全设备扫描、后台通知、媒体键 |
+| Android | 权限拒绝/允许、目录授权、全设备扫描、后台通知、媒体键；更新下载、未知来源授权、系统安装确认、签名一致与 versionCode 递增 |
+| 应用更新 | Windows 检查/下载/SHA-256/静默升级/失败标记；Android ABI 选择与系统安装；`latest.json` 404、哈希不匹配、解压版与签名不一致 |
 | Web | 首屏、响应式布局、刷新后数据库、无 IO 平台异常 |
 | 后端 | 未认证 401、账号隔离、路径越界、重复路径、令牌轮换、`/health/ready`、关联 ID、sidecar 超时与熔断恢复 |
 
@@ -468,6 +513,9 @@ docker compose --env-file .env -f compose.online-music.nginx.yml config
 - `test/auth_sync_test.dart`、`test/http_backend_gateway_test.dart`：同步合并、删除墓碑、刷新重试与 HTTP 契约。
 - `test/online_*_test.dart`、`test/http_online_music_gateway_test.dart`：在线搜索、菜单、批量操作、下载与网关契约。
 - `test/linux_library_scanner_test.dart`、`test/scan_notification_service_test.dart`：Linux 扫描与通知降级边界。
+- `test/update_manifest_test.dart`：版本比较、清单字段校验（含 Android APK 与带下划线的 ABI 键）。
+- `test/update_install_script_test.dart`：Windows 更新助手脚本的等待/静默安装/失败标记与环境变量路径校验。
+- `test/update_service_test.dart`：MockClient 下的检查、下载、SHA-256 校验、信任主机与错误映射。
 - `backend/Music.Api.Tests/`：认证、账号隔离、同步墓碑、在线音乐搜索/播放/下载/歌词/封面、关联 ID、健康检查、指标和熔断测试。
 
 新测试建议：
@@ -488,6 +536,9 @@ docker compose --env-file .env -f compose.online-music.nginx.yml config
 - Android 权限只在功能需要时请求；当前麦克风权限为识曲预留，未实现功能不应主动录音。
 - 不把音频文件上传到后端，除非未来需求明确改变产品语义并经过专门设计。
 - 对 `third_party/` 的修改要保留上游来源、补丁原因和验证平台，方便后续升级。
+- Android 发布 keystore、密码和 GitHub Secrets 不得提交；`android/key.properties`、`*.jks`、`*.keystore` 必须保持忽略。丢失密钥等于失去应用内更新能力。
+- 应用内更新必须保留 HTTPS、受信任主机、大小上限与 SHA-256 校验；不得为了调试方便关闭或绕过。
+- Windows PowerShell 5.1 会把无 BOM 的 UTF-8 中文脚本按 ANSI 解码；修改 `build_command/`/`tool/` 下含中文的脚本时要确认编码（本次新增的发布脚本使用 UTF-8 BOM），且不要假设开发机一定有 `pwsh`。
 
 ## 18. 完成任务后的交付清单
 
@@ -511,5 +562,7 @@ docker compose --env-file .env -f compose.online-music.nginx.yml config
 - `AGENTS.md`：开发约束、架构边界和验证要求。
 - `docs/api.md`：后端配置、认证与 API 契约。
 - `backend/README.md`：后端单独运行说明。
+- `docs/release_and_updates.md`：更新清单契约、Windows 安装器、Android 签名与应用内更新流程。
+- `docs/releases/v<version>.md`：Release body 与 `latest.json` 的 notes 来源。
 
 文档必须描述仓库真实状态。实验代码存在不等于已接入产品；某个平台能够编译也不等于已完成实际功能验证。

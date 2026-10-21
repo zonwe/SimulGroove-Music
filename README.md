@@ -4,10 +4,12 @@
 
 截至 2026-09-07，本次核对已确认 `flutter analyze`、120 项 Flutter 测试、60 项后端测试和最新 Android Debug/ARM64 Release 构建通过；K80 Ultra 模拟器已通过 APK 安装启动、通知/媒体权限拒绝与允许、MediaStore 扫描落库、扫描完成通知和本机后端登录同步冒烟。隔离分支的线上 CI 已通过 Flutter 格式/分析/测试、Web 构建、后端测试、Android Debug 构建、生产部署配置校验、非 root API 镜像构建与容器就绪冒烟、API→OTLP Collector 的真实指标和敏感字段检查，以及告警阈值、持续时间和恢复测试。Windows Debug 构建最近一次通过记录为 2026-09-03，Linux 构建与实机回归按当前安排暂缓，Android 深度实机回归仍需连接真实设备确认。
 
+2026-10-21：Windows 安装器/应用内更新与 Android APK 自更新已接入。本地已通过 `flutter analyze`、191 项 Flutter 测试、Windows/Android/Web Release 构建、Inno Setup 安装器静默安装/卸载冒烟、更新助手端到端冒烟（真实 `cmd.exe` + 假安装器），以及 `latest.json` 生成与 Dart 回读。GitHub Release 工作流尚未在 Actions 实际运行，真实设备上的应用内更新也尚未验收。
+
 ## 当前功能
 
 - Android：通过系统目录选择器授权一个或多个音乐文件夹并递归扫描，也可选择扫描整台设备；支持后台播放、媒体通知、锁屏/耳机媒体控制与音频焦点。
-- Windows：在设置中选择一个或多个音乐目录并递归扫描；使用自绘标题栏，主窗口固定为 1280×720，可切换 384×144 置顶悬浮控制窗。
+- Windows：在设置中选择一个或多个音乐目录并递归扫描；使用自绘标题栏，主窗口固定为 1280×720，可切换 384×144 置顶悬浮控制窗。当前版本提供按用户安装的 Inno Setup 安装器（无需管理员权限），解压版仍可直接运行。
 - Linux：通过系统目录选择器添加并递归扫描音乐目录，使用 media_kit 播放本地与在线音频，支持 MPRIS 系统媒体控制、桌面快捷键、宽屏播放队列和紧凑悬浮窗。
 - 常见格式：MP3、FLAC、M4A、AAC、WAV、OGG、OPUS、WMA（最终能否解码也取决于系统/平台解码器）。
 - 音乐库：歌曲、专辑、艺术家视图，本地搜索，封面及标签读取。
@@ -25,6 +27,7 @@
 - 服务器扫描：由 `backend/Music.Api` 托管的 Web 控制台配置后端机器上的音乐绝对路径、定时扫描并查看索引结果；已索引曲目可在管理页试听，也可通过账号隔离、支持 Range 的 API 播放；Flutter 客户端不提供该管理入口，也不会上传客户端音乐。
 - 在线音乐：通过已登录的 `Music.Api` 聚合受控来源，点击搜索按钮后请求，搜索结果以紧凑两行展示并可整行点击播放，封面可在设置中关闭；右键或长按结果会打开歌曲菜单，可查看歌手/专辑集合与封面、选择歌曲或下载单曲。搜索、歌手和专辑页面都可批量加入新建或已有歌单；Windows/Linux/Android 可在设置页指定系统授权目录、选择下载文件命名规则并批量下载，支持的音频格式优先内嵌封面与歌词，无法内嵌时保存同名封面或 `.lrc`，下载完成后立即进入本地音乐库；Web 暂不开放需要认证请求头的播放和下载。
 - 在线音乐运维：区分 `/health` 存活检查与 `/health/ready` 依赖就绪检查；支持安全的 `X-Correlation-ID`、低基数 .NET `Meter` 指标、可选 OTLP 导出和连续瞬时失败熔断；来源复核门禁见 [在线音乐来源授权与发布复核](docs/online_music_release_review.md)。
+- 应用更新：Windows 安装版和 Android 可在设置页检查更新，启动时默认每 12 小时检查一次并可关闭。更新包下载后校验 SHA-256：Windows 退出应用后由更新助手静默运行安装器并重启；Android 交给系统安装界面确认安装（需要允许安装未知应用，且相邻版本必须使用同一签名）。详见 [发布、安装器与应用内更新](docs/release_and_updates.md)。
 - 占位入口：听歌识曲（已声明麦克风权限但未实现）。
 - Web：提供响应式界面、真实后端登录与在线搜索；按当前需求不提供本地目录扫描和本地播放。
 
@@ -97,6 +100,8 @@ flutter run -d linux --dart-define=MUSIC_API_URL=http://localhost:5080
 
 仓库 CI（`.github/workflows/ci.yml`）包含 Flutter 格式检查、静态分析、单元测试、Web 冒烟构建、后端 Release 测试、Android Debug 和 Windows Release 构建；支持推送、PR 和手动触发，不会上传构建产物。Linux Release 任务暂缓且默认跳过，仅在手动运行工作流时勾选 `run_linux` 才会执行。
 
+发布工作流 `.github/workflows/release.yml` 由 `v*` tag 或手动触发：构建 Windows 安装器/便携包与三个 ABI 的 Android APK，生成 `latest.json` 和 `SHA256SUMS.txt`，上传到对应 GitHub Release。Android 发布任务要求配置固定签名 secrets，否则会失败，避免发布无法自更新的 APK。完整流程与签名配置见 [发布、安装器与应用内更新](docs/release_and_updates.md)。
+
 后端回归测试：
 
 ```powershell
@@ -113,6 +118,16 @@ flutter build windows
 flutter build linux
 ```
 
+Windows 安装器需要 Inno Setup 6：
+
+```powershell
+winget install --id JRSoftware.InnoSetup -e
+flutter build windows --release
+powershell -ExecutionPolicy Bypass -File build_command/build_installer.ps1
+```
+
+产物位于 `build\artifacts\windows-installer\SimulGrooveMusic-Setup-<version>-x64.exe`；安装器按用户安装到 `%LOCALAPPDATA%\Programs`。Drift 数据库默认在 `%USERPROFILE%\Documents\flutter_music.sqlite`，其他应用数据在 `%APPDATA%\top.zonwe\SimulGroove Music`，卸载与升级都不会删除音乐库。
+
 Android 日常安装不要使用体积较大的通用 Debug APK。K80 Ultra 使用 ARM64 Release：
 
 ```powershell
@@ -120,7 +135,7 @@ flutter build apk --release --split-per-abi
 adb install -r build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 ```
 
-2026-09-07 构建的 ARM64 Release 测试包为 24,125,567 字节，SHA-256 为 `819F3648D06686CE2087A10D070DC85844D72783F3E2C2BB8E46344F86B304EE`；清单确认只包含 `arm64-v8a`，当前仍使用 Android Debug 证书签名，仅用于开发设备回归，不作为应用商店正式发布包。Debug 包约 170 MB，并会把约 99 MB JIT 资产解压到应用数据目录；升级到本项目的 Release 后会在保留数据库的前提下自动清理这些旧调试资产。扫描所得封面会压缩到最多 256–320 像素，避免音乐库数据库随原始大封面快速膨胀。完整的 K80 Ultra 安装、型号校验、人工检查项和本地证据流程见 [Android 真机验收](docs/android_device_acceptance.md)。
+2026-09-07 构建的 ARM64 Release 测试包为 24,125,567 字节，SHA-256 为 `819F3648D06686CE2087A10D070DC85844D72783F3E2C2BB8E46344F86B304EE`；清单确认只包含 `arm64-v8a`。该历史测试包使用本机 debug 证书；当前发布构建会读取 `android/key.properties` 使用固定发布密钥，未配置时回退 debug 签名，仅用于本地调试，不能用于应用内更新。若改用新的发布密钥，Android 会拒绝覆盖 v1.0.0 的 debug 签名包，需要先卸载旧版（会清除应用数据）或沿用原 debug 密钥。应用内更新还要求 `versionCode` 随每次发布递增，并在系统设置中允许本应用安装未知应用。Debug 包约 170 MB，并会把约 99 MB JIT 资产解压到应用数据目录；升级到本项目的 Release 后会在保留数据库的前提下自动清理这些旧调试资产。扫描所得封面会压缩到最多 256–320 像素，避免音乐库数据库随原始大封面快速膨胀。完整的 K80 Ultra 安装、型号校验、人工检查项和本地证据流程见 [Android 真机验收](docs/android_device_acceptance.md)。
 
 Drift 表结构变化后重新生成代码：
 
@@ -141,4 +156,6 @@ dart run build_runner build --delete-conflicting-outputs
 
 - 听歌识曲实现
 - Web 本地文件扫描、本地播放、在线播放与在线下载
+- Linux 与 Web 的应用内更新（当前仅 Windows 安装版与 Android 支持）
+- Windows 安装器/exe 的 Authenticode 代码签名（未签名时 SmartScreen 会提示未知发布者）
 - iOS 与 macOS 产品级支持（当前仅保留 Flutter 平台脚手架）

@@ -5,6 +5,37 @@ $isWindowsHost = $env:OS -eq 'Windows_NT'
 $isLinuxHost = -not $isWindowsHost -and (Test-Path '/proc/version')
 . (Join-Path $PSScriptRoot 'publish_artifacts.ps1')
 
+function Test-InnoSetupAvailable {
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:ISCC)) {
+        $candidates += $env:ISCC
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:INNO_SETUP_HOME)) {
+        $candidates += (Join-Path $env:INNO_SETUP_HOME 'ISCC.exe')
+    }
+    $programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+    if ($programFilesX86) {
+        $candidates += (Join-Path $programFilesX86 'Inno Setup 6\ISCC.exe')
+    }
+    if ($env:ProgramFiles) {
+        $candidates += (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+    }
+    if ($env:LOCALAPPDATA) {
+        $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe')
+    }
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($command) {
+        $candidates += $command.Source
+    }
+    return [bool](
+        @($candidates | Where-Object {
+            $_ -and (Test-Path -LiteralPath $_ -PathType Leaf)
+        }).Count -gt 0
+    )
+}
+
+$hasInnoSetup = $isWindowsHost -and (Test-InnoSetupAvailable)
+
 $buildSteps = @(
     [PSCustomObject]@{
         Name = 'Android APK'
@@ -55,6 +86,23 @@ $buildSteps = @(
         Artifacts = @(
             'build\artifacts\windows\simul_groove_player.exe'
             'build\artifacts\windows\SHA256SUMS.txt'
+        )
+    }
+    [PSCustomObject]@{
+        Name = 'Windows 安装包'
+        Command = 'powershell'
+        Arguments = @(
+            '-NoProfile'
+            '-ExecutionPolicy'
+            'Bypass'
+            '-File'
+            'build_command/build_installer.ps1'
+        )
+        Supported = $hasInnoSetup
+        SkipReason = '需要 Windows 与 Inno Setup 6（winget install --id JRSoftware.InnoSetup -e）'
+        Publisher = ''
+        Artifacts = @(
+            'build\artifacts\windows-installer\SimulGrooveMusic-Setup-*-x64.exe'
         )
     }
 )

@@ -1,0 +1,259 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（不含 v，例如 1.1.0），必须与 pubspec.yaml 一致'
+        required: true
+        type: string
+      notes:
+        description: '可选发布说明；优先使用 docs/releases/v<version>.md'
+        required: false
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: 校验版本
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build: ${{ steps.version.outputs.build }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: 解析并校验版本
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            version="$INPUT_VERSION"
+          else
+            version="${REF_NAME#v}"
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::无法解析发布版本号：$version"
+            exit 1
+          fi
+          pubspec_raw=$(grep -E '^version:' pubspec.yaml | awk '{print $2}')
+          pubspec_version=${pubspec_raw%%+*}
+          build_number=1
+          case "$pubspec_raw" in
+            *+*) build_number=${pubspec_raw##*+} ;;
+          esac
+          if [ "$pubspec_version" != "$version" ]; then
+            echo "::error::pubspec.yaml 版本 $pubspec_version 与发布版本 $version 不一致"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build_number" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows 安装器与便携包
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: 安装依赖
+        run: flutter pub get
+      - name: 构建 Windows Release
+        run: flutter build windows --release
+      - name: 安装 Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: 构建安装器
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: ./build_command/build_installer.ps1 -Version "$env:VERSION"
+      - name: 整理 Windows 资产
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item -LiteralPath "build\artifacts\windows-installer\SimulGrooveMusic-Setup-$env:VERSION-x64.exe" -Destination dist
+          Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "dist\SimulGroove-Music-v$env:VERSION-windows-x64.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+
+  android:
+    name: Android APK
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: 安装依赖
+        run: flutter pub get
+      - name: 写入发布签名
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ] || [ -z "$STORE_PASSWORD" ]; then
+            echo "::error::缺少 Android 发布签名 Secrets；应用内更新要求相邻版本使用同一签名。"
+            echo "::error::需要 ANDROID_KEYSTORE_BASE64 / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD / ANDROID_STORE_PASSWORD。"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          {
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "storeFile=$RUNNER_TEMP/release.jks"
+          } > android/key.properties
+      - name: 构建 APK
+        run: flutter build apk --release --split-per-abi
+      - name: 重命名 APK
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          source_dir=build/app/outputs/flutter-apk
+          cp "$source_dir/app-arm64-v8a-release.apk" "dist/SimulGroove-Music-v${VERSION}-android-arm64-v8a.apk"
+          cp "$source_dir/app-armeabi-v7a-release.apk" "dist/SimulGroove-Music-v${VERSION}-android-armeabi-v7a.apk"
+          cp "$source_dir/app-x86_64-release.apk" "dist/SimulGroove-Music-v${VERSION}-android-x86_64.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: 发布 GitHub Release
+    needs: [prepare, windows, android]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: 整理发布资产并生成更新清单
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build }}
+          INPUT_NOTES: ${{ inputs.notes }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item -Path "artifacts\windows\*" -Destination dist -Recurse
+          Copy-Item -Path "artifacts\android\*" -Destination dist -Recurse
+
+          $installer = Get-ChildItem -LiteralPath dist -Filter 'SimulGrooveMusic-Setup-*-x64.exe' |
+            Select-Object -First 1
+          if (-not $installer) { throw '缺少 Windows 安装器产物。' }
+          $setupName = "SimulGroove-Music-v$env:VERSION-windows-x64-setup.exe"
+          Move-Item -LiteralPath $installer.FullName -Destination (Join-Path dist $setupName)
+
+          $notesFile = "docs/releases/v$env:VERSION.md"
+          $manifestArgs = @{
+            Version = $env:VERSION
+            BuildNumber = [int]$env:BUILD_NUMBER
+            InstallerPath = (Join-Path dist $setupName)
+            AndroidArm64Apk = (Join-Path dist "SimulGroove-Music-v$env:VERSION-android-arm64-v8a.apk")
+            AndroidArmV7Apk = (Join-Path dist "SimulGroove-Music-v$env:VERSION-android-armeabi-v7a.apk")
+            AndroidX64Apk = (Join-Path dist "SimulGroove-Music-v$env:VERSION-android-x86_64.apk")
+            OutputPath = (Join-Path dist 'latest.json')
+          }
+          if (Test-Path -LiteralPath $notesFile -PathType Leaf) {
+            $manifestArgs['NotesFile'] = $notesFile
+            $notes = [System.IO.File]::ReadAllText($notesFile, [System.Text.Encoding]::UTF8)
+          } else {
+            $notes = $env:INPUT_NOTES
+            if ([string]::IsNullOrWhiteSpace($notes)) {
+              $notes = "SimulGroove Music $env:VERSION"
+            }
+            $manifestArgs['Notes'] = $notes
+          }
+          ./tool/build_update_manifest.ps1 @manifestArgs
+
+          $files = Get-ChildItem -LiteralPath dist -File | Sort-Object Name
+          $lines = foreach ($file in $files) {
+            if ($file.Name -eq 'SHA256SUMS.txt') { continue }
+            $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($file.Name)"
+          }
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllLines(
+            (Join-Path (Resolve-Path dist) 'SHA256SUMS.txt'),
+            [string[]]$lines,
+            $utf8
+          )
+
+          $body = @"
+          ## SimulGroove Music v$env:VERSION
+
+          $notes
+
+          ### 产物
+
+          | 平台 | 文件 |
+          | --- | --- |
+          | Windows x64 | $setupName |
+          | Windows x64（便携） | SimulGroove-Music-v$env:VERSION-windows-x64.zip |
+          | Android arm64-v8a | SimulGroove-Music-v$env:VERSION-android-arm64-v8a.apk |
+          | Android armeabi-v7a | SimulGroove-Music-v$env:VERSION-android-armeabi-v7a.apk |
+          | Android x86_64 | SimulGroove-Music-v$env:VERSION-android-x86_64.apk |
+
+          校验和见 ``SHA256SUMS.txt``；应用内更新使用 ``latest.json``。
+          "@
+          [System.IO.File]::WriteAllText(
+            (Join-Path $env:RUNNER_TEMP 'release-notes.md'),
+            $body,
+            $utf8
+          )
+      - name: 创建或更新 Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "v$env:VERSION"
+          $assets = Get-ChildItem -LiteralPath dist -File |
+            ForEach-Object { $_.FullName }
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @assets --clobber
+          } else {
+            gh release create $tag @assets `
+              --title "SimulGroove Music $tag" `
+              --notes-file (Join-Path $env:RUNNER_TEMP 'release-notes.md') `
+              --target $env:GITHUB_SHA `
+              --latest
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "gh release 发布失败，退出码: $LASTEXITCODE"
+          }
