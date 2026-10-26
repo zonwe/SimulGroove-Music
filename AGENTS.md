@@ -14,7 +14,7 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 - Web：响应式界面、Drift Web 数据库、真实后端账号和在线搜索；不支持本地目录扫描与本地音乐播放。
 - 通用功能：歌曲/专辑/艺术家视图、搜索、封面、歌词、播放队列、歌单、喜欢、10 段均衡器、扫描通知、主题外观和设置持久化。
 - 实验性后端：`backend/Music.Api` 提供 ASP.NET Core + SQLite 的认证、歌单/喜欢/均衡器预设与删除墓碑同步、服务器目录扫描、在线音乐 BFF 和审计日志接口；在线音乐链路已具备存活/就绪检查、关联 ID、低基数指标和进程内熔断。
-- 应用更新：Windows 安装版支持 SHA-256 校验后的静默升级，Android 下载 APK 后交给系统安装界面；更新源为 GitHub Release 的 `latest.json`。Linux/Web 暂不支持应用内更新。
+- 应用更新：Windows 安装版与 Android 默认开启自动检查更新（最多每 24 小时一次，可在设置中关闭），自动下载默认关闭、需显式开启；下载后校验 SHA-256，安装前请求确认。Windows 由更新助手静默升级并重启，Android 下载 APK 后交给系统安装界面；更新源为 GitHub Release 的 `latest.json`。Linux/Web 暂不支持应用内更新。
 - 发布状态：`v1.1.0`（tag `v1.1.0`）已通过 GitHub Release 工作流发布；Android 从 v1.0.0 的 debug 证书切换到固定发布密钥，v1.0.0 → v1.1.0 需要卸载一次（清除应用数据），之后必须保持同一密钥。
 
 以下内容尚未视为完整产品能力：
@@ -59,7 +59,7 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 | `lib/features/settings/` | 实际设置页：外观、播放界面、音效、扫描、在线音乐、托盘与快捷键区块 | 各区块独立成文件；新增设置优先加区块而不是往 `settings_page.dart` 堆叠 |
 | `lib/features/online_search/` | 在线音乐搜索状态、页面和结果项 | 只调用 `Music.Api`；不得直连 sidecar 或保存第三方 URL/Cookie |
 | `lib/core/update/` | 更新清单/版本模型、检查与下载、SHA-256 校验、Windows 更新助手和 Android 安装桥 | 清单契约、信任主机和路径校验不能放宽；公共文件不得导入 `dart:io` |
-| `lib/features/update/` | 启动更新检查闸门和更新对话框 | 自动检查只提示，不自动下载；下载/安装期间禁止重复提交 |
+| `lib/features/update/` | 启动自动更新闸门和更新对话框 | 自动检查默认开启、自动下载默认关闭；只有设置开启后才后台下载；安装前请求确认，下载/安装期间禁止重复提交 |
 | `build_command/installer/` | Inno Setup 安装器脚本（按用户安装） | `AppId` 固定；升级必须原地覆盖；不要随意改 `Runner.rc` 的 `CompanyName`/`ProductName`（影响应用支持目录，Drift 数据库在 Documents） |
 | `build_command/build_installer.ps1` | Windows 安装器构建入口 | 需要 Inno Setup 6；脚本用 UTF-8 BOM 保存以兼容 Windows PowerShell 5.1 |
 | `tool/build_update_manifest.ps1` | 生成 `latest.json` | 资产名、URL、SHA-256 必须与 Release 实际文件一致 |
@@ -390,6 +390,7 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 - 更新清单字段变化必须同时修改 `lib/core/update/update_manifest.dart`、`tool/build_update_manifest.ps1`、`docs/release_and_updates.md` 和测试。
 - Windows 与 Android 的资产类型不同（`installer`/`apk`），不要让一个平台下载另一个平台的包。
 - Windows 更新助手脚本必须保持“等待旧进程退出 → 静默安装 → 重启/失败标记”的顺序；不要在应用进程内直接替换正在使用的 exe/DLL。
+- 启动自动检查与自动下载必须分别尊重 `updateAutoCheckSettingKey` 和 `updateAutoDownloadSettingKey`；关闭自动检查后启动阶段不得访问更新源，自动下载默认关闭。自动下载失败要保留手动重试入口，不能静默丢更新。
 - 任何新增的下载路径都必须校验 HTTPS、主机白名单、大小上限和 SHA-256。
 
 ### 新增音频格式
@@ -526,6 +527,7 @@ docker compose --env-file .env -f compose.online-music.nginx.yml config
 - `test/update_manifest_test.dart`：版本比较、清单字段校验（含 Android APK 与带下划线的 ABI 键）。
 - `test/update_install_script_test.dart`：Windows 更新助手脚本的等待/静默安装/失败标记与环境变量路径校验。
 - `test/update_service_test.dart`：MockClient 下的检查、下载、SHA-256 校验、信任主机与错误映射。
+- `test/startup_update_gate_test.dart`：自动检查默认开启、自动下载需显式开启、关闭检查、解压版跳过下载与失败重试入口。
 - `backend/Music.Api.Tests/`：认证、账号隔离、同步墓碑、在线音乐搜索/播放/下载/歌词/封面、关联 ID、健康检查、指标和熔断测试。
 
 新测试建议：

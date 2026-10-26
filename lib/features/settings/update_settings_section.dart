@@ -98,7 +98,8 @@ class _UpdateSettingsSectionState extends ConsumerState<UpdateSettingsSection> {
 
   @override
   Widget build(BuildContext context) {
-    final autoCheck = ref.watch(updateCheckOnStartupProvider).value ?? true;
+    final autoCheck = ref.watch(updateAutoCheckProvider).value ?? true;
+    final autoDownload = ref.watch(updateAutoDownloadProvider).value ?? false;
     final service = ref.watch(appUpdateServiceProvider);
     final isWindows =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
@@ -116,16 +117,35 @@ class _UpdateSettingsSectionState extends ConsumerState<UpdateSettingsSection> {
         const Divider(height: 1),
         SwitchListTile(
           secondary: const Icon(Icons.update_outlined),
-          title: const Text('启动时检查更新'),
-          subtitle: const Text('最多每 12 小时检查一次；发现新版本时提示，不自动下载'),
+          title: const Text('自动检查更新'),
+          subtitle: const Text(
+            '启动时最多每 24 小时检查一次 GitHub Release；'
+            '发现新版本时提示，不会自动下载。关闭后仍可在下方手动检查。',
+          ),
           value: autoCheck,
           onChanged: (value) => ref
               .read(databaseProvider)
-              .setSetting(updateCheckOnStartupSettingKey, '$value'),
+              .setSetting(updateAutoCheckSettingKey, '$value'),
+        ),
+        const Divider(height: 1),
+        SwitchListTile(
+          secondary: const Icon(Icons.cloud_download_outlined),
+          title: const Text('自动下载更新'),
+          subtitle: Text(
+            autoCheck
+                ? '启动检查发现新版本后在后台下载并校验 SHA-256；安装前仍会确认。'
+                : '需要先开启“自动检查更新”。',
+          ),
+          value: autoDownload,
+          onChanged: autoCheck
+              ? (value) => ref
+                    .read(databaseProvider)
+                    .setSetting(updateAutoDownloadSettingKey, '$value')
+              : null,
         ),
         const Divider(height: 1),
         ListTile(
-          leading: const Icon(Icons.cloud_download_outlined),
+          leading: const Icon(Icons.sync_outlined),
           title: const Text('检查更新'),
           subtitle: Text(
             _lastChecked == null

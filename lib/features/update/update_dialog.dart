@@ -13,11 +13,18 @@ Future<void> showUpdateAvailableDialog(
   BuildContext context, {
   required UpdateAvailable update,
   required bool allowSkip,
+  String? installerPath,
+  String? initialError,
 }) {
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => UpdateAvailableDialog(update: update, allowSkip: allowSkip),
+    builder: (_) => UpdateAvailableDialog(
+      update: update,
+      allowSkip: allowSkip,
+      installerPath: installerPath,
+      initialError: initialError,
+    ),
   );
 }
 
@@ -26,12 +33,20 @@ class UpdateAvailableDialog extends ConsumerStatefulWidget {
     super.key,
     required this.update,
     required this.allowSkip,
+    this.installerPath,
+    this.initialError,
   });
 
   final UpdateAvailable update;
 
   /// 启动自动检查允许“跳过此版本”；手动检查不提供该选项。
   final bool allowSkip;
+
+  /// 已在后台下载并校验完成的安装包路径；非空时直接进入安装确认。
+  final String? installerPath;
+
+  /// 后台自动下载失败时的可读原因；非空时对话框直接显示重试入口。
+  final String? initialError;
 
   @override
   ConsumerState<UpdateAvailableDialog> createState() =>
@@ -55,6 +70,11 @@ class _UpdateAvailableDialogState extends ConsumerState<UpdateAvailableDialog> {
   void initState() {
     super.initState();
     _installed = ref.read(appUpdateServiceProvider).isInstalled;
+    _installerPath = widget.installerPath;
+    _error = widget.initialError;
+    _phase = _installerPath != null
+        ? _UpdatePhase.ready
+        : (_error == null ? _UpdatePhase.idle : _UpdatePhase.error);
   }
 
   Future<void> _download() async {
@@ -227,7 +247,9 @@ class _UpdateAvailableDialogState extends ConsumerState<UpdateAvailableDialog> {
                 if (_phase == _UpdatePhase.ready) ...[
                   const SizedBox(height: 20),
                   Text(
-                    '安装包已下载并通过 SHA-256 校验。${service.installHint}',
+                    widget.installerPath == null
+                        ? '安装包已下载并通过 SHA-256 校验。${service.installHint}'
+                        : '新版本已在后台自动下载并通过 SHA-256 校验。${service.installHint}',
                     style: theme.textTheme.bodyMedium,
                   ),
                 ],

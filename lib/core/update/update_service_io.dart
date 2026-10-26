@@ -72,6 +72,7 @@ class DesktopAppUpdateService implements AppUpdateService {
   final Future<Directory> Function() _temporaryDirectory;
   final String _executablePath;
   AppVersion? _cachedVersion;
+  bool _downloadInProgress = false;
 
   @override
   bool get isSupported =>
@@ -266,6 +267,26 @@ class DesktopAppUpdateService implements AppUpdateService {
 
   @override
   Future<String> downloadUpdate(
+    UpdateAsset asset, {
+    UpdateProgressCallback? onProgress,
+  }) async {
+    // 启动自动下载与设置页手动下载可能同时发生；串行化可避免两个写入者
+    // 争用同一个 .part 文件。
+    if (_downloadInProgress) {
+      throw const UpdateException(
+        '已有更新包正在下载，请稍后再试。',
+        code: 'update_download_busy',
+      );
+    }
+    _downloadInProgress = true;
+    try {
+      return await _downloadUpdate(asset, onProgress: onProgress);
+    } finally {
+      _downloadInProgress = false;
+    }
+  }
+
+  Future<String> _downloadUpdate(
     UpdateAsset asset, {
     UpdateProgressCallback? onProgress,
   }) async {

@@ -219,11 +219,20 @@ final appUpdateServiceProvider = Provider<AppUpdateService>((ref) {
   return service;
 });
 
-final updateCheckOnStartupProvider = StreamProvider<bool>(
+/// 自动检查更新开关：启动时最多每 24 小时检查一次。
+final updateAutoCheckProvider = StreamProvider<bool>(
   (ref) => ref
       .watch(databaseProvider)
       .watchSettings()
-      .map(updateCheckOnStartupFromSettings),
+      .map(updateAutoCheckFromSettings),
+);
+
+/// 自动下载更新开关：默认关闭，开启后才在后台下载新版本。
+final updateAutoDownloadProvider = StreamProvider<bool>(
+  (ref) => ref
+      .watch(databaseProvider)
+      .watchSettings()
+      .map(updateAutoDownloadFromSettings),
 );
 
 final scanNotificationEnabledProvider = StreamProvider<bool>(

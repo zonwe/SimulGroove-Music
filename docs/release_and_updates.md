@@ -93,11 +93,11 @@ powershell -ExecutionPolicy Bypass -File build_command/build_installer.ps1 -Vers
 
 ### 4.1 流程
 
-1. 启动后最多每 12 小时检查一次（可在设置中关闭）；设置页也可手动检查。
+1. 设置页的“自动检查更新”默认开启（可手动关闭）；启动后最多每 24 小时检查一次 GitHub Release，发现新版本时先提示。“自动下载更新”默认关闭，只有显式开启后才在后台下载并校验，随后请求安装确认。设置页也可手动检查。
 2. 读取 `latest.json`，选择 `windows-x64` 资产，按 `x.y.z` 分段与构建号比较。
-3. 用户确认后下载到 `%TEMP%\SimulGrooveMusic\updates`，同时计算 SHA-256。
-4. 下载完成后比较清单中的 `size` 与 `sha256`；不匹配立即删除。
-5. 生成更新助手 `apply-update-<时间戳>.cmd`，由它：
+3. 开启自动下载时，在后台下载到 `%TEMP%\SimulGrooveMusic\updates`，同时计算 SHA-256，并显示不阻塞操作的后台下载提示；未开启时等待用户在对话框中点击下载。
+4. 下载完成后比较清单中的 `size` 与 `sha256`；不匹配立即删除，并在更新对话框中给出重试入口。
+5. 用户确认后生成更新助手 `apply-update-<时间戳>.cmd`，由它：
    - 等待当前进程退出；
    - 以 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=...` 运行安装器；
    - 成功后重新启动应用；失败时写入 `update-failed.txt` 并重启旧版本。
@@ -109,20 +109,21 @@ SHA-256 只能证明下载内容与清单一致，信任根仍是 HTTPS 更新�
 
 ### 4.2 解压版限制
 
-只有安装版（目录中存在 `unins000.exe`）才允许应用内静默升级。解压版会在更新对话框中提示“复制下载链接”，由用户手动下载安装器；安装一次后即可使用自动更新。
+只有安装版（目录中存在 `unins000.exe`）才允许应用内静默升级。解压版不会在启动时自动下载安装器，而是在更新对话框中提示“复制下载链接”，由用户手动下载安装；安装版后续可按需开启自动下载。
 
 ### 4.3 失败处理
 
 - `%TEMP%\SimulGrooveMusic\updates\update-failed.txt` 保存安装器退出码与日志路径。
 - 下次启动时窗口会显示失败提示；日志文件为同目录的 `update-install-<时间戳>.log`。
 - 更新包校验失败、清单 404、网络超时都会在设置页给出可读错误，不会静默退出应用。
+- 启动检查失败也会记录本次尝试时间，最多每 24 小时自动重试一次；设置页的手动检查不受间隔限制。
 
 ## 5. Android 应用内更新
 
 ### 5.1 流程
 
 1. 通过 `Abi.current()` 选择 `android-arm64-v8a`、`android-armeabi-v7a` 或 `android-x86_64` 资产。
-2. 下载 APK 到应用缓存 `SimulGrooveMusic/updates`，校验大小与 SHA-256。
+2. 开启“自动下载更新”时，启动检查会在后台把匹配 ABI 的 APK 下载到应用缓存 `SimulGrooveMusic/updates`，校验大小与 SHA-256，然后弹出安装确认；默认关闭时只提示版本，等用户点击后才下载。
 3. Dart 通过 MethodChannel `top.zonwe.simul_groove_player/updater` 调用原生 `installApk`。
 4. Kotlin 校验 APK 位于更新缓存目录，使用 `FileProvider` 生成 `content://` URI，并打开系统安装界面。
 5. Android 8+ 若未授予“安装未知应用”，会跳转到本应用的授权页并返回错误；授权后重试即可。
@@ -255,8 +256,9 @@ powershell -ExecutionPolicy Bypass -File tool/build_update_manifest.ps1 `
 ## 9. 已知限制
 
 - Linux 与 Web 未实现应用内更新；Linux 仍按发行包手工升级。
-- Windows 便携版只能手动更新。
-- Android 必须允许“安装未知应用”，且不能静默安装。
+- Windows 便携版不自动下载安装器，只能手动更新。
+- Android 必须允许“安装未知应用”，且不能静默安装；开启自动下载时也只自动完成检查与下载，安装仍需用户在系统界面确认。
+- 开启“自动下载更新”后不会检测计费网络；需要节省流量时保持默认关闭，或关闭自动检查后手动检查。
 - 未配置稳定 Android 密钥时，CI 发布任务会直接失败，避免发布不可自更新的 APK。
 - 安装器和 exe 未做 Authenticode 签名，SmartScreen 会提示未知发布者。
 

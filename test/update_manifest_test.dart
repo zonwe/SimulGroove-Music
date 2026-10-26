@@ -145,17 +145,31 @@ void main() {
   });
 
   group('update settings', () {
-    test('startup checks default to enabled', () {
-      expect(updateCheckOnStartupFromSettings(const {}), isTrue);
+    test('auto check defaults to enabled and can be turned off', () {
+      expect(updateAutoCheckFromSettings(const {}), isTrue);
       expect(
-        updateCheckOnStartupFromSettings(const {
-          updateCheckOnStartupSettingKey: 'false',
-        }),
+        updateAutoCheckFromSettings(const {updateAutoCheckSettingKey: 'false'}),
         isFalse,
       );
     });
 
-    test('startup checks are throttled to the configured interval', () {
+    test('auto download defaults to off and requires explicit opt-in', () {
+      expect(updateAutoDownloadFromSettings(const {}), isFalse);
+      expect(
+        updateAutoDownloadFromSettings(const {
+          updateAutoDownloadSettingKey: 'false',
+        }),
+        isFalse,
+      );
+      expect(
+        updateAutoDownloadFromSettings(const {
+          updateAutoDownloadSettingKey: 'true',
+        }),
+        isTrue,
+      );
+    });
+
+    test('startup checks are throttled to at most once per day', () {
       final now = DateTime(2026, 10, 21, 12);
       expect(
         shouldAutoCheckUpdates(enabled: true, lastCheckedAt: null, now: now),
@@ -164,7 +178,7 @@ void main() {
       expect(
         shouldAutoCheckUpdates(
           enabled: true,
-          lastCheckedAt: now.subtract(const Duration(hours: 11)),
+          lastCheckedAt: now.subtract(const Duration(hours: 23)),
           now: now,
         ),
         isFalse,
@@ -172,13 +186,49 @@ void main() {
       expect(
         shouldAutoCheckUpdates(
           enabled: true,
-          lastCheckedAt: now.subtract(const Duration(hours: 13)),
+          lastCheckedAt: now.subtract(const Duration(hours: 25)),
           now: now,
         ),
         isTrue,
       );
       expect(
         shouldAutoCheckUpdates(enabled: false, lastCheckedAt: null, now: now),
+        isFalse,
+      );
+    });
+
+    test('auto download requires opt-in, an installer and an update', () {
+      expect(
+        shouldAutoDownloadUpdate(
+          autoDownloadEnabled: true,
+          installed: true,
+          updateAvailable: true,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldAutoDownloadUpdate(
+          autoDownloadEnabled: false,
+          installed: true,
+          updateAvailable: true,
+        ),
+        isFalse,
+      );
+      // Windows 解压版没有卸载器，只能在对话框里引导手动安装。
+      expect(
+        shouldAutoDownloadUpdate(
+          autoDownloadEnabled: true,
+          installed: false,
+          updateAvailable: true,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldAutoDownloadUpdate(
+          autoDownloadEnabled: true,
+          installed: true,
+          updateAvailable: false,
+        ),
         isFalse,
       );
     });

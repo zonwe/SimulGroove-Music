@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -207,6 +208,42 @@ void main() {
         .toList();
     expect(leftovers, isEmpty);
   });
+
+  test(
+    'rejects a concurrent download instead of sharing the partial file',
+    () async {
+      final bytes = utf8.encode('fake windows installer payload');
+      final digest = sha256.convert(bytes).toString();
+      final release = Completer<void>();
+      final client = MockClient((request) async {
+        if (request.url == _manifestUri) {
+          return http.Response(
+            jsonEncode(_manifest(size: bytes.length, sha256: digest)),
+            200,
+          );
+        }
+        await release.future;
+        return http.Response.bytes(bytes, 200);
+      });
+      final service = _service(temp, client: client);
+      final available = await service.checkForUpdates() as UpdateAvailable;
+
+      final first = service.downloadUpdate(available.asset);
+      await expectLater(
+        service.downloadUpdate(available.asset),
+        throwsA(
+          isA<UpdateException>().having(
+            (error) => error.code,
+            'code',
+            'update_download_busy',
+          ),
+        ),
+      );
+
+      release.complete();
+      expect(await first, endsWith('Setup-1.1.1.exe'));
+    },
+  );
 
   test('refuses a non-installer asset on Windows', () async {
     final asset = UpdateAsset(
