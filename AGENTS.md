@@ -47,6 +47,7 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 | `lib/core/online_music/` | 在线搜索、播放票据、封面、歌词、下载与本地持久化边界 | 只经 `Music.Api`，不得保存 sidecar 私有字段 |
 | `lib/core/lyrics/` | LRC 解析 | 适合优先写纯 Dart 单元测试 |
 | `lib/core/theme/` | 外观设置模型 | 设置最终保存在 Drift `AppSettings` 表中 |
+| `lib/core/format/` | 纯展示格式化（播放时长等） | 只放无 Flutter 依赖的纯函数，页面共用一份实现，避免格式漂移 |
 | `lib/core/window/` | Windows 窗口、托盘和拖动区域，含平台 stub | Web 构建依赖条件导出隔离 `dart:io` |
 | `lib/core/shortcuts/` | Windows 全局快捷键注册和持久化 | 注意快捷键冲突、生命周期和非 Windows 分支 |
 | `lib/core/auth/` | HTTP 认证、令牌安全存储和歌单/喜欢/均衡器预设/删除墓碑同步边界 | 保持 Access/Refresh Token 轮换、单次刷新重试和退出清理 |
@@ -65,6 +66,9 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 | `tool/build_update_manifest.ps1` | 生成 `latest.json` | 资产名、URL、SHA-256 必须与 Release 实际文件一致 |
 | `tool/generate_android_keystore.ps1` | 生成 Android 发布密钥并输出 CI secrets | 现有发布密钥已生成；仅在首次配置或明确轮换时使用，不要覆盖 |
 | `.github/workflows/release.yml` | tag/手动发布安装器、APK、`latest.json` 与校验和 | `v1.1.0` 已实际跑通；Android 签名 secrets 缺失时必须失败 |
+| `.github/workflows/ci.yml` | 推送/PR 的质量门禁：actionlint、格式、分析、测试、Web 冒烟、后端测试、Android Debug、Windows Release、部署配置校验、手动 Linux Release | 修改它与本地命令时保持同一套检查；Linux 任务默认跳过，只有手动勾选 `run_linux` 才执行 |
+| `.github/workflows/android-device-acceptance.yml` | 真机验收：拒绝模拟器、校验 ARM64 APK 与签名、安装启动并留证据 | 深度回归仍需真实设备；脚本不做主观判定 |
+| `.github/workflows/production-acceptance.yml` | 生产部署验收：证书、告警路由、Fire/Resolve 证据与来源审批 | 真实域名、通知接收方与来源批准由目标环境提供 |
 | `android/` | Android 宿主、权限、MediaStore 与更新安装 MethodChannel | 修改 Kotlin 后至少做 Android 编译或实机验证；APK 安装必须经 FileProvider + 系统安装界面 |
 | `windows/` | Windows Runner、CMake、图标和生成的插件注册 | 生成的 registrant 不手改；CMake 有 MSVC 兼容设置 |
 | `linux/` | Linux GTK Runner、CMake 与生成的插件注册 | 在 Linux 主机验证 GTK、libmpv、MPRIS、X11/Wayland 和桌面环境差异 |
@@ -74,6 +78,7 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 | `go-music-dl/` | 固定上游 clone 与私有 JSON sidecar | 集成模式默认仅监听 `127.0.0.1`；搜索私有字段与上游 URL 只进短期内存注册表，不得向公网或 Flutter 暴露 |
 | `compose.online-music.yml` | `Music.Api` 与 sidecar 的单机容器编排模板 | 只发布 API 端口；sidecar 仅加入 Compose 私有网络并保留必要的外网访问能力 |
 | `compose.online-music.nginx.yml` | 宿主机 Nginx 反向代理的单机编排 | `Music.Api` 只绑定 `127.0.0.1`，公网流量必须经 Nginx；转发头由应用内中间件处理 |
+| `compose.online-music.production.yml` | 只发布 Caddy 80/443 的生产编排 | 与私有 Collector/Prometheus/Alertmanager 链路一起使用；真实域名与证书由部署环境提供 |
 | `deploy/nginx/` | Nginx 站点、安全头与限流模板 | 模板只保留占位值；证书路径、域名和出口 IP 由部署环境替换 |
 | `.env.nginx.example` | Nginx 反代编排的环境变量模板 | 只能保存占位值；真实域名、密钥写入未提交的 `.env` |
 | `.env.example` | Compose 环境变量模板 | 只能保存占位值；真实 JWT、管理员密码和 Cookie 写入未提交的 `.env` 或密钥系统 |
@@ -167,10 +172,11 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 
 ## 7. Drift 数据库约定
 
-数据库位于 `lib/core/database/app_database.dart`，当前 schema 版本为 5，包含：
+数据库位于 `lib/core/database/app_database.dart`，当前 schema 版本为 6，包含：
 
 - `Accounts`：本地账号快照。
-- `Tracks`：歌曲、来源、文件 URI/路径、标签、封面、歌词和同步字段。
+- `Tracks`：歌曲、来源、文件 URI/路径、标签、歌词和同步字段（封面已拆到 `TrackArtworks`）。
+- `TrackArtworks`：曲目封面 blob，按曲目 id 单独读取，随曲目级联删除。
 - `ScanSources`：用户已授权或选择的本地扫描位置。
 - `Playlists`：歌单元数据。
 - `PlaylistEntries`：歌单与歌曲的多对多关系及顺序。
@@ -189,8 +195,10 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 5. 表定义修改后执行：
 
    ```powershell
-   dart run build_runner build --delete-conflicting-outputs
+   dart run build_runner build
    ```
+
+   （build_runner 2.17 起 `--delete-conflicting-outputs` 已移除并被忽略，不要再传。）
 
 6. 检查生成 diff 是否只反映预期表结构变化。
 7. UI 读取优先使用 `watch...` 响应式查询，批处理和一致性更新使用 `batch`/`transaction`。
@@ -235,6 +243,7 @@ Flutter 页面/Repository → HTTP + Bearer Token → Music.Api Endpoints
 - Windows 本地文件优先使用 `filePath` 构造 `Uri.file`；其他平台使用曲目 URI。
 - 循环和随机模式修改后要主动广播状态，因为底层不一定产生足以刷新 UI 的播放事件。
 - 封面通过缓存 URI 提供给系统通知，原始字节仍可放在 `extras` 给 Flutter UI。
+- 封面不随队列整库加载：`Tracks` 不再内嵌封面，`MusicAudioHandler` 通过 `loadArtwork` 回调按当前曲目取图，界面用 `TrackArtworkView` 按可见行查询。
 - 播放错误、文件失效和权限失效应在进入播放前或播放失败时给用户清晰反馈。
 - `MusicAudioHandler.play()` 在发出播放命令后返回，异步播放错误通过统一错误流展示；不要用底层 `AudioPlayer.play()` 的结束 Future 表示加载完成。
 - `PlaybackPersistence` 每 5 秒及播放状态变化时保存本地队列快照，在首帧后尝试恢复；恢复不得覆盖用户新发起的播放，也不得自动出声。
@@ -326,7 +335,7 @@ Windows 相关改动还要检查窗口生命周期、托盘释放、快捷键注
 - 只对传输层错误（连接被重置、DNS 失败）做一次重试，且仅在搜索路径上；HTTP 状态响应、业务错误和超时都不重试。
 - 生产环境必须覆盖默认 JWT 密钥；代码和文档中不得加入真实密钥。
 - 数据库文件、WAL/SHM、`bin/` 和 `obj/` 不应纳入功能改动。
-- 反向代理部署必须由应用显式注册转发头中间件（`Program.cs` 的 `UseForwardedHeaders`），默认只信任回环代理；不要改用 `ASPNETCORE_FORWARDEDHEADERS_ENABLED`——它同样会注册中间件，但使用默认选项、接受任意来源的 `X-Forwarded-For`，并与显式配置重复。容器化入口代理不在回环网段，需设置 `ForwardedHeaders:TrustNonLoopbackProxy=true`，且仅在外部无法直达 API 时开启。只接受 `X-Forwarded-For`/`X-Forwarded-Proto`，不信任客户端可伪造的 `X-Forwarded-Host`。
+- 反向代理部署必须由应用显式注册转发头中间件（`Program.cs` 调用 `ForwardedHeadersSetup.CreateOptions`，信任范围集中在 `Middleware/ForwardedHeadersSetup.cs`，并由 `ForwardedHeadersTests` 覆盖），默认只信任回环代理；不要改用 `ASPNETCORE_FORWARDEDHEADERS_ENABLED`——它同样会注册中间件，但使用默认选项、接受任意来源的 `X-Forwarded-For`，并与显式配置重复。容器化入口代理不在回环网段，需设置 `ForwardedHeaders:TrustNonLoopbackProxy=true`，且仅在外部无法直达 API 时开启。只接受 `X-Forwarded-For`/`X-Forwarded-Proto`，不信任客户端可伪造的 `X-Forwarded-Host`。
 - 配置 `AllowedHosts` 时必须保留 `127.0.0.1`，否则容器内 healthcheck 的 Host 头会被拒绝；Nginx 侧需转发 `Host`、`X-Real-IP`、`X-Forwarded-For` 与 `X-Forwarded-Proto`。
 - Compose 编排只发布 `Music.Api` 端口，sidecar 不映射宿主机端口；`.env`、数据卷导出、Data Protection 密钥和 sidecar Cookie 不得提交。
 
@@ -528,7 +537,13 @@ docker compose --env-file .env -f compose.online-music.nginx.yml config
 - `test/update_install_script_test.dart`：Windows 更新助手脚本的等待/静默安装/失败标记与环境变量路径校验。
 - `test/update_service_test.dart`：MockClient 下的检查、下载、SHA-256 校验、信任主机与错误映射。
 - `test/startup_update_gate_test.dart`：自动检查默认开启、自动下载需显式开启、关闭检查、解压版跳过下载与失败重试入口。
-- `backend/Music.Api.Tests/`：认证、账号隔离、同步墓碑、在线音乐搜索/播放/下载/歌词/封面、关联 ID、健康检查、指标和熔断测试。
+- `test/music_audio_handler_test.dart`、`test/playback_persistence_test.dart`：播放编排、媒体信息、队列快照恢复、暂停语义与按当前曲目懒加载封面。
+- `test/library_scan_controller_test.dart`、`test/app_database_scan_sources_test.dart`、`test/app_database_playlists_test.dart`、`test/app_database_integrity_test.dart`：扫描互斥、来源匹配、封面写入/清空、歌单写入、外键级联、旧库修复与 v4/v5 迁移。
+- `test/track_artwork_view_test.dart`：封面拆表后按曲目 id 取图、显式封面优先与占位回退。
+- `test/now_playing_page_test.dart`、`test/now_playing_layout_test.dart`、`test/artist_collection_navigation_test.dart`：正在播放页、布局设置与集合跳转。
+- `test/online_search_page_test.dart`、`test/online_search_controller_test.dart`、`test/online_search_context_menu_test.dart`、`test/online_search_batch_actions_test.dart`、`test/online_collection_page_test.dart`、`test/online_track_downloader_test.dart`、`test/online_music_repository_test.dart`、`test/online_playlist_batch_test.dart`、`test/online_track_artwork_provider_test.dart`：在线搜索页面、状态机、菜单、批量操作、下载与封面。
+- `test/settings_download_directory_test.dart`、`test/account_page_test.dart`、`test/library_track_filter_test.dart`、`test/track_match_token_test.dart`、`test/duration_text_test.dart`：设置页、账号页、搜索过滤、跨设备曲目匹配令牌与时长格式化。
+- `backend/Music.Api.Tests/`：认证、账号隔离、同步墓碑、在线音乐搜索/播放/下载/歌词/封面、关联 ID、健康检查、指标、熔断与转发头信任边界。
 
 新测试建议：
 
@@ -545,7 +560,7 @@ docker compose --env-file .env -f compose.online-music.nginx.yml config
 - 不在日志、异常或截图中暴露 Access Token/Refresh Token。
 - 删除扫描源会连带删除本地索引数据；修改相关 SQL 前必须理解范围。
 - 服务端目录扫描必须限制在允许根目录内，并防止路径规范化绕过。
-- Android 权限只在功能需要时请求；当前麦克风权限为识曲预留，未实现功能不应主动录音。
+- Android 权限只在功能需要时请求；听歌识曲仍是占位页，因此清单中不声明 `RECORD_AUDIO`，实现识曲时再与权限申请流程一起加回。
 - 不把音频文件上传到后端，除非未来需求明确改变产品语义并经过专门设计。
 - 对 `third_party/` 的修改要保留上游来源、补丁原因和验证平台，方便后续升级。
 - Android 发布 keystore、密码和 GitHub Secrets 不得提交；`android/key.properties`、`*.jks`、`*.keystore` 必须保持忽略。当前发布密钥为 `android/app/simulgroove-release.jks`（alias `simulgroove`），证书指纹与备份要求见“发布一个新版本”；丢失密钥等于失去应用内更新能力。

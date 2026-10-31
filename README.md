@@ -6,6 +6,8 @@
 
 2026-10-21：Windows 安装器/应用内更新与 Android APK 自更新已接入。本地已通过 `flutter analyze`、191 项 Flutter 测试、Windows/Android/Web Release 构建、Inno Setup 安装器静默安装/卸载冒烟、更新助手端到端冒烟（真实 `cmd.exe` + 假安装器），以及 `latest.json` 生成与 Dart 回读。GitHub Release 工作流已由 `v1.1.0` tag 实际运行并通过（[run 39596997713](https://github.com/zonwe/SimulGroove-Music/actions/runs/39596997713)），[v1.1.0](https://github.com/zonwe/SimulGroove-Music/releases/tag/v1.1.0) 已发布安装器、便携包、三个 ABI APK、`latest.json` 与 `SHA256SUMS.txt`；真实设备上的应用内更新尚待验收。
 
+2026-10-31：完成一轮性能与工程卫生整理。本地已通过 `dart format`、`flutter analyze`（0 告警）、209 项 Flutter 测试、83 项后端测试（0 编译告警）以及 Windows/Web Release 构建。主要变化：封面从 `Tracks` 拆到独立的 `track_artworks` 表（schema v6，含 v5→v6 迁移与歌单/喜欢引用不丢失的回归测试），列表查询不再随曲目读取整库封面，界面按可见行取图、播放队列按当前曲目懒加载封面；设置写入只触发一条 `AppSettings` 查询（原先每个派生设置各起一条流）；列表页不再在 `build` 中重复建立歌单/喜欢订阅；专辑与艺术家网格索引由 O(n²) 改为 O(1)；封面按显示尺寸解码；扫描来源重建与同步占位清理改用分块删除与 `NOT EXISTS`，避免大库触碰 SQLite 变量上限；同步不再逐歌单建立流订阅；后端转发头配置抽成可测的 `ForwardedHeadersSetup`，统一到 `.NET 10` 的 `KnownIPNetworks` 并补上“默认只信任回环、不采信 `X-Forwarded-Host`”的回归测试；Android 清单移除未使用的 `RECORD_AUDIO`。
+
 ## 当前功能
 
 - Android：通过系统目录选择器授权一个或多个音乐文件夹并递归扫描，也可选择扫描整台设备；支持后台播放、媒体通知、锁屏/耳机媒体控制与音频焦点。
