@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/app_database.dart';
+import '../../core/format/duration_text.dart';
 import '../../core/library/artist_names.dart';
 import 'artwork_view.dart';
 import '../player/mini_player_bar.dart';
@@ -34,7 +35,7 @@ class CollectionPage extends ConsumerWidget {
           final track = tracks[index];
           return ListTile(
             minTileHeight: 64,
-            leading: ArtworkView(bytes: track.artwork),
+            leading: TrackArtworkView(trackId: track.id),
             title: Text(
               track.title,
               maxLines: 1,
@@ -45,7 +46,7 @@ class CollectionPage extends ConsumerWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            trailing: Text(_formatDuration(track.durationMs)),
+            trailing: Text(formatTrackDuration(track.durationMs)),
             onTap: () =>
                 playOrOpenNowPlaying(context, ref, tracks, initialIndex: index),
           );
@@ -124,10 +125,4 @@ void openCollectionPage(
       builder: (_) => CollectionPage(kind: kind, value: value, tracks: tracks),
     ),
   );
-}
-
-String _formatDuration(int? milliseconds) {
-  if (milliseconds == null) return '--:--';
-  final duration = Duration(milliseconds: milliseconds);
-  return '${duration.inMinutes}:${duration.inSeconds.remainder(60).toString().padLeft(2, '0')}';
 }

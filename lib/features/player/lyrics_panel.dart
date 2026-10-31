@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../../core/format/duration_text.dart';
 import '../../core/lyrics/lrc_parser.dart';
 
 @visibleForTesting
@@ -20,11 +21,8 @@ double lyricsScrollAlignment(List<LyricLine> lines, int targetIndex) {
 }
 
 @visibleForTesting
-String formatLyricSeekTime(Duration duration) {
-  final minutes = duration.inMinutes;
-  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return '$minutes:$seconds';
-}
+String formatLyricSeekTime(Duration duration) =>
+    formatPlaybackDuration(duration);
 
 /// 开启二次点按确认时，判断这次点按是否只是「选中待确认」的第一次点按。
 ///

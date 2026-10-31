@@ -31,7 +31,6 @@ class Tracks extends Table {
   TextColumn get artist => text().withDefault(const Constant('未知艺术家'))();
   TextColumn get album => text().withDefault(const Constant('未知专辑'))();
   IntColumn get durationMs => integer().nullable()();
-  BlobColumn get artwork => blob().nullable()();
   TextColumn get lyrics => text().nullable()();
   IntColumn get fileSize => integer().nullable()();
   DateTimeColumn get modifiedAt => dateTime().nullable()();
@@ -42,6 +41,20 @@ class Tracks extends Table {
 
   @override
   Set<Column<Object>> get primaryKey => {id};
+}
+
+/// 曲目封面。
+///
+/// 封面是每首几百 KB 的 blob，放在 `Tracks` 里会让 `watchTracks()` 这样的全套
+/// 列表查询把整个音乐库的封面都读进内存。拆表后列表只查标量列，界面按可见行
+/// 单独取图；`onDelete: cascade` 保证删歌时封面一起消失。
+class TrackArtworks extends Table {
+  TextColumn get trackId =>
+      text().references(Tracks, #id, onDelete: KeyAction.cascade)();
+  BlobColumn get bytes => blob()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {trackId};
 }
 
 class ScanSources extends Table {
@@ -166,6 +179,7 @@ Expression<bool> _startsWithLiteral(
   tables: [
     Accounts,
     Tracks,
+    TrackArtworks,
     ScanSources,
     Playlists,
     PlaylistEntries,
@@ -182,7 +196,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -192,6 +206,16 @@ class AppDatabase extends _$AppDatabase {
       if (from < 3) await m.createTable(equalizerPresets);
       if (from < 4) await m.createTable(syncTombstones);
       if (from < 5) await m.addColumn(tracks, tracks.contentFingerprint);
+      if (from < 6) {
+        // 先把 v5 的内嵌封面搬到独立表，再重建 tracks 丢掉这一列。
+        // alterTable 会临时关闭外键，歌单/喜欢/封面表的引用不会级联丢失。
+        await m.createTable(trackArtworks);
+        await customStatement('''
+          INSERT INTO track_artworks (track_id, bytes)
+          SELECT id, artwork FROM tracks WHERE artwork IS NOT NULL
+        ''');
+        await m.alterTable(TableMigration(tracks));
+      }
     },
     beforeOpen: (details) async {
       // Foreign-key declarations alone do not enable SQLite enforcement.
@@ -265,10 +289,74 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> clearPlaybackSnapshot() => delete(playbackSnapshots).go();
 
-  Future<void> upsertTracks(Iterable<TracksCompanion> values) async {
-    await batch((batch) {
-      batch.insertAllOnConflictUpdate(tracks, values.toList());
+  /// 写入曲目，并可选地同时更新封面。
+  ///
+  /// [artworks] 里出现的 id 会覆盖封面（值为 null 表示清空）；没出现的曲目保持
+  /// 原封面不动，方便「只补歌词」这类局部更新。
+  Future<void> upsertTracks(
+    Iterable<TracksCompanion> values, {
+    Map<String, Uint8List?>? artworks,
+  }) async {
+    final rows = values.toList(growable: false);
+    if (rows.isEmpty && (artworks == null || artworks.isEmpty)) return;
+    await transaction(() async {
+      if (rows.isNotEmpty) {
+        await batch((batch) {
+          batch.insertAllOnConflictUpdate(tracks, rows);
+        });
+      }
+      if (artworks != null && artworks.isNotEmpty) {
+        await _replaceTrackArtworks(artworks);
+      }
     });
+  }
+
+  /// 覆盖指定曲目的封面行：先删后插，避免残留旧图。
+  Future<void> _replaceTrackArtworks(Map<String, Uint8List?> artworks) async {
+    final ids = artworks.keys.toList(growable: false);
+    for (var start = 0; start < ids.length; start += 500) {
+      final chunk = ids.sublist(start, (start + 500).clamp(0, ids.length));
+      await (delete(
+        trackArtworks,
+      )..where((row) => row.trackId.isIn(chunk))).go();
+    }
+    final rows = [
+      for (final entry in artworks.entries)
+        if (entry.value case final Uint8List bytes)
+          TrackArtworksCompanion.insert(trackId: entry.key, bytes: bytes),
+    ];
+    if (rows.isNotEmpty) {
+      await batch(
+        (batch) => batch.insertAllOnConflictUpdate(trackArtworks, rows),
+      );
+    }
+  }
+
+  /// 单曲封面。列表页按可见行单独取图，不再随曲目一起读整库封面。
+  Future<Uint8List?> trackArtwork(String trackId) async {
+    final row = await (select(
+      trackArtworks,
+    )..where((row) => row.trackId.equals(trackId))).getSingleOrNull();
+    return row?.bytes;
+  }
+
+  /// 批量取封面（候选：播放队列快照恢复）。
+  Future<Map<String, Uint8List>> trackArtworksFor(
+    Iterable<String> trackIds,
+  ) async {
+    final ids = trackIds.toSet().toList(growable: false);
+    if (ids.isEmpty) return const {};
+    final result = <String, Uint8List>{};
+    for (var start = 0; start < ids.length; start += 500) {
+      final chunk = ids.sublist(start, (start + 500).clamp(0, ids.length));
+      final rows = await (select(
+        trackArtworks,
+      )..where((row) => row.trackId.isIn(chunk))).get();
+      for (final row in rows) {
+        result[row.trackId] = row.bytes;
+      }
+    }
+    return result;
   }
 
   Future<void> saveScanSource(ScanSourcesCompanion value) =>
@@ -313,20 +401,39 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> replaceScanSourceTracks(
     ScanSource source,
-    Iterable<TracksCompanion> values,
-  ) async {
+    Iterable<TracksCompanion> values, {
+    Map<String, Uint8List?>? artworks,
+  }) async {
     final incoming = values.toList(growable: false);
     final incomingUris = incoming.map((value) => value.uri.value).toSet();
     await transaction(() async {
-      final sourceTracks = _tracksFromScanSource(source);
-      final staleTracks = incomingUris.isEmpty
-          ? sourceTracks
-          : sourceTracks & tracks.uri.isNotIn(incomingUris);
-      await (delete(tracks)..where((row) => staleTracks)).go();
+      // 逐块比较而不是生成一个巨大的 `uri NOT IN (...)`：一个来源可能有上万首
+      // 曲目，SQLite 的绑定变量数量有上限（现代构建默认 32766），超限会直接抛错。
+      final existingQuery = selectOnly(tracks)
+        ..addColumns([tracks.id, tracks.uri])
+        ..where(_tracksFromScanSource(source));
+      final existing = await existingQuery.get();
+      final staleIds = <String>[];
+      for (final row in existing) {
+        final id = row.read(tracks.id);
+        if (id == null) continue;
+        if (incomingUris.contains(row.read(tracks.uri))) continue;
+        staleIds.add(id);
+      }
+      for (var start = 0; start < staleIds.length; start += 500) {
+        final chunk = staleIds.sublist(
+          start,
+          (start + 500).clamp(0, staleIds.length),
+        );
+        await (delete(tracks)..where((row) => row.id.isIn(chunk))).go();
+      }
       if (incoming.isNotEmpty) {
         await batch((batch) {
           batch.insertAllOnConflictUpdate(tracks, incoming);
         });
+      }
+      if (artworks != null && artworks.isNotEmpty) {
+        await _replaceTrackArtworks(artworks);
       }
     });
   }
@@ -577,27 +684,20 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> deleteUnreferencedSyncedTrackPlaceholders() async {
-    final playlistReferences = await (selectOnly(
-      playlistEntries,
-    )..addColumns([playlistEntries.trackId])).get();
-    final likedReferences = await (selectOnly(
-      likedTracks,
-    )..addColumns([likedTracks.trackId])).get();
-    final referencedIds = <String>{
-      ...playlistReferences
-          .map((row) => row.read(playlistEntries.trackId))
-          .whereType<String>(),
-      ...likedReferences
-          .map((row) => row.read(likedTracks.trackId))
-          .whereType<String>(),
-    };
-    await (delete(tracks)..where((row) {
-          final isSyncedPlaceholder = row.sourceType.equals('synced');
-          return referencedIds.isEmpty
-              ? isSyncedPlaceholder
-              : isSyncedPlaceholder & row.id.isNotIn(referencedIds);
-        }))
-        .go();
+    // `NOT IN (大量 id)` 会随歌单/喜欢规模一起增长，并有变量数量上限；
+    // 相关子查询表达「没有任何引用」既不占内存也避免拼接超长参数列表。
+    await customStatement('''
+      DELETE FROM tracks
+      WHERE source_type = 'synced'
+        AND NOT EXISTS (
+          SELECT 1 FROM playlist_entries
+          WHERE playlist_entries.track_id = tracks.id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM liked_tracks
+          WHERE liked_tracks.track_id = tracks.id
+        )
+    ''');
   }
 
   Stream<List<Track>> watchPlaylistTracks(String playlistId) {
@@ -613,6 +713,24 @@ class AppDatabase extends _$AppDatabase {
     return query.watch().map(
       (rows) => rows.map((row) => row.readTable(tracks)).toList(),
     );
+  }
+
+  /// 一次性读取歌单曲目。
+  ///
+  /// 同步等只需要当前值的场景不要用 `watchPlaylistTracks(...).first`：那会为每个
+  /// 歌单建立并立即取消一条流订阅，歌单多时就是 N 次额外查询。
+  Future<List<Track>> playlistTracks(String playlistId) async {
+    final query =
+        select(tracks).join([
+            innerJoin(
+              playlistEntries,
+              playlistEntries.trackId.equalsExp(tracks.id),
+            ),
+          ])
+          ..where(playlistEntries.playlistId.equals(playlistId))
+          ..orderBy([OrderingTerm.asc(playlistEntries.position)]);
+    final rows = await query.get();
+    return rows.map((row) => row.readTable(tracks)).toList();
   }
 
   Future<void> addTrackToPlaylist(String playlistId, String trackId) async {

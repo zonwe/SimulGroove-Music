@@ -137,7 +137,7 @@ class BackendAuthRepository implements AuthRepository {
     final localPlaylists = await _database.playlistsForSync(account.id);
     final playlists = <BackendPlaylist>[];
     for (final playlist in localPlaylists) {
-      final tracks = (await _database.watchPlaylistTracks(playlist.id).first)
+      final tracks = (await _database.playlistTracks(playlist.id))
           .where(
             (track) => track.accountId == null || track.accountId == account.id,
           )

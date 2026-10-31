@@ -13,10 +13,10 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          // 用静态流代替 Drift 查询，避免测试收尾时流查询关闭定时器残留。
+          // 用静态值代替 Drift 查询，避免测试收尾时流查询关闭定时器残留。
           accountProvider.overrideWith((ref) => Stream<Account?>.value(null)),
-          backendBaseUrlProvider.overrideWith(
-            (ref) => Stream<String>.value(savedAddress),
+          backendBaseUrlProvider.overrideWithValue(
+            AsyncValue.data(savedAddress),
           ),
         ],
         child: const MaterialApp(home: Scaffold(body: AccountPage())),

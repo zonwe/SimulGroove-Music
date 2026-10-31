@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:drift/native.dart';
 import 'package:flutter_music/core/database/app_database.dart';
@@ -23,9 +24,11 @@ void main() {
         'second',
       );
       expect(await db.select(db.likedTracks).get(), hasLength(1));
+      expect(await db.trackArtwork('track'), isNotNull);
       await (db.delete(db.tracks)..where((row) => row.id.equals('track'))).go();
       expect(await db.select(db.playlistEntries).get(), isEmpty);
       expect(await db.select(db.likedTracks).get(), isEmpty);
+      expect(await db.trackArtwork('track'), isNull);
       expect(await db.watchPlaylists().first, hasLength(1));
       await expectLater(
         db.addTrackToPlaylist('second', 'missing'),
@@ -66,16 +69,21 @@ void main() {
 
 Future<void> _seed(AppDatabase db) async {
   final now = DateTime(2026);
-  await db.upsertTracks([
-    TracksCompanion.insert(
-      id: 'track',
-      sourceType: 'test',
-      sourceId: 'track',
-      uri: 'test://track',
-      title: 'track',
-      updatedAt: now,
-    ),
-  ]);
+  await db.upsertTracks(
+    [
+      TracksCompanion.insert(
+        id: 'track',
+        sourceType: 'test',
+        sourceId: 'track',
+        uri: 'test://track',
+        title: 'track',
+        updatedAt: now,
+      ),
+    ],
+    artworks: {
+      'track': Uint8List.fromList([0x0A, 0x0B]),
+    },
+  );
   for (final id in ['first', 'second']) {
     await db.createPlaylist(
       PlaylistsCompanion.insert(

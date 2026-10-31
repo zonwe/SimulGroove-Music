@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/format/duration_text.dart';
 import '../../core/online_music/online_track.dart';
 import 'online_artwork_view.dart';
 
@@ -35,7 +36,8 @@ class OnlineTrackTile extends StatelessWidget {
       artists,
       if (track.album.isNotEmpty) track.album,
       track.provider,
-      if (track.durationMs case final duration?) _formatDuration(duration),
+      if (track.durationMs case final duration?)
+        formatPlaybackDuration(Duration(milliseconds: duration)),
       if (!track.playable) '不可播放' else if (!playbackSupported) '当前平台不支持播放',
     ].join(' · ');
     final canSelect = selectionEnabled && !resolving && onSelected != null;
@@ -162,12 +164,5 @@ class OnlineTrackTile extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String _formatDuration(int milliseconds) {
-    final duration = Duration(milliseconds: milliseconds);
-    final minutes = duration.inMinutes;
-    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
   }
 }

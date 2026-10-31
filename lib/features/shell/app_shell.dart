@@ -252,19 +252,6 @@ class _DesktopNavigation extends StatelessWidget {
                   ),
                 ),
               const Spacer(),
-              // if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
-              //   Padding(
-              //     padding: const EdgeInsets.all(16),
-              //     child: Builder(
-              //       builder: (context) => Text(
-              //         'Windows 本地模式',
-              //         style: TextStyle(
-              //           color: Theme.of(context).colorScheme.onSurfaceVariant,
-              //           fontSize: 12,
-              //         ),
-              //       ),
-              //     ),
-              //   ),
             ],
           ),
         ),

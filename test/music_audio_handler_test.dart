@@ -108,6 +108,32 @@ void main() {
     );
     expect(handler.mediaItem.value?.id, 'new');
   });
+
+  test(
+    'local playback fills the current artwork lazily from the loader',
+    () async {
+      final cover = Uint8List.fromList([0x0A, 0x0B, 0x0C]);
+      final requested = <String>[];
+      final lazyPlayer = FakeAudioPlayer();
+      final lazyHandler = MusicAudioHandler(
+        player: lazyPlayer,
+        loadArtwork: (trackId) async {
+          requested.add(trackId);
+          return trackId == 'a' ? cover : null;
+        },
+      );
+      addTearDown(lazyHandler.disposePlayer);
+
+      await lazyHandler.playTracks([_local('a'), _local('b')]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // 队列项只携带标量字段，封面按当前曲目单独取一次。
+      expect(requested, ['a']);
+      expect(lazyHandler.mediaItem.value?.id, 'a');
+      expect(lazyHandler.mediaItem.value?.extras?['artwork'], cover);
+      expect(lazyHandler.queue.value.first.extras?['artwork'], cover);
+    },
+  );
 }
 
 Track _local(String id) => Track(

@@ -35,7 +35,10 @@ class LibraryScanController extends ChangeNotifier {
             : await _scanner.scan();
         if (result == null) return null;
         await _database.transaction(() async {
-          await _database.upsertTracks(result.tracks.map(_toCompanion));
+          await _database.upsertTracks(
+            result.tracks.map(_toCompanion),
+            artworks: _artworksOf(result.tracks),
+          );
           await _saveSource(result);
         });
         return (
@@ -66,6 +69,7 @@ class LibraryScanController extends ChangeNotifier {
             await _database.replaceScanSourceTracks(
               source,
               result.tracks.map(_toCompanion),
+              artworks: _artworksOf(result.tracks),
             );
             await _saveSource(result, previous: source);
           });
@@ -192,10 +196,15 @@ TracksCompanion _toCompanion(ScannedTrack track) => TracksCompanion.insert(
   artist: Value(track.artist),
   album: Value(track.album),
   durationMs: Value(track.durationMs),
-  artwork: Value(track.artwork),
   lyrics: Value(track.lyrics),
   fileSize: Value(track.fileSize),
   modifiedAt: Value(track.modifiedAt),
   contentFingerprint: Value(track.contentFingerprint),
   updatedAt: DateTime.now(),
 );
+
+/// 封面单独写进 `track_artworks`。这里保留 null 值：重扫时元数据里没有封面，
+/// 就应该清掉旧图，而不是留下上一版扫描的封面。
+Map<String, Uint8List?> _artworksOf(Iterable<ScannedTrack> tracks) => {
+  for (final track in tracks) track.id: track.artwork,
+};

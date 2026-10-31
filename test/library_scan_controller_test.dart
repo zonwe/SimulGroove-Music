@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -93,7 +94,56 @@ void main() {
       expect((await db.allTracks()).single.id, 'track');
     },
   );
+
+  test(
+    'scan writes artwork to its own table and a cover-less rescan clears it',
+    () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      final cover = Uint8List.fromList([0x0A, 0x0B, 0x0C]);
+      final controller = LibraryScanController(
+        db,
+        FakeLibraryScanner(scanResult: _scanResultWithArtwork(cover)),
+        FakeScanNotificationService(),
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await db.close();
+      });
+
+      await controller.scan();
+      expect(await db.trackArtwork('track'), cover);
+
+      // 文件元数据里没有封面时，重扫必须清掉上一版的图，而不是留下旧封面。
+      final secondController = LibraryScanController(
+        db,
+        FakeLibraryScanner(scanResult: _scanResultWithArtwork(null)),
+        FakeScanNotificationService(),
+      );
+      addTearDown(secondController.dispose);
+      await secondController.scan();
+
+      expect(await db.trackArtwork('track'), isNull);
+      expect((await db.allTracks()).single.id, 'track');
+    },
+  );
 }
+
+ScanResult _scanResultWithArtwork(Uint8List? artwork) => ScanResult(
+  tracks: [
+    ScannedTrack(
+      id: 'track',
+      sourceType: 'test',
+      sourceId: 'track',
+      uri: 'test://track',
+      title: 'track',
+      artist: '',
+      album: '',
+      artwork: artwork,
+    ),
+  ],
+  sourceUri: 'test://music',
+  sourceLabel: 'Music',
+);
 
 class _DelayedScanner extends FakeLibraryScanner {
   final result = Completer<ScanResult?>();

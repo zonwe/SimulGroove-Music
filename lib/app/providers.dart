@@ -100,11 +100,18 @@ final onlineSearchControllerProvider = Provider<OnlineSearchController>((ref) {
   ref.onDispose(controller.dispose);
   return controller;
 });
-final onlineSearchShowArtworkProvider = StreamProvider<bool>(
-  (ref) => ref
-      .watch(databaseProvider)
-      .watchSettings()
-      .map(onlineSearchShowArtworkFromSettings),
+
+/// `AppSettings` 的单一订阅。
+///
+/// 设置页和播放器有十几处派生设置值；如果每个都自己 `watchSettings()`，
+/// 一次写入就会产生同样数量的独立查询和流事件。这里只保留一条查询，
+/// 其余派生 Provider 共享它的 `AsyncValue`。
+final settingsProvider = StreamProvider<Map<String, String>>(
+  (ref) => ref.watch(databaseProvider).watchSettings(),
+);
+final onlineSearchShowArtworkProvider = Provider<AsyncValue<bool>>(
+  (ref) =>
+      ref.watch(settingsProvider).whenData(onlineSearchShowArtworkFromSettings),
 );
 final onlineTrackPlaybackProvider = Provider<OnlineTrackPlayback>(
   (ref) => DefaultOnlineTrackPlayback(
@@ -122,8 +129,10 @@ final onlineTrackDownloaderProvider = Provider<OnlineTrackDownloader>(
     readSetting: (key) => ref.read(databaseProvider).readSetting(key),
     writeSetting: (key, value) =>
         ref.read(databaseProvider).setSetting(key, value),
-    saveDownloadedTrack: (track) =>
-        ref.read(databaseProvider).upsertTracks([track]),
+    saveDownloadedTrack: (track, {artwork}) =>
+        ref.read(databaseProvider).upsertTracks([
+          track,
+        ], artworks: artwork == null ? null : {track.id.value: artwork}),
   ),
 );
 final onlineTrackArtworkProvider = FutureProvider.autoDispose
@@ -139,34 +148,51 @@ final onlineTrackArtworkProvider = FutureProvider.autoDispose
 final tracksProvider = StreamProvider<List<Track>>(
   (ref) => ref.watch(databaseProvider).watchTracks(),
 );
+
+/// 单曲封面。
+///
+/// 封面拆到 `track_artworks` 之后，列表只查标量列；界面按可见行用这个 family
+/// 单独取图，离开屏幕后自动释放，内存不再随音乐库规模增长。
+final trackArtworkProvider = FutureProvider.autoDispose
+    .family<Uint8List?, String>(
+      (ref, trackId) => ref.watch(databaseProvider).trackArtwork(trackId),
+    );
 final accountProvider = StreamProvider<Account?>(
   (ref) => ref.watch(databaseProvider).watchCurrentAccount(),
 );
 
 /// 当前生效的后端服务器地址（AppSettings 优先，编译期注入兜底），供账号页展示与编辑。
-final backendBaseUrlProvider = StreamProvider<String>(
+final backendBaseUrlProvider = Provider<AsyncValue<String>>(
   (ref) => ref
-      .watch(databaseProvider)
-      .watchSettings()
-      .map(
+      .watch(settingsProvider)
+      .whenData(
         (settings) => normalizeBackendBaseUrl(
           settings[backendBaseUrlSettingKey] ?? defaultBackendBaseUrl,
         ),
-      )
-      .distinct(),
+      ),
 );
 final playlistsProvider = StreamProvider<List<Playlist>>(
   (ref) => ref.watch(databaseProvider).watchPlaylists(),
 );
+
+/// 单个歌单的曲目流。
+///
+/// 页面里不要在 `build` 中直接 `ref.read(db).watchPlaylistTracks(...)`：
+/// 每次重建都会新建一条流和一次查询，滚动或本地状态变化时会反复重订阅。
+/// autoDispose 保证离开页面的歌单不再常驻订阅。
+final playlistTracksProvider = StreamProvider.autoDispose
+    .family<List<Track>, String>(
+      (ref, playlistId) =>
+          ref.watch(databaseProvider).watchPlaylistTracks(playlistId),
+    );
 final scanSourcesProvider = StreamProvider<List<ScanSource>>(
   (ref) => ref.watch(databaseProvider).watchScanSources(),
 );
 final onlineDownloadFilenameFormatProvider =
-    StreamProvider<OnlineDownloadFilenameFormat>(
+    Provider<AsyncValue<OnlineDownloadFilenameFormat>>(
       (ref) => ref
-          .watch(databaseProvider)
-          .watchSettings()
-          .map(
+          .watch(settingsProvider)
+          .whenData(
             (settings) => parseOnlineDownloadFilenameFormat(
               settings[onlineDownloadFilenameFormatSettingKey],
             ),
@@ -178,38 +204,31 @@ final likedTracksProvider = StreamProvider<List<Track>>(
 final likedTrackIdsProvider = StreamProvider<Set<String>>(
   (ref) => ref.watch(databaseProvider).watchLikedTrackIds(),
 );
-final appearanceProvider = StreamProvider<AppAppearance>(
-  (ref) => ref
-      .watch(databaseProvider)
-      .watchSettings()
-      .map(AppAppearance.fromSettings),
+final appearanceProvider = Provider<AsyncValue<AppAppearance>>(
+  (ref) => ref.watch(settingsProvider).whenData(AppAppearance.fromSettings),
 );
-final nowPlayingLayoutProvider = StreamProvider<NowPlayingLayout>(
+final nowPlayingLayoutProvider = Provider<AsyncValue<NowPlayingLayout>>(
   (ref) => ref
-      .watch(databaseProvider)
-      .watchSettings()
-      .map(
+      .watch(settingsProvider)
+      .whenData(
         (settings) =>
             parseNowPlayingLayout(settings[nowPlayingLayoutSettingKey]),
       ),
 );
-final lyricsTapToSeekEnabledProvider = StreamProvider<bool>(
-  (ref) => ref
-      .watch(databaseProvider)
-      .watchSettings()
-      .map(lyricsTapToSeekEnabledFromSettings),
+final lyricsTapToSeekEnabledProvider = Provider<AsyncValue<bool>>(
+  (ref) =>
+      ref.watch(settingsProvider).whenData(lyricsTapToSeekEnabledFromSettings),
 );
-final lyricsTapToSeekConfirmProvider = StreamProvider<bool>(
-  (ref) => ref
-      .watch(databaseProvider)
-      .watchSettings()
-      .map(lyricsTapToSeekConfirmFromSettings),
+final lyricsTapToSeekConfirmProvider = Provider<AsyncValue<bool>>(
+  (ref) =>
+      ref.watch(settingsProvider).whenData(lyricsTapToSeekConfirmFromSettings),
 );
-final trayMinimizeOnCloseProvider = StreamProvider<bool>(
+final trayMinimizeOnCloseProvider = Provider<AsyncValue<bool>>(
   (ref) => ref
-      .watch(databaseProvider)
-      .watchSettings()
-      .map((settings) => settings[trayMinimizeOnCloseSettingKey] != 'false'),
+      .watch(settingsProvider)
+      .whenData(
+        (settings) => settings[trayMinimizeOnCloseSettingKey] != 'false',
+      ),
 );
 
 /// 应用内更新：Windows 安装版使用静默安装；其他平台返回不支持。
@@ -220,26 +239,19 @@ final appUpdateServiceProvider = Provider<AppUpdateService>((ref) {
 });
 
 /// 自动检查更新开关：启动时最多每 24 小时检查一次。
-final updateAutoCheckProvider = StreamProvider<bool>(
-  (ref) => ref
-      .watch(databaseProvider)
-      .watchSettings()
-      .map(updateAutoCheckFromSettings),
+final updateAutoCheckProvider = Provider<AsyncValue<bool>>(
+  (ref) => ref.watch(settingsProvider).whenData(updateAutoCheckFromSettings),
 );
 
 /// 自动下载更新开关：默认关闭，开启后才在后台下载新版本。
-final updateAutoDownloadProvider = StreamProvider<bool>(
-  (ref) => ref
-      .watch(databaseProvider)
-      .watchSettings()
-      .map(updateAutoDownloadFromSettings),
+final updateAutoDownloadProvider = Provider<AsyncValue<bool>>(
+  (ref) => ref.watch(settingsProvider).whenData(updateAutoDownloadFromSettings),
 );
 
-final scanNotificationEnabledProvider = StreamProvider<bool>(
+final scanNotificationEnabledProvider = Provider<AsyncValue<bool>>(
   (ref) => ref
-      .watch(databaseProvider)
-      .watchSettings()
-      .map(
+      .watch(settingsProvider)
+      .whenData(
         (settings) => settings[scanNotificationEnabledSettingKey] != 'false',
       ),
 );

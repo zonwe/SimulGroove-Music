@@ -30,10 +30,10 @@ Future<void> main() async {
   );
   final MusicAudioHandler audioHandler;
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-    audioHandler = MusicAudioHandler();
+    audioHandler = MusicAudioHandler(loadArtwork: database.trackArtwork);
   } else {
     audioHandler = await AudioService.init<MusicAudioHandler>(
-      builder: MusicAudioHandler.new,
+      builder: () => MusicAudioHandler(loadArtwork: database.trackArtwork),
       config: AudioServiceConfig(
         androidNotificationChannelId: 'top.zonwe.simul_groove_player.playback',
         androidNotificationChannelName: '音乐播放',

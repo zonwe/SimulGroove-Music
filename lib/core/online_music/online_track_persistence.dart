@@ -24,7 +24,6 @@ TracksCompanion onlineTrackPlaceholder(OnlineTrack track) {
 TracksCompanion downloadedOnlineTrack(
   OnlineTrack track,
   DownloadedOnlineFile file, {
-  Uint8List? artwork,
   String? lyrics,
 }) => TracksCompanion.insert(
   id: onlineTrackLibraryId(track),
@@ -36,7 +35,6 @@ TracksCompanion downloadedOnlineTrack(
   artist: Value(track.artists.isEmpty ? '未知艺术家' : track.artists.join('、')),
   album: Value(track.album.isEmpty ? '未知专辑' : track.album),
   durationMs: Value(track.durationMs),
-  artwork: Value(artwork),
   lyrics: Value(lyrics),
   fileSize: Value(file.bytes > 0 ? file.bytes : null),
   modifiedAt: Value(DateTime.now()),

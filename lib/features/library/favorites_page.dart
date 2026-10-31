@@ -62,7 +62,7 @@ class _FavoriteTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) => ListTile(
     minTileHeight: 64,
-    leading: ArtworkView(bytes: track.artwork),
+    leading: TrackArtworkView(trackId: track.id),
     title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
     subtitle: Text(
       '${track.artist} · ${track.album}',

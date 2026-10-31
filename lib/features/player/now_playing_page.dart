@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../core/format/duration_text.dart';
 import '../../core/player/lyrics_settings.dart';
 import '../../core/player/now_playing_layout.dart';
 import '../../core/window/desktop_window_controller.dart';
@@ -202,8 +203,16 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
                                             mainAxisAlignment:
                                                 MainAxisAlignment.spaceBetween,
                                             children: [
-                                              Text(_format(position)),
-                                              Text(_format(duration)),
+                                              Text(
+                                                formatPlaybackDuration(
+                                                  position,
+                                                ),
+                                              ),
+                                              Text(
+                                                formatPlaybackDuration(
+                                                  duration,
+                                                ),
+                                              ),
                                             ],
                                           ),
                                         ],
@@ -264,10 +273,4 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
       },
     );
   }
-}
-
-String _format(Duration duration) {
-  final minutes = duration.inMinutes;
-  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return '$minutes:$seconds';
 }

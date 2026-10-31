@@ -216,29 +216,6 @@ class IoLibraryScanner implements LibraryScanner {
     final trimmed = value?.trim();
     return trimmed == null || trimmed.isEmpty ? null : trimmed;
   }
-
-  Uint8List? _compactArtwork(Uint8List? bytes) {
-    if (bytes == null || bytes.isEmpty) return null;
-    try {
-      final decoded = image.decodeImage(bytes);
-      if (decoded == null) return bytes.length <= 512 * 1024 ? bytes : null;
-      final longestSide = decoded.width > decoded.height
-          ? decoded.width
-          : decoded.height;
-      final thumbnail = longestSide > 320
-          ? image.copyResize(
-              decoded,
-              width: decoded.width >= decoded.height ? 320 : null,
-              height: decoded.height > decoded.width ? 320 : null,
-              interpolation: image.Interpolation.average,
-            )
-          : decoded;
-      return Uint8List.fromList(image.encodeJpg(thumbnail, quality: 70));
-    } catch (error) {
-      AppLog.debug('封面解码失败，按大小决定保留或丢弃', error);
-      return bytes.length <= 512 * 1024 ? bytes : null;
-    }
-  }
 }
 
 Map<String, String?> _readEmbeddedLyricsByPath(List<String> paths) {
@@ -304,7 +281,7 @@ Future<ScanResult> scanDesktopDirectory(
         artist: _cleanDesktopValue(metadata?.artist, '未知艺术家'),
         album: _cleanDesktopValue(metadata?.album, '未知专辑'),
         durationMs: metadata?.duration?.inMilliseconds,
-        artwork: _compactDesktopArtwork(
+        artwork: _compactArtwork(
           metadata?.pictures.isEmpty ?? true
               ? null
               : metadata!.pictures.first.bytes,
@@ -381,7 +358,12 @@ String? _cleanDesktopLyrics(String? value) {
   return trimmed == null || trimmed.isEmpty ? null : trimmed;
 }
 
-Uint8List? _compactDesktopArtwork(Uint8List? bytes) {
+/// 把封面压到最长边 320 像素的 JPEG。
+///
+/// Android（MediaStore/Document Tree）与 Windows/Linux 扫描共用同一份实现：
+/// 原始大图直接进 SQLite 会让音乐库数据库和列表查询内存一起膨胀。解码失败时
+/// 只有体积较小的原图才保留，避免把损坏的大封面写进数据库。
+Uint8List? _compactArtwork(Uint8List? bytes) {
   if (bytes == null || bytes.isEmpty) return null;
   try {
     final decoded = image.decodeImage(bytes);

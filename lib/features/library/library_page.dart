@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
+import '../../core/format/duration_text.dart';
 import '../../core/library/artist_names.dart';
 import '../../core/library/library_track_filter.dart';
 import '../../core/player/track_directory.dart';
@@ -240,7 +241,7 @@ class _SongList extends ConsumerWidget {
                   value: selectedTrackIds.contains(track.id),
                   onChanged: (_) => onToggleSelected(track),
                 )
-              : ArtworkView(bytes: track.artwork),
+              : TrackArtworkView(trackId: track.id),
           title: Text(
             track.title,
             maxLines: 1,
@@ -255,7 +256,7 @@ class _SongList extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                _duration(track.durationMs),
+                formatTrackDuration(track.durationMs),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               PopupMenuButton<String>(
@@ -305,6 +306,9 @@ class _GroupGrid extends StatelessWidget {
         groups.putIfAbsent(name, () => []).add(track);
       }
     }
+    // Map.entries.elementAt 会为每个可见格子从头迭代一次，滚动时退化成 O(n²)；
+    // 先物化成列表，索引就变成 O(1)。
+    final entries = groups.entries.toList(growable: false);
     return GridView.builder(
       padding: const EdgeInsets.only(bottom: 18),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -313,9 +317,9 @@ class _GroupGrid extends StatelessWidget {
         crossAxisSpacing: 14,
         mainAxisSpacing: 14,
       ),
-      itemCount: groups.length,
+      itemCount: entries.length,
       itemBuilder: (context, index) {
-        final entry = groups.entries.elementAt(index);
+        final entry = entries[index];
         final first = entry.value.first;
         return Card(
           clipBehavior: Clip.antiAlias,
@@ -333,8 +337,8 @@ class _GroupGrid extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Center(
-                      child: ArtworkView(
-                        bytes: first.artwork,
+                      child: TrackArtworkView(
+                        trackId: first.id,
                         size: 160,
                         borderRadius: 10,
                       ),
@@ -388,14 +392,6 @@ class _EmptyLibrary extends StatelessWidget {
       ],
     ),
   );
-}
-
-String _duration(int? milliseconds) {
-  if (milliseconds == null) return '--:--';
-  final duration = Duration(milliseconds: milliseconds);
-  final minutes = duration.inMinutes;
-  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return '$minutes:$seconds';
 }
 
 /// 歌曲操作菜单条目，供列表按钮与右键菜单复用，保证两处行为一致。

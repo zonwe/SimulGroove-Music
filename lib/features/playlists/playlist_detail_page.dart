@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/database/app_database.dart';
+import '../../core/format/duration_text.dart';
 import '../library/artwork_view.dart';
 import '../library/collection_page.dart';
 import '../player/playback_navigation.dart';
@@ -21,178 +22,169 @@ class PlaylistDetailPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return StreamBuilder<List<Track>>(
-      stream: ref.read(databaseProvider).watchPlaylistTracks(playlist.id),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(child: Text('歌单读取失败：${snapshot.error}'));
-        }
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final tracks = snapshot.data!;
-        final likedIds =
-            ref.watch(likedTrackIdsProvider).asData?.value ?? const <String>{};
-        return SafeArea(
-          bottom: false,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final compact = constraints.maxWidth < 600;
-              final headerTextScale =
-                  (MediaQuery.textScalerOf(context).scale(16) / 16).clamp(
-                    1.0,
-                    1.4,
-                  );
-              return CustomScrollView(
-                slivers: [
-                  SliverPersistentHeader(
-                    pinned: true,
-                    delegate: _PlaylistHeaderDelegate(
-                      playlist: playlist,
-                      tracks: tracks,
-                      compact: compact,
-                      textScale: headerTextScale,
-                      onBack: onBack,
-                      onPlay: tracks.isEmpty
-                          ? null
-                          : () => playOrOpenNowPlaying(
-                              context,
-                              ref,
-                              tracks,
-                              initialIndex: 0,
-                            ),
-                    ),
-                  ),
-                  if (tracks.isEmpty)
-                    const SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: _EmptyPlaylist(),
-                    )
-                  else ...[
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 22, 24, 10),
-                        child: Text(
-                          '歌曲  ${tracks.length}',
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
+    final tracksAsync = ref.watch(playlistTracksProvider(playlist.id));
+    if (tracksAsync.hasError) {
+      return Center(child: Text('歌单读取失败：${tracksAsync.error}'));
+    }
+    final tracks = tracksAsync.value;
+    if (tracks == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final likedIds =
+        ref.watch(likedTrackIdsProvider).asData?.value ?? const <String>{};
+    return SafeArea(
+      bottom: false,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 600;
+          final headerTextScale =
+              (MediaQuery.textScalerOf(context).scale(16) / 16).clamp(1.0, 1.4);
+          return CustomScrollView(
+            slivers: [
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _PlaylistHeaderDelegate(
+                  playlist: playlist,
+                  tracks: tracks,
+                  compact: compact,
+                  textScale: headerTextScale,
+                  onBack: onBack,
+                  onPlay: tracks.isEmpty
+                      ? null
+                      : () => playOrOpenNowPlaying(
+                          context,
+                          ref,
+                          tracks,
+                          initialIndex: 0,
                         ),
+                ),
+              ),
+              if (tracks.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _EmptyPlaylist(),
+                )
+              else ...[
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 22, 24, 10),
+                    child: Text(
+                      '歌曲  ${tracks.length}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 0, 24),
-                      sliver: SliverList.builder(
-                        itemCount: tracks.length * 2 - 1,
-                        itemBuilder: (context, itemIndex) {
-                          if (itemIndex.isOdd) {
-                            return const Divider(height: 1, indent: 76);
-                          }
-                          final index = itemIndex ~/ 2;
-                          final track = tracks[index];
-                          return GestureDetector(
-                            onSecondaryTapDown: (details) =>
-                                _showPlaylistTrackMenu(
-                                  context,
-                                  ref,
-                                  playlist,
-                                  tracks,
-                                  track,
-                                  index,
-                                  details.globalPosition,
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 0, 24),
+                  sliver: SliverList.builder(
+                    itemCount: tracks.length * 2 - 1,
+                    itemBuilder: (context, itemIndex) {
+                      if (itemIndex.isOdd) {
+                        return const Divider(height: 1, indent: 76);
+                      }
+                      final index = itemIndex ~/ 2;
+                      final track = tracks[index];
+                      return GestureDetector(
+                        onSecondaryTapDown: (details) => _showPlaylistTrackMenu(
+                          context,
+                          ref,
+                          playlist,
+                          tracks,
+                          track,
+                          index,
+                          details.globalPosition,
+                        ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.only(left: 12),
+                          minTileHeight: 68,
+                          leading: TrackArtworkView(
+                            trackId: track.id,
+                            size: 48,
+                          ),
+                          title: Text(
+                            track.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            '${track.artist} · ${track.album}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                formatTrackDuration(track.durationMs),
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              IconButton(
+                                tooltip: likedIds.contains(track.id)
+                                    ? '取消喜欢'
+                                    : '喜欢',
+                                icon: Icon(
+                                  likedIds.contains(track.id)
+                                      ? Icons.favorite
+                                      : Icons.favorite_border,
                                 ),
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.only(left: 12),
-                              minTileHeight: 68,
-                              leading: ArtworkView(
-                                bytes: track.artwork,
-                                size: 48,
-                              ),
-                              title: Text(
-                                track.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Text(
-                                '${track.artist} · ${track.album}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    _trackDuration(track.durationMs),
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall,
-                                  ),
-                                  IconButton(
-                                    tooltip: likedIds.contains(track.id)
-                                        ? '取消喜欢'
-                                        : '喜欢',
-                                    icon: Icon(
-                                      likedIds.contains(track.id)
-                                          ? Icons.favorite
-                                          : Icons.favorite_border,
+                                onPressed: () => ref
+                                    .read(databaseProvider)
+                                    .setTrackLiked(
+                                      track.id,
+                                      !likedIds.contains(track.id),
                                     ),
-                                    onPressed: () => ref
-                                        .read(databaseProvider)
-                                        .setTrackLiked(
-                                          track.id,
-                                          !likedIds.contains(track.id),
-                                        ),
+                              ),
+                              PopupMenuButton<String>(
+                                position: PopupMenuPosition.under,
+                                offset: const Offset(-160, 4),
+                                tooltip: '更多操作',
+                                onSelected: (value) async {
+                                  if (value == 'artist') {
+                                    await openArtistCollectionPage(
+                                      context,
+                                      tracks,
+                                      track.artist,
+                                    );
+                                  } else if (value == 'album') {
+                                    openCollectionPage(
+                                      context,
+                                      tracks,
+                                      CollectionKind.album,
+                                      track.album,
+                                    );
+                                  }
+                                },
+                                itemBuilder: (_) => [
+                                  PopupMenuItem(
+                                    value: 'artist',
+                                    child: Text('查看歌手：${track.artist}'),
                                   ),
-                                  PopupMenuButton<String>(
-                                    position: PopupMenuPosition.under,
-                                    offset: const Offset(-160, 4),
-                                    tooltip: '更多操作',
-                                    onSelected: (value) async {
-                                      if (value == 'artist') {
-                                        await openArtistCollectionPage(
-                                          context,
-                                          tracks,
-                                          track.artist,
-                                        );
-                                      } else if (value == 'album') {
-                                        openCollectionPage(
-                                          context,
-                                          tracks,
-                                          CollectionKind.album,
-                                          track.album,
-                                        );
-                                      }
-                                    },
-                                    itemBuilder: (_) => [
-                                      PopupMenuItem(
-                                        value: 'artist',
-                                        child: Text('查看歌手：${track.artist}'),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'album',
-                                        child: Text('查看专辑：${track.album}'),
-                                      ),
-                                    ],
+                                  PopupMenuItem(
+                                    value: 'album',
+                                    child: Text('查看专辑：${track.album}'),
                                   ),
                                 ],
                               ),
-                              onTap: () => playOrOpenNowPlaying(
-                                context,
-                                ref,
-                                tracks,
-                                initialIndex: index,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ],
-              );
-            },
-          ),
-        );
-      },
+                            ],
+                          ),
+                          onTap: () => playOrOpenNowPlaying(
+                            context,
+                            ref,
+                            tracks,
+                            initialIndex: index,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -373,8 +365,8 @@ class _ExpandedPlaylistHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          ArtworkView(
-            bytes: tracks.firstOrNull?.artwork,
+          TrackArtworkView(
+            trackId: tracks.firstOrNull?.id,
             size: artworkSize,
             borderRadius: 10,
           ),
@@ -453,14 +445,6 @@ class _EmptyPlaylist extends StatelessWidget {
       ),
     ),
   );
-}
-
-String _trackDuration(int? milliseconds) {
-  if (milliseconds == null) return '--:--';
-  final duration = Duration(milliseconds: milliseconds);
-  final minutes = duration.inMinutes;
-  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return '$minutes:$seconds';
 }
 
 String _playlistSummary(int count, int milliseconds) {

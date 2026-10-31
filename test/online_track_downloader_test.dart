@@ -29,7 +29,9 @@ void main() {
             ? 'test://downloads'
             : null,
         writeSetting: (_, _) async {},
-        saveDownloadedTrack: (track) => db.upsertTracks([track]),
+        saveDownloadedTrack: (track, {artwork}) => db.upsertTracks([
+          track,
+        ], artworks: artwork == null ? null : {track.id.value: artwork}),
       );
       const track = OnlineTrack(
         provider: 'source',
@@ -50,7 +52,7 @@ void main() {
       expect(remaining, isEmpty);
       expect(platform.fileNames, hasLength(1));
       final indexed = (await db.allTracks()).single;
-      expect(indexed.artwork, isNotEmpty);
+      expect(await db.trackArtwork(indexed.id), isNotEmpty);
       expect(indexed.lyrics, '[00:01]lyrics');
     },
   );
@@ -63,7 +65,7 @@ void main() {
       platform: platform,
       readSetting: (key) async => settings[key],
       writeSetting: (key, value) async => settings[key] = value,
-      saveDownloadedTrack: (track) async => savedTracks.add(track),
+      saveDownloadedTrack: (track, {artwork}) async => savedTracks.add(track),
     );
 
     final destination = await downloader.chooseDestination();
@@ -107,7 +109,7 @@ void main() {
           _ => null,
         },
         writeSetting: (_, _) async {},
-        saveDownloadedTrack: (_) async {},
+        saveDownloadedTrack: (_, {artwork}) async {},
       );
 
       final result = await downloader.downloadAll(const [_track]);
@@ -132,7 +134,7 @@ void main() {
         _ => null,
       },
       writeSetting: (_, _) async {},
-      saveDownloadedTrack: (_) async {},
+      saveDownloadedTrack: (_, {artwork}) async {},
     );
 
     final result = await downloader.downloadAll(const [

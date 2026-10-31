@@ -27,7 +27,7 @@ class RecognitionPage extends StatelessWidget {
             Text('听歌识曲', style: Theme.of(context).textTheme.headlineMedium),
             const SizedBox(height: 10),
             const Text(
-              '入口和麦克风权限声明已经预留，识别引擎将在后续版本接入。',
+              '入口已经预留，识别引擎将在后续版本接入；当前版本不申请麦克风权限。',
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),

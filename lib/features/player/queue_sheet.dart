@@ -125,7 +125,8 @@ class PlaybackQueuePanel extends StatelessWidget {
                                 selectedTileColor: Theme.of(
                                   context,
                                 ).colorScheme.secondaryContainer,
-                                leading: ArtworkView(
+                                leading: TrackArtworkView(
+                                  trackId: item.id,
                                   bytes: item.extras?['artwork'] as Uint8List?,
                                   size: 48,
                                 ),

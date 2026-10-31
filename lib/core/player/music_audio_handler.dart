@@ -19,8 +19,11 @@ export 'playback_queue_logic.dart' show PlaybackMode;
 
 class MusicAudioHandler extends BaseAudioHandler
     with QueueHandler, SeekHandler {
-  MusicAudioHandler({ja.AudioPlayer? player})
-    : _player = player ?? _createPlayer() {
+  MusicAudioHandler({
+    ja.AudioPlayer? player,
+    Future<Uint8List?> Function(String trackId)? loadArtwork,
+  }) : _player = player ?? _createPlayer(),
+       _artworkLoader = loadArtwork {
     _subscriptions.add(
       _player.playbackEventStream.listen(
         _handlePlaybackEvent,
@@ -46,6 +49,11 @@ class MusicAudioHandler extends BaseAudioHandler
         : null,
   );
   final ja.AudioPlayer _player;
+
+  /// 按曲目 id 读取封面。封面已拆到独立表，队列不再一次性把整库封面带进内存，
+  /// 只在当前曲目切换时按需取一张。
+  final Future<Uint8List?> Function(String trackId)? _artworkLoader;
+  final Set<String> _artworkLoading = {};
   final _errors = StreamController<String>.broadcast();
   int _queueRequest = 0;
   final List<StreamSubscription<Object?>> _subscriptions = [];
@@ -216,7 +224,7 @@ class MusicAudioHandler extends BaseAudioHandler
     await play();
   }
 
-  MediaItem _toMediaItem(Track track) {
+  MediaItem _toMediaItem(Track track, [Uint8List? artwork]) {
     return MediaItem(
       id: track.id,
       title: track.title,
@@ -229,7 +237,7 @@ class MusicAudioHandler extends BaseAudioHandler
         'uri': track.uri,
         'lyrics': track.lyrics,
         'sourceType': track.sourceType,
-        'artwork': track.artwork,
+        'artwork': artwork,
       },
     );
   }
@@ -238,12 +246,40 @@ class MusicAudioHandler extends BaseAudioHandler
     if (_rebuildingQueue) return;
     final items = queue.value;
     if (index != null && index >= 0 && index < items.length) {
-      mediaItem.add(items[index]);
-      final bytes = items[index].extras?['artwork'];
-      if (items[index].artUri == null && bytes is Uint8List) {
-        unawaited(_cacheCurrentArtwork(items[index].id, bytes, _queueRequest));
+      final item = items[index];
+      mediaItem.add(item);
+      final bytes = item.extras?['artwork'];
+      if (item.artUri == null && bytes is Uint8List) {
+        unawaited(_cacheCurrentArtwork(item.id, bytes, _queueRequest));
+      } else if (bytes == null) {
+        _ensureCurrentArtwork(item);
       }
     }
+  }
+
+  /// 懒加载当前曲目的封面：先补进队列项（供正在播放页使用），再写入通知缓存。
+  void _ensureCurrentArtwork(MediaItem item) {
+    final loader = _artworkLoader;
+    if (loader == null || !_artworkLoading.add(item.id)) return;
+    final request = _queueRequest;
+    unawaited(() async {
+      try {
+        final bytes = await loader(item.id);
+        if (bytes == null || request != _queueRequest) return;
+        final current = mediaItem.value;
+        if (current?.id != item.id) return;
+        _replaceItem(
+          current!.copyWith(extras: {...?current.extras, 'artwork': bytes}),
+        );
+        if (current.artUri == null) {
+          await _cacheCurrentArtwork(current.id, bytes, request);
+        }
+      } catch (error, stackTrace) {
+        AppLog.warning('读取曲目封面失败', error, stackTrace);
+      } finally {
+        _artworkLoading.remove(item.id);
+      }
+    }());
   }
 
   Future<void> updateOnlineTrackMetadata({

@@ -128,59 +128,55 @@ class _PlaylistCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return StreamBuilder<List<Track>>(
-      stream: ref.read(databaseProvider).watchPlaylistTracks(playlist.id),
-      builder: (context, snapshot) {
-        final tracks = snapshot.data ?? const <Track>[];
-        return Card(
-          clipBehavior: Clip.antiAlias,
-          child: ListTile(
-            minTileHeight: 72,
-            contentPadding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
-            leading: ArtworkView(
-              bytes: tracks.firstOrNull?.artwork,
-              size: 52,
-              borderRadius: 8,
-            ),
-            title: Text(
-              playlist.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            subtitle: Text(tracks.isEmpty ? '暂无歌曲' : '${tracks.length} 首歌曲'),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (playlist.syncState == 'synced')
-                  const Tooltip(
-                    message: '已同步到后台',
-                    child: Icon(Icons.cloud_done_outlined, size: 20),
+    final tracks =
+        ref.watch(playlistTracksProvider(playlist.id)).value ?? const <Track>[];
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        minTileHeight: 72,
+        contentPadding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+        leading: TrackArtworkView(
+          trackId: tracks.firstOrNull?.id,
+          size: 52,
+          borderRadius: 8,
+        ),
+        title: Text(
+          playlist.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(tracks.isEmpty ? '暂无歌曲' : '${tracks.length} 首歌曲'),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (playlist.syncState == 'synced')
+              const Tooltip(
+                message: '已同步到后台',
+                child: Icon(Icons.cloud_done_outlined, size: 20),
+              ),
+            PopupMenuButton<String>(
+              tooltip: '歌单操作',
+              onSelected: (value) {
+                if (value == 'delete') {
+                  _deletePlaylist(context, ref, playlist);
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'delete',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.delete_outline),
+                    title: Text('删除歌单'),
                   ),
-                PopupMenuButton<String>(
-                  tooltip: '歌单操作',
-                  onSelected: (value) {
-                    if (value == 'delete') {
-                      _deletePlaylist(context, ref, playlist);
-                    }
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.delete_outline),
-                        title: Text('删除歌单'),
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
-            onTap: onOpen,
-          ),
-        );
-      },
+          ],
+        ),
+        onTap: onOpen,
+      ),
     );
   }
 }

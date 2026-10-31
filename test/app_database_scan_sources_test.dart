@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
@@ -119,6 +120,11 @@ void main() {
       await fileDatabase.customStatement(
         'ALTER TABLE tracks DROP COLUMN content_fingerprint',
       );
+      // v4 的封面还内嵌在 tracks 里；把它加回来再升级，才能覆盖真实的旧库形态。
+      await fileDatabase.customStatement(
+        'ALTER TABLE tracks ADD COLUMN artwork BLOB',
+      );
+      await fileDatabase.customStatement('DROP TABLE track_artworks');
       await fileDatabase.customStatement('PRAGMA user_version = 4');
       await fileDatabase.close();
 
@@ -134,6 +140,75 @@ void main() {
       expect(
         columns.map((row) => row.read<String>('name')),
         contains('content_fingerprint'),
+      );
+    },
+  );
+
+  test(
+    'schema 5 moves embedded artwork into track_artworks without losing links',
+    () async {
+      final warnBefore = driftRuntimeOptions.dontWarnAboutMultipleDatabases;
+      driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+      addTearDown(() {
+        driftRuntimeOptions.dontWarnAboutMultipleDatabases = warnBefore;
+      });
+
+      final directory = await Directory.systemTemp.createTemp(
+        'flutter_music_schema_5_',
+      );
+      final file = File('${directory.path}/music.db');
+      addTearDown(() async {
+        if (await directory.exists()) await directory.delete(recursive: true);
+      });
+      final cover = Uint8List.fromList([0x0A, 0x0B, 0x0C]);
+
+      var fileDatabase = AppDatabase.forTesting(NativeDatabase(file));
+      await fileDatabase.upsertTracks(
+        [_track(id: 'kept', path: r'C:\Music\kept.mp3')],
+        artworks: {'kept': cover},
+      );
+      await fileDatabase.createPlaylist(
+        PlaylistsCompanion.insert(
+          id: 'list',
+          name: 'list',
+          createdAt: DateTime(2026),
+          updatedAt: DateTime(2026),
+        ),
+      );
+      await fileDatabase.addTrackToPlaylist('list', 'kept');
+      await fileDatabase.setTrackLiked('kept', true);
+
+      // 还原成 v5：封面回到 tracks 列，独立表不存在。
+      await fileDatabase.customStatement('DROP TABLE track_artworks');
+      await fileDatabase.customStatement(
+        'ALTER TABLE tracks ADD COLUMN artwork BLOB',
+      );
+      await fileDatabase.customStatement(
+        "UPDATE tracks SET artwork = X'0A0B0C' WHERE id = 'kept'",
+      );
+      await fileDatabase.customStatement('PRAGMA user_version = 5');
+      await fileDatabase.close();
+
+      fileDatabase = AppDatabase.forTesting(NativeDatabase(file));
+      addTearDown(fileDatabase.close);
+
+      expect(await fileDatabase.trackArtwork('kept'), cover);
+      final columns = await fileDatabase
+          .customSelect('PRAGMA table_info(tracks)')
+          .get();
+      expect(
+        columns.map((row) => row.read<String>('name')),
+        isNot(contains('artwork')),
+      );
+      // 重建 tracks 表时不能级联删掉歌单条目和喜欢关系。
+      expect(
+        (await fileDatabase.playlistTracks('list')).map((track) => track.id),
+        ['kept'],
+      );
+      expect(await fileDatabase.watchLikedTrackIds().first, {'kept'});
+      expect(
+        await fileDatabase.customSelect('PRAGMA foreign_key_check').get(),
+        isEmpty,
       );
     },
   );

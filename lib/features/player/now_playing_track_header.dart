@@ -86,19 +86,30 @@ class NowPlayingTrackTitleRow extends ConsumerWidget {
           ),
         ),
         const SizedBox(width: 4),
-        StreamBuilder<Set<String>>(
-          stream: ref.read(databaseProvider).watchLikedTrackIds(),
-          builder: (context, likedSnapshot) {
-            final liked = likedSnapshot.data?.contains(item.id) ?? false;
-            return IconButton(
-              tooltip: liked ? '取消喜欢' : '喜欢',
-              icon: Icon(liked ? Icons.favorite : Icons.favorite_border),
-              onPressed: () =>
-                  ref.read(databaseProvider).setTrackLiked(item.id, !liked),
-            );
-          },
-        ),
+        _LikedToggle(trackId: item.id),
       ],
+    );
+  }
+}
+
+/// 喜欢按钮。
+///
+/// 不要在 `build` 里 `ref.read(db).watchLikedTrackIds()`：StreamBuilder 每次重建
+/// 都会新建一条流和一次查询；共用 `likedTrackIdsProvider` 只保留一条订阅。
+class _LikedToggle extends ConsumerWidget {
+  const _LikedToggle({required this.trackId});
+
+  final String trackId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final liked =
+        ref.watch(likedTrackIdsProvider).value?.contains(trackId) ?? false;
+    return IconButton(
+      tooltip: liked ? '取消喜欢' : '喜欢',
+      icon: Icon(liked ? Icons.favorite : Icons.favorite_border),
+      onPressed: () =>
+          ref.read(databaseProvider).setTrackLiked(trackId, !liked),
     );
   }
 }

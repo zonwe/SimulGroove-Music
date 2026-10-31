@@ -36,7 +36,8 @@ String serializeOnlineDownloadFilenameFormat(
 
 typedef ReadDownloadSetting = Future<String?> Function(String key);
 typedef WriteDownloadSetting = Future<void> Function(String key, String value);
-typedef SaveDownloadedTrack = Future<void> Function(TracksCompanion track);
+typedef SaveDownloadedTrack =
+    Future<void> Function(TracksCompanion track, {Uint8List? artwork});
 
 class OnlineDownloadProgress {
   const OnlineDownloadProgress({
@@ -268,8 +269,8 @@ class DefaultOnlineTrackDownloader
               downloadedOnlineTrack(
                 track,
                 file,
-                artwork: bytes,
               ).copyWith(lyrics: const Value.absent()),
+              artwork: bytes,
             );
             if (companion != null) {
               final type = _artworkType(bytes);
@@ -284,11 +285,7 @@ class DefaultOnlineTrackDownloader
             final lyrics = await _repository.loadLyrics(track);
             if (lyrics == null) continue;
             await _saveDownloadedTrack(
-              downloadedOnlineTrack(
-                track,
-                file,
-                lyrics: lyrics,
-              ).copyWith(artwork: const Value.absent()),
+              downloadedOnlineTrack(track, file, lyrics: lyrics),
             );
             if (companion != null) {
               await companion.saveCompanion(
