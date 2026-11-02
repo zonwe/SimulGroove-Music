@@ -40,6 +40,8 @@ services:
       OnlineMusic__AllowedSources__0: "${ONLINE_MUSIC_SOURCE_0:-}"
       OnlineMusic__AllowedSources__1: "${ONLINE_MUSIC_SOURCE_1:-}"
       OnlineMusic__AllowedSources__2: "${ONLINE_MUSIC_SOURCE_2:-}"
+      OnlineMusic__AllowedSources__3: "${ONLINE_MUSIC_SOURCE_3:-}"
+      OnlineMusic__AllowedSources__4: "${ONLINE_MUSIC_SOURCE_4:-}"
     healthcheck:
       test:
         - CMD-SHELL
