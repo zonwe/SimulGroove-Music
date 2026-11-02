@@ -8,6 +8,8 @@
 
 2026-10-31：完成一轮性能与工程卫生整理。本地已通过 `dart format`、`flutter analyze`（0 告警）、209 项 Flutter 测试、83 项后端测试（0 编译告警）以及 Windows/Web Release 构建。主要变化：封面从 `Tracks` 拆到独立的 `track_artworks` 表（schema v6，含 v5→v6 迁移与歌单/喜欢引用不丢失的回归测试），列表查询不再随曲目读取整库封面，界面按可见行取图、播放队列按当前曲目懒加载封面；设置写入只触发一条 `AppSettings` 查询（原先每个派生设置各起一条流）；列表页不再在 `build` 中重复建立歌单/喜欢订阅；专辑与艺术家网格索引由 O(n²) 改为 O(1)；封面按显示尺寸解码；扫描来源重建与同步占位清理改用分块删除与 `NOT EXISTS`，避免大库触碰 SQLite 变量上限；同步不再逐歌单建立流订阅；后端转发头配置抽成可测的 `ForwardedHeadersSetup`，统一到 `.NET 10` 的 `KnownIPNetworks` 并补上“默认只信任回环、不采信 `X-Forwarded-Host`”的回归测试；Android 清单移除未使用的 `RECORD_AUDIO`。
 
+2026-11-02：在线搜索免登录、搜索游标分页、客户端固定正式后端与自动检查/自动下载拆分上线；同步链路修复跨设备歌单重复曲目主键冲突，曲目匹配并列时按时长决胜，删除墓碑会撤回全部同内容副本。版本号推进到 `1.2.0+5`，发布说明见 [v1.2.0](docs/releases/v1.2.0.md)。本地已通过 `dart format`、`flutter analyze`（0 问题）、232 项 Flutter 测试、88 项后端测试、Windows Release 构建、Inno Setup 安装器编译、三个 ABI 的 Android Release APK（固定发布密钥签名校验）与 Web Release 构建。
+
 ## 当前功能
 
 - Android：通过系统目录选择器授权一个或多个音乐文件夹并递归扫描，也可选择扫描整台设备；支持后台播放、媒体通知、锁屏/耳机媒体控制与音频焦点。
@@ -30,7 +32,7 @@
 - 在线音乐：通过 `Music.Api` 聚合受控来源，搜索不要求登录（匿名请求按来源 IP 限流），点击搜索按钮后请求，搜索结果以紧凑两行展示并可整行点击播放，封面可在设置中关闭；右键或长按结果会打开歌曲菜单，可查看歌手/专辑集合与封面、选择歌曲或下载单曲。搜索、歌手和专辑页面都可批量加入新建或已有歌单；Windows/Linux/Android 可在设置页指定系统授权目录、选择下载文件命名规则并批量下载，支持的音频格式优先内嵌封面与歌词，无法内嵌时保存同名封面或 `.lrc`，下载完成后立即进入本地音乐库；在线播放与下载仍需登录，Web 暂不开放需要认证请求头的播放和下载。
 - 在线音乐运维：区分 `/health` 存活检查与 `/health/ready` 依赖就绪检查；支持安全的 `X-Correlation-ID`、低基数 .NET `Meter` 指标、可选 OTLP 导出和连续瞬时失败熔断；来源复核门禁见 [在线音乐来源授权与发布复核](docs/online_music_release_review.md)。
 - 应用更新：Windows 安装版和 Android 默认开启自动检查更新（最多每 24 小时一次），但不会默认下载；可在设置中单独开启“自动下载更新”。手动确认下载或开启自动下载后，更新包会校验 SHA-256，安装前再请求确认；也可在设置页手动检查。Windows 退出应用后由更新助手静默运行安装器并重启；Android 交给系统安装界面确认安装（需要允许安装未知应用，且相邻版本必须使用同一签名）。更新源为 GitHub Release 的 `latest.json`。详见 [发布、安装器与应用内更新](docs/release_and_updates.md)。
-- 占位入口：听歌识曲（已声明麦克风权限但未实现）。
+- 占位入口：听歌识曲（功能未实现，清单中不声明 `RECORD_AUDIO`）。
 - Web：提供响应式界面、真实后端登录与在线搜索；按当前需求不提供本地目录扫描和本地播放。
 
 本地在线搜索联调需先在另一个终端启动项目内的 sidecar clone：
@@ -141,7 +143,7 @@ adb install -r build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 Drift 表结构变化后重新生成代码：
 
 ```powershell
-dart run build_runner build --delete-conflicting-outputs
+dart run build_runner build
 ```
 
 当前 Android 模拟器配置为 1280×2772、480 dpi、x86_64、8 核、12 GB RAM；CPU/RAM 修改在模拟器下次冷启动后生效。ARM64 发布/兼容性由 Redmi K80 Ultra 实机验证。

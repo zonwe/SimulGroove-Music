@@ -34,10 +34,10 @@ tag v1.1.0 / 手动触发
 1. 修改 `pubspec.yaml`：
 
    ```yaml
-   version: 1.1.0+5
+   version: 1.2.0+5
    ```
 
-   - `1.1.0` 是语义版本，对应 Git tag `v1.1.0`。
+   - `1.2.0` 是语义版本，对应 Git tag `v1.2.0`。
    - `5` 是构建号：Windows 资源版本与 Android `versionName` 中的 `+build` 都取自它；Flutter 还会按 ABI 给 Android `versionCode` 加千位偏移。**每次发布必须递增**，否则 Android 会拒绝安装降级包。
 2. 打 tag 或手动运行 `.github/workflows/release.yml`。工作流会校验 `pubspec.yaml` 的版本与 tag/输入一致。
 3. 发布说明优先读取 `docs/releases/v<version>.md`；没有时使用工作流输入或自动生成的简短说明。
@@ -164,7 +164,7 @@ Android 只允许用与已安装版本相同的证书签名的新版 APK 覆盖�
 - 发布工作流使用 `flutter build apk --release --split-per-abi` 生成三个 APK。
 - 客户端只会下载与当前进程 ABI 匹配的 APK；模拟器通常对应 `android-x86_64`。
 - Android 系统按 `versionCode` 比较版本，`pubspec.yaml` 的 `+build` 必须递增。
-- Flutter 会按 ABI 给 `versionCode` 加千位偏移（arm64 的构建号 4 对应 2004，armeabi 对应 1004，x86_64 对应 4004）。应用内更新比较的是 `versionName` 中的 `+build`；Gradle 已把 `+<build>` 写入 `versionName`，因此 `package_info_plus` 返回 `1.1.0+4`，不会把 ABI 偏移误当成构建号。
+- Flutter 会按 ABI 给 `versionCode` 加千位偏移（arm64 的构建号 5 对应 2005，armeabi 对应 1005，x86_64 对应 4005）。应用内更新比较的是 `versionName` 中的 `+build`；Gradle 已把 `+<build>` 写入 `versionName`，因此 `package_info_plus` 返回 `1.2.0+5`，不会把 ABI 偏移误当成构建号。
 
 ## 6. `latest.json` 契约
 
@@ -245,8 +245,8 @@ powershell -ExecutionPolicy Bypass -File tool/build_update_manifest.ps1 `
 5. 推送 tag：
 
    ```powershell
-   git tag v1.1.0
-   git push origin v1.1.0
+   git tag v1.2.0
+   git push origin v1.2.0
    ```
 
    或在 Actions 中手动运行 `Release` 并填写版本号。
