@@ -650,7 +650,11 @@ class AppDatabase extends _$AppDatabase {
     required Iterable<String> trackIds,
     Iterable<TracksCompanion> missingTracks = const [],
   }) async {
-    final ids = trackIds.toList(growable: false);
+    // 同一首歌可能被多台设备以各自的 uri 上传，服务端按
+    // (username, remote_id, uri) 存储，拉回本机后这些条目会解析成同一个
+    // trackId。歌单主键是 (playlistId, trackId)，重复插入会让整个同步事务
+    // 失败；这里按首次出现顺序去重，保留远端条目的先后关系。
+    final ids = trackIds.toSet().toList(growable: false);
     final tracksToInsert = missingTracks.toList(growable: false);
     await transaction(() async {
       await into(playlists).insertOnConflictUpdate(
@@ -683,12 +687,16 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
-  Future<void> deleteUnreferencedSyncedTrackPlaceholders() async {
+  /// 清理没有被任何歌单或喜欢引用的在线曲目占位。
+  ///
+  /// 占位行由歌单同步与在线搜索以 `source_type = 'online'` 写入，已下载副本会
+  /// 改写成真实文件来源，因此不会被这里误删；本地扫描来源的曲目同样不受影响。
+  Future<void> deleteUnreferencedOnlineTrackPlaceholders() async {
     // `NOT IN (大量 id)` 会随歌单/喜欢规模一起增长，并有变量数量上限；
     // 相关子查询表达「没有任何引用」既不占内存也避免拼接超长参数列表。
     await customStatement('''
       DELETE FROM tracks
-      WHERE source_type = 'synced'
+      WHERE source_type = 'online'
         AND NOT EXISTS (
           SELECT 1 FROM playlist_entries
           WHERE playlist_entries.track_id = tracks.id

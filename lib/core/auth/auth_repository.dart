@@ -292,7 +292,7 @@ class BackendAuthRepository implements AuthRepository {
       );
       if (local == null) downloaded++;
     }
-    await _database.deleteUnreferencedSyncedTrackPlaceholders();
+    await _database.deleteUnreferencedOnlineTrackPlaceholders();
 
     var downloadedLikes = 0;
     for (final track in remote.likedTracks) {

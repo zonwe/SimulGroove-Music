@@ -710,10 +710,12 @@ void main() {
   test('unmatched cross-device path is not kept as unavailable song', () async {
     final updatedAt = DateTime(2026, 8, 24, 9);
     const remoteFileUri = 'file:///D:/Music/not-on-this-device.mp3';
+    // 远端独有曲目在本地落库时是 online 占位行（`_onlineTrackCompanion`），
+    // 这里预置一条同样来源的旧占位，验证匹配失败后它不会作为不可用歌曲残留。
     await database.upsertTracks([
       TracksCompanion.insert(
         id: 'old-placeholder',
-        sourceType: 'synced',
+        sourceType: 'online',
         sourceId: remoteFileUri,
         uri: remoteFileUri,
         title: 'Remote only',

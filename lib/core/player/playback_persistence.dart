@@ -38,10 +38,7 @@ class PlaybackPersistence with WidgetsBindingObserver {
         if (saved != null) {
           final tracks = (await _database.tracksByIds(saved.baseIds))
               .where(
-                (track) =>
-                    track.isAvailable &&
-                    track.sourceType != 'online' &&
-                    track.sourceType != 'synced',
+                (track) => track.isAvailable && track.sourceType != 'online',
               )
               .toList();
           // Restore a usable current track without probing the entire library.
