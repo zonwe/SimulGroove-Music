@@ -219,15 +219,24 @@ class BackendAuthRepository implements AuthRepository {
             playlistByRemoteId.remove(deletion.remoteKey);
           }
         case SyncEntityType.likedTrack:
-          final matchedTrack = isTrackMatchToken(deletion.remoteKey)
-              ? localTrackMatcher.findKnownByMatchToken(deletion.remoteKey)
-              : localTrackMatcher.findKnownByUri(deletion.remoteKey);
-          final local = matchedTrack == null
-              ? null
-              : likeByUri[matchedTrack.uri];
-          if (local != null && !local.updatedAt.isAfter(deletion.deletedAt)) {
-            await _database.setTrackLikedFromSync(local.track.id, false);
-            likeByUri.remove(local.track.uri);
+          // 同一份内容可能有多份本地副本，令牌墓碑要把每一份的喜欢都撤回；
+          // URI 墓碑仍然只对应一个曲目。
+          final matchedTracks = <Track>{};
+          if (isTrackMatchToken(deletion.remoteKey)) {
+            matchedTracks.addAll(
+              localTrackMatcher.findKnownByMatchTokens(deletion.remoteKey),
+            );
+          } else {
+            final byUri = localTrackMatcher.findKnownByUri(deletion.remoteKey);
+            if (byUri != null) matchedTracks.add(byUri);
+          }
+          for (final matchedTrack in matchedTracks) {
+            final local = likeByUri[matchedTrack.uri];
+            if (local == null || local.updatedAt.isAfter(deletion.deletedAt)) {
+              continue;
+            }
+            await _database.setTrackLikedFromSync(matchedTrack.id, false);
+            likeByUri.remove(matchedTrack.uri);
           }
         case SyncEntityType.equalizerPreset:
           final local = presetByRemoteId[deletion.remoteKey];

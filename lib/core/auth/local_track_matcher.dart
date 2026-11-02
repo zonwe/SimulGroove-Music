@@ -70,10 +70,13 @@ class LocalTrackMatcher {
 
   Track? findKnownByUri(String uri) => _knownByUri[uri];
 
-  Track? findKnownByMatchToken(String token) {
-    final matches = _knownTracksByMatchToken[token];
-    return matches?.length == 1 ? matches!.single : null;
-  }
+  /// 与盲匹配令牌对应的全部已索引曲目（含不可用曲目）。
+  ///
+  /// 同一份内容可能存在多份本地副本，删除墓碑必须覆盖全部副本，所以这里返回
+  /// 列表而不是要求唯一命中；加入歌单/喜欢仍走 [findByMatchToken] 的唯一性
+  /// 约束，避免挑错版本。
+  List<Track> findKnownByMatchTokens(String token) =>
+      List.unmodifiable(_knownTracksByMatchToken[token] ?? const <Track>[]);
 
   Track? findByMatchToken(String token) {
     final matches = _tracksByMatchToken[token];
@@ -112,19 +115,44 @@ class LocalTrackMatcher {
 
     Track? best;
     var bestScore = -1;
+    var bestDurationDelta = 0;
     var ambiguous = false;
     for (final candidate in candidates.values) {
       final score = _syncMatchScore(remote, candidate);
+      if (score < 0) continue;
+      final durationDelta = _durationDelta(remote, candidate);
       if (score > bestScore) {
         best = candidate;
         bestScore = score;
+        bestDurationDelta = durationDelta;
         ambiguous = false;
-      } else if (score >= 0 && score == bestScore) {
+        continue;
+      }
+      if (score < bestScore) continue;
+      // 得分并列时用时长接近程度决胜（原版/母带/现场的差别通常只有一两秒），
+      // 仍然持平才判为歧义。
+      if (durationDelta < bestDurationDelta) {
+        best = candidate;
+        bestDurationDelta = durationDelta;
+        ambiguous = false;
+      } else if (durationDelta == bestDurationDelta) {
         ambiguous = true;
       }
     }
     return bestScore < 0 || ambiguous ? null : best;
   }
+}
+
+/// 双方时长都未知时的占位差值，比任何真实差值都大。
+const _unknownDurationDelta = 1 << 30;
+
+int _durationDelta(BackendTrack remote, Track local) {
+  final remoteDuration = remote.durationMs;
+  final localDuration = local.durationMs;
+  if (remoteDuration == null || localDuration == null) {
+    return _unknownDurationDelta;
+  }
+  return (remoteDuration - localDuration).abs();
 }
 
 int _syncMatchScore(BackendTrack remote, Track local) {

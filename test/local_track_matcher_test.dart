@@ -128,8 +128,32 @@ void main() {
         ),
         isNull,
       );
-      expect(matcher.findKnownByMatchToken(token), same(track));
+      expect(matcher.findKnownByMatchTokens(token).single, same(track));
       expect(matcher.findKnownByUri('file:///D:/Music/gone.mp3'), same(track));
+    });
+
+    test('同内容多份副本时令牌墓碑能拿到全部副本', () {
+      final first = _local(
+        'first',
+        uri: 'file:///D:/Music/song.mp3',
+        contentFingerprint: _fingerprint,
+      );
+      final second = _local(
+        'second',
+        uri: 'content://media/external/audio/media/9',
+        sourceType: 'android_media_store',
+        contentFingerprint: _fingerprint,
+      );
+      final matcher = LocalTrackMatcher([
+        first,
+        second,
+      ], trackMatchKey: _matchKey);
+
+      expect(
+        matcher.findKnownByMatchTokens(matcher.matchTokenFor(first)!),
+        hasLength(2),
+      );
+      expect(matcher.findKnownByMatchTokens('hmac-sha256:missing'), isEmpty);
     });
   });
 
@@ -241,6 +265,54 @@ void main() {
       ], trackMatchKey: _matchKey);
 
       expect(matcher.find(_remote(uri: 'file:///D:/Music/three.mp3')), isNull);
+    });
+
+    test('得分并列时按时长差最小者决胜', () {
+      final farther = _local(
+        'farther',
+        uri: 'file:///D:/Music/one.mp3',
+        durationMs: 180000,
+      );
+      final closer = _local(
+        'closer',
+        uri: 'file:///D:/Music/two.mp3',
+        durationMs: 182000,
+      );
+      final matcher = LocalTrackMatcher([
+        farther,
+        closer,
+      ], trackMatchKey: _matchKey);
+
+      expect(
+        matcher.find(
+          _remote(uri: 'file:///D:/Music/three.mp3', durationMs: 182500),
+        ),
+        same(closer),
+      );
+    });
+
+    test('得分并列且时长差相等时仍视为歧义', () {
+      final first = _local(
+        'first',
+        uri: 'file:///D:/Music/one.mp3',
+        durationMs: 181000,
+      );
+      final second = _local(
+        'second',
+        uri: 'file:///D:/Music/two.mp3',
+        durationMs: 182000,
+      );
+      final matcher = LocalTrackMatcher([
+        first,
+        second,
+      ], trackMatchKey: _matchKey);
+
+      expect(
+        matcher.find(
+          _remote(uri: 'file:///D:/Music/three.mp3', durationMs: 181500),
+        ),
+        isNull,
+      );
     });
 
     test('完全找不到依据时返回 null', () {

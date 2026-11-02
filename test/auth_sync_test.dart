@@ -1084,6 +1084,64 @@ void main() {
     expect(await database.watchLikedTrackIds().first, isEmpty);
   });
 
+  test('云端盲匹配令牌墓碑会撤回全部同内容副本的喜欢', () async {
+    final likedAt = DateTime(2026, 8, 24, 8);
+    const fingerprint =
+        'sha256:77777777777777777777777777777777'
+        '77777777777777777777777777777777';
+    final matchToken = createTrackMatchToken(
+      contentFingerprint: fingerprint,
+      trackMatchKey: _trackMatchKey,
+    )!;
+    await database.upsertTracks([
+      TracksCompanion.insert(
+        id: 'copy-fingerprint-a',
+        sourceType: 'android_media_store',
+        sourceId: '45',
+        uri: 'content://media/external/audio/media/45',
+        title: 'Song',
+        contentFingerprint: const Value(fingerprint),
+        updatedAt: likedAt,
+      ),
+      TracksCompanion.insert(
+        id: 'copy-fingerprint-b',
+        sourceType: 'windows_file',
+        sourceId: r'D:\Music\song.mp3',
+        uri: 'file:///D:/Music/song.mp3',
+        title: 'Song',
+        contentFingerprint: const Value(fingerprint),
+        updatedAt: likedAt,
+      ),
+    ]);
+    await database.setTrackLikedFromSync(
+      'copy-fingerprint-a',
+      true,
+      updatedAt: likedAt,
+    );
+    await database.setTrackLikedFromSync(
+      'copy-fingerprint-b',
+      true,
+      updatedAt: likedAt,
+    );
+    gateway.response = BackendLibrary(
+      playlists: const [],
+      likedTracks: const [],
+      deletions: [
+        BackendDeletion(
+          entityType: SyncEntityType.likedTrack,
+          remoteKey: matchToken,
+          deletedAt: likedAt.add(const Duration(minutes: 1)),
+        ),
+      ],
+    );
+
+    await repository.syncNow();
+
+    // 令牌对两份副本都成立，删除墓碑必须把两份喜欢一起撤回，不能因为
+    // “令牌不唯一”而放任任何一份继续喜欢。
+    expect(await database.watchLikedTrackIds().first, isEmpty);
+  });
+
   test('云端盲匹配令牌墓碑会撤回不可用曲目的本地喜欢', () async {
     final likedAt = DateTime(2026, 8, 24, 8);
     const fingerprint =
