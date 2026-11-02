@@ -593,3 +593,12 @@ docker compose --env-file .env -f compose.online-music.nginx.yml config
 - `docs/releases/v<version>.md`：Release body 与 `latest.json` 的 notes 来源。
 
 文档必须描述仓库真实状态。实验代码存在不等于已接入产品；某个平台能够编译也不等于已完成实际功能验证。
+
+## 20. Git 提交与推送约定
+
+- 所有提交信息必须使用中文描述，格式为 `type(scope): 中文说明`，例如 `chore(online-search): 清空搜索框后保留上次结果`。
+- `type` 沿用 Conventional Commits：`feat`、`fix`、`docs`、`chore`、`refactor`、`test`、`build`、`perf`、`style`；`scope` 用英文短横线命名并指向模块或功能（如 `online-search`、`update`），范围不明确时可省略为 `type: 中文说明`。
+- 说明部分只写中文，直接说清改了什么行为或为什么改，不加句号；避免「update」「修改代码」这类没有信息量的描述。
+- 一个提交只做一件事：不把无关改动、生成物、运行数据库、密钥或本地临时文件混进同一次提交。
+- 提交前完成与改动范围相称的验证；推送前确认当前分支和远端，禁止强推 `main`、`release/*` 或 tag。
+- 已推送的提交不要用 amend 或强推覆盖历史；需要修正时追加一次新的中文说明提交。
