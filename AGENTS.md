@@ -15,7 +15,7 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 - 通用功能：歌曲/专辑/艺术家视图、搜索、封面、歌词、播放队列、歌单、喜欢、10 段均衡器、扫描通知、主题外观和设置持久化。
 - 实验性后端：`backend/Music.Api` 提供 ASP.NET Core + SQLite 的认证、歌单/喜欢/均衡器预设与删除墓碑同步、服务器目录扫描、在线音乐 BFF 和审计日志接口；在线音乐链路已具备存活/就绪检查、关联 ID、低基数指标和进程内熔断。
 - 应用更新：Windows 安装版与 Android 默认开启自动检查更新（最多每 24 小时一次，可在设置中关闭），自动下载默认关闭、需显式开启；下载后校验 SHA-256，安装前请求确认。Windows 由更新助手静默升级并重启，Android 下载 APK 后交给系统安装界面；更新源为 GitHub Release 的 `latest.json`。Linux/Web 暂不支持应用内更新。
-- 发布状态：`v1.1.0`（tag `v1.1.0`）已通过 GitHub Release 工作流发布；Android 从 v1.0.0 的 debug 证书切换到固定发布密钥，v1.0.0 → v1.1.0 需要卸载一次（清除应用数据），之后必须保持同一密钥。
+- 发布状态：`v1.2.0`（tag `v1.2.0`）已由 GitHub Release 工作流发布（run 41471721344），此前 `v1.1.0`（run 39596997713）已跑通同一流程。v1.0.0 使用 debug 证书，升级到 v1.1.0 时需卸载一次（清除应用数据）；v1.1.0 起使用固定发布密钥，v1.1.0 → v1.2.0 可直接覆盖安装，之后必须保持同一密钥。
 
 以下内容尚未视为完整产品能力：
 
@@ -65,7 +65,7 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 | `build_command/build_installer.ps1` | Windows 安装器构建入口 | 需要 Inno Setup 6；脚本用 UTF-8 BOM 保存以兼容 Windows PowerShell 5.1 |
 | `tool/build_update_manifest.ps1` | 生成 `latest.json` | 资产名、URL、SHA-256 必须与 Release 实际文件一致 |
 | `tool/generate_android_keystore.ps1` | 生成 Android 发布密钥并输出 CI secrets | 现有发布密钥已生成；仅在首次配置或明确轮换时使用，不要覆盖 |
-| `.github/workflows/release.yml` | tag/手动发布安装器、APK、`latest.json` 与校验和 | `v1.1.0` 已实际跑通；Android 签名 secrets 缺失时必须失败 |
+| `.github/workflows/release.yml` | tag/手动发布安装器、APK、`latest.json` 与校验和 | `v1.1.0`、`v1.2.0` 已实际跑通；Android 签名 secrets 缺失时必须失败 |
 | `.github/workflows/ci.yml` | 推送/PR 的质量门禁：actionlint、格式、分析、测试、Web 冒烟、后端测试、Android Debug、Windows Release、部署配置校验、手动 Linux Release | 修改它与本地命令时保持同一套检查；Linux 任务默认跳过，只有手动勾选 `run_linux` 才执行 |
 | `.github/workflows/android-device-acceptance.yml` | 真机验收：拒绝模拟器、校验 ARM64 APK 与签名、安装启动并留证据 | 深度回归仍需真实设备；脚本不做主观判定 |
 | `.github/workflows/production-acceptance.yml` | 生产部署验收：证书、告警路由、Fire/Resolve 证据与来源审批 | 真实域名、通知接收方与来源批准由目标环境提供 |
@@ -390,7 +390,7 @@ dotnet run --project backend/Music.Api/Music.Api.csproj --urls http://localhost:
 2. 确认本机 keystore / `android/key.properties` 和离线备份仍可用；**不要重新生成密钥**。只有明确轮换（会要求所有已安装用户卸载重装）时才使用 `tool/generate_android_keystore.ps1`。
 3. 同步 `README.md` 的功能/安装说明与 `docs/release_and_updates.md` 的契约或流程变化。
 4. 本地至少运行 `dart format --output=none --set-exit-if-changed lib test`、`flutter analyze`、`flutter test`、`flutter build windows --release` 和 `powershell -ExecutionPolicy Bypass -File build_command/build_installer.ps1`。
-5. 推送 `v<version>` tag 或手动运行 `Release` 工作流；`v1.1.0` 已由该流程发布（run 39596997713），后续沿用。工作流会校验 pubspec 与 tag 一致，生成安装器、便携包、三个 ABI 的 APK、`latest.json` 和 `SHA256SUMS.txt`。
+5. 推送 `v<version>` tag 或手动运行 `Release` 工作流；`v1.1.0`（run 39596997713）与 `v1.2.0`（run 41471721344）已由该流程发布，后续沿用。工作流会校验 pubspec 与 tag 一致，生成安装器、便携包、三个 ABI 的 APK、`latest.json` 和 `SHA256SUMS.txt`。
 6. 验证 Release 资产文件名与 `latest.json` 中的 URL 完全一致；`latest.json` 必须在该 Release 中，客户端才能通过 `releases/latest/download/latest.json` 取到。
 7. 用旧版本实际走一遍“检查更新 → 下载 → 校验 → 安装”，并确认升级后数据库仍在。
 

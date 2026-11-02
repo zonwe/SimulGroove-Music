@@ -8,7 +8,7 @@
 
 2026-10-31：完成一轮性能与工程卫生整理。本地已通过 `dart format`、`flutter analyze`（0 告警）、209 项 Flutter 测试、83 项后端测试（0 编译告警）以及 Windows/Web Release 构建。主要变化：封面从 `Tracks` 拆到独立的 `track_artworks` 表（schema v6，含 v5→v6 迁移与歌单/喜欢引用不丢失的回归测试），列表查询不再随曲目读取整库封面，界面按可见行取图、播放队列按当前曲目懒加载封面；设置写入只触发一条 `AppSettings` 查询（原先每个派生设置各起一条流）；列表页不再在 `build` 中重复建立歌单/喜欢订阅；专辑与艺术家网格索引由 O(n²) 改为 O(1)；封面按显示尺寸解码；扫描来源重建与同步占位清理改用分块删除与 `NOT EXISTS`，避免大库触碰 SQLite 变量上限；同步不再逐歌单建立流订阅；后端转发头配置抽成可测的 `ForwardedHeadersSetup`，统一到 `.NET 10` 的 `KnownIPNetworks` 并补上“默认只信任回环、不采信 `X-Forwarded-Host`”的回归测试；Android 清单移除未使用的 `RECORD_AUDIO`。
 
-2026-11-02：在线搜索免登录、搜索游标分页、客户端固定正式后端与自动检查/自动下载拆分上线；同步链路修复跨设备歌单重复曲目主键冲突，曲目匹配并列时按时长决胜，删除墓碑会撤回全部同内容副本。版本号推进到 `1.2.0+5`，发布说明见 [v1.2.0](docs/releases/v1.2.0.md)。本地已通过 `dart format`、`flutter analyze`（0 问题）、232 项 Flutter 测试、88 项后端测试、Windows Release 构建、Inno Setup 安装器编译、三个 ABI 的 Android Release APK（固定发布密钥签名校验）与 Web Release 构建。
+2026-11-02：在线搜索免登录、搜索游标分页、客户端固定正式后端与自动检查/自动下载拆分上线；同步链路修复跨设备歌单重复曲目主键冲突，曲目匹配并列时按时长决胜，删除墓碑会撤回全部同内容副本。版本号推进到 `1.2.0+5`，发布说明见 [v1.2.0](docs/releases/v1.2.0.md)。本地已通过 `dart format`、`flutter analyze`（0 问题）、232 项 Flutter 测试、88 项后端测试、Windows Release 构建、Inno Setup 安装器编译、三个 ABI 的 Android Release APK（固定发布密钥签名校验）与 Web Release 构建。GitHub Release 工作流已由 `v1.2.0` tag 实际跑通（[run 41471721344](https://github.com/zonwe/SimulGroove-Music/actions/runs/41471721344)），[v1.2.0](https://github.com/zonwe/SimulGroove-Music/releases/tag/v1.2.0) 已发布安装器、便携包、三个 ABI APK、`latest.json` 与 `SHA256SUMS.txt`；回读清单为 `1.2.0+5`，资产地址与 Release 文件名一致，真实设备上的应用内升级仍待验收。
 
 ## 当前功能
 
