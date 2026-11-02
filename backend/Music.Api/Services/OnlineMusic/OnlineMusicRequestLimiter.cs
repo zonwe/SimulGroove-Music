@@ -6,6 +6,9 @@ namespace Music.Api.Services.OnlineMusic;
 public interface IOnlineMusicRequestLimiter
 {
     bool TryAcquire(string username, string? ipAddress);
+
+    /// <summary>匿名请求没有账号维度，只按来源 IP 计数。</summary>
+    bool TryAcquireAnonymous(string? ipAddress);
 }
 
 public sealed class OnlineMusicRequestLimiter(IOptions<OnlineMusicOptions> options) : IOnlineMusicRequestLimiter
@@ -18,6 +21,13 @@ public sealed class OnlineMusicRequestLimiter(IOptions<OnlineMusicOptions> optio
         var now = DateTimeOffset.UtcNow;
         if (!TryAcquire($"account:{username}", now)) return false;
         return string.IsNullOrWhiteSpace(ipAddress) || TryAcquire($"ip:{ipAddress}", now);
+    }
+
+    public bool TryAcquireAnonymous(string? ipAddress)
+    {
+        // 拿不到来源 IP 时退回共享计数桶，避免出现完全不限流的入口。
+        var key = string.IsNullOrWhiteSpace(ipAddress) ? "ip:unknown" : $"ip:{ipAddress}";
+        return TryAcquire(key, DateTimeOffset.UtcNow);
     }
 
     private bool TryAcquire(string key, DateTimeOffset now)

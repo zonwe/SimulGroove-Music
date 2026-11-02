@@ -27,11 +27,16 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 
 ### Flutter 客户端如何获得服务器地址
 
-客户端不内置任何默认地址，按以下优先级解析：
+客户端默认连接正式后端 `https://music.zonwe.top`，账号页不再提供地址输入框，地址只由编译期变量覆盖：
 
-1. 本地 `AppSettings` 中的 `backend.base_url`（在「账号」页的「高级设置」中填写并保存，保存后下一次请求立即生效；登录页默认不展示该地址）；
-2. 编译期注入的 `--dart-define=MUSIC_API_URL=...`；
-3. 两者都缺失时，账号页会提示「请填写服务器地址后登录」，请求会得到"尚未配置服务器地址"的明确错误。
+```dart
+const String.fromEnvironment(
+  'MUSIC_API_URL',
+  defaultValue: 'https://music.zonwe.top',
+)
+```
+
+本地联调（例如 `http://localhost:5080`）用 `--dart-define=MUSIC_API_URL=...` 构建。旧版本写入 Drift `AppSettings` 的 `backend.base_url` 不再读取，因此升级客户端后会直接连接默认地址。
 
 相关配置：
 
@@ -379,7 +384,7 @@ JWT 签名错误、受众不匹配或已过期时返回 `401`。
 
 ## 8. 在线音乐搜索与播放
 
-在线搜索采用 `Flutter -> Music.Api -> go-music-dl sidecar` 的 BFF 边界。除健康检查外，公开接口需要 Bearer Access Token。Flutter 不接触 sidecar 地址、第三方 Cookie、签名参数或原始播放 URL。
+在线搜索采用 `Flutter -> Music.Api -> go-music-dl sidecar` 的 BFF 边界。在线搜索本身不要求登录：没有有效 Access Token 时按匿名请求处理并按来源 IP 限流；来源列表、播放票据、歌词、封面和下载仍需要 Bearer Access Token。Flutter 不接触 sidecar 地址、第三方 Cookie、签名参数或原始播放 URL。
 
 部署环境必须显式审核 `OnlineMusic:Enabled`、私有 sidecar 地址和来源白名单。仓库内 `go-music-dl` clone 的集成提交 `11bfd8b` 基于上游提交 `c5a30343f12fafbad83245eee2119768a77be575` 实现了 JSON 集成契约；本地启动命令：
 
@@ -418,7 +423,7 @@ Development 配置默认启用 `netease`、`kugou`、`kuwo`。生产部署需要
 }
 ```
 
-`sources` 为空时搜索全部允许来源。成功响应包含稳定身份 `provider + trackId`、展示字段、可播放状态和来源级警告。单个来源失败时返回 `200` 且 `partial: true`；整体超时返回 `504 online_music_upstream_timeout`，限流返回 `429 online_music_rate_limited`。
+`sources` 为空时搜索全部允许来源。该接口不要求登录：没有有效 Access Token 时按匿名请求处理并按来源 IP 限流，有效令牌仍按账号 + IP 限流；未认证不会返回 `401`。成功响应包含稳定身份 `provider + trackId`、展示字段、可播放状态和来源级警告。单个来源失败时返回 `200` 且 `partial: true`；整体超时返回 `504 online_music_upstream_timeout`，限流返回 `429 online_music_rate_limited`。
 
 `limit` 是单页条数（1 到 `OnlineMusic:MaxResults`）。首屏搜索会对所选来源各请求一次，把结果按来源交错合并后缓存，再用 `nextCursor` 分页返回；把上一页的 `nextCursor` 原样传回即可继续加载，`nextCursor` 为空表示已经到底。游标是 sidecar 内部的短期结果页引用（默认 10 分钟），缓存过期或游标与当前 `query`/`sources` 不匹配时客户端会收到 `200` 空页，应按“没有更多”处理并停止重试。
 
@@ -489,7 +494,7 @@ Development 配置默认启用 `netease`、`kugou`、`kuwo`。生产部署需要
 仓库内 Flutter 客户端已经按以下规则接入，具体运行步骤和已知限制见 [`flutter_backend_integration.md`](flutter_backend_integration.md)：
 
 1. 登录后保存 `token`、`refreshToken` 和 `expiresAt`。
-2. API 请求使用 `token` 作为 Bearer Token。
+2. API 请求使用 `token` 作为 Bearer Token；在线搜索是唯一允许匿名的接口，未登录或会话刷新失败时不带 Authorization，按来源 IP 限流。
 3. Access Token 即将过期或接口返回 `401` 时，通过 `/api/auth/refresh` 刷新一次。
 4. 刷新成功后同时替换两个 Token；刷新失败则清除登录状态。
 5. 退出时调用 `/api/auth/logout`，随后清除本地两个 Token。

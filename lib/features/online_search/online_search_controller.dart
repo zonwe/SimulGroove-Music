@@ -47,18 +47,11 @@ class OnlineSearchController extends ChangeNotifier {
 
   OnlineSearchState get state => _state;
 
-  void clear() {
-    _generation++;
-    _setState(const OnlineSearchState.idle());
-  }
-
   Future<void> searchNow(String value) async {
-    final generation = ++_generation;
     final query = value.trim();
-    if (query.isEmpty) {
-      _setState(const OnlineSearchState.idle());
-      return;
-    }
+    // 空关键字不是一次新的搜索：保留已有结果，直到用户提交新的关键字。
+    if (query.isEmpty) return;
+    final generation = ++_generation;
     await _loadFirstPage(query, generation);
   }
 

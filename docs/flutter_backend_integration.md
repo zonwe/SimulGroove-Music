@@ -12,7 +12,7 @@
 - 退出登录调用 `/api/auth/logout`，即使服务不可用也会清理本地令牌和账号快照。
 - 本地歌单、喜欢歌曲、均衡器预设和删除墓碑通过 `/api/playlists/sync` 双向合并，服务端返回的较新版本会写回 Drift。
 - Flutter 客户端不承载服务器扫描管理；该功能位于 Music.Api 的 `/admin/scanning` Razor Pages 管理后台。
-- Windows、Linux、Android、Web 共用相同 Gateway/Repository；服务地址优先从账号页保存的运行时设置读取，也可由 `MUSIC_API_URL` 提供编译期兜底。
+- Windows、Linux、Android、Web 共用相同 Gateway/Repository；客户端默认连接 `https://music.zonwe.top`，地址只能由 `MUSIC_API_URL` 在编译期覆盖。
 - 在线搜索、播放票据、Range 音频代理、歌词、封面和下载都经 `Music.Api` 访问私有 sidecar；Flutter 不接触第三方 Cookie、原始资源 URL 或 sidecar 私有字段。
 
 尚未完成：
@@ -53,16 +53,16 @@ HttpBackendGateway   SecureAuthTokenStore
 
 ## 3. 后端地址配置
 
-客户端按“账号页保存的运行时地址 → `MUSIC_API_URL` 编译期兜底”的优先级解析后端地址。仓库不内置真实服务器地址，未配置时会在账号页提示用户填写：
+客户端默认连接正式后端 `https://music.zonwe.top`，登录页不再提供地址输入框，地址只由编译期变量覆盖：
 
 ```dart
 const String.fromEnvironment(
   'MUSIC_API_URL',
-  defaultValue: '',
+  defaultValue: 'https://music.zonwe.top',
 )
 ```
 
-账号页保存的地址写入 Drift `AppSettings` 的 `backend.base_url`，下一次请求立即生效并在重启后恢复。登录页默认把地址收进「高级设置」，已保存的地址不会直接显示；只有尚未配置时地址输入框才会自动展开。编译期变量适合开发调试或预置部署地址；两者同时存在时，运行时设置优先。
+账号页保存地址的功能已移除，旧版本写入 Drift `AppSettings` 的 `backend.base_url` 不再读取；需要连接本地或自建后端时，用 `--dart-define=MUSIC_API_URL=...` 重新构建，而不是在运行时填写。
 
 | 客户端 | 开发地址示例 | 说明 |
 | --- | --- | --- |
@@ -213,7 +213,7 @@ flutter test
 dotnet build backend/Music.Api/Music.Api.csproj --no-restore
 ```
 
-手工联调至少要覆盖：服务器地址保存与重启恢复、Flutter 登录成功、错误密码、Access Token 刷新、后端离线错误、退出、歌单/喜欢/均衡器预设同步、删除传播和较新修改恢复；扫描控制台还需覆盖登录、窄屏布局、路径越界、重复路径、立即扫描、启停计划、查看曲目和删除扫描源。
+手工联调至少要覆盖：默认后端地址生效、Flutter 登录成功、错误密码、Access Token 刷新、后端离线错误、退出、歌单/喜欢/均衡器预设同步、删除传播和较新修改恢复；扫描控制台还需覆盖登录、窄屏布局、路径越界、重复路径、立即扫描、启停计划、查看曲目和删除扫描源。
 
 后端完整接口契约见 [`api.md`](api.md)。
 

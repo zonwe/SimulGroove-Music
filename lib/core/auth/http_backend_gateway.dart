@@ -6,30 +6,19 @@ import 'package:http/http.dart' as http;
 import 'backend_gateway.dart';
 
 class HttpBackendGateway implements BackendGateway {
-  HttpBackendGateway({
-    String? baseUrl,
-    http.Client? client,
-    BackendBaseUrlReader? readBaseUrl,
-  }) : _fixedBaseUrl = baseUrl == null
-           ? null
-           : normalizeBackendBaseUrl(baseUrl),
-       _client = client ?? http.Client(),
-       _baseUrlReader = readBaseUrl;
+  HttpBackendGateway({String? baseUrl, http.Client? client})
+    : _fixedBaseUrl = baseUrl == null ? null : normalizeBackendBaseUrl(baseUrl),
+      _client = client ?? http.Client();
 
   static const _timeout = Duration(seconds: 15);
 
-  // 固定地址用于测试与编译期注入；生产路径优先读取 _baseUrlReader，
-  // 保证账号页保存地址后下一次请求立即生效，避免等待 Provider 重建。
+  // 固定地址只用于测试；生产路径直接用编译期默认地址（正式服务器，
+  // 可用 MUSIC_API_URL 覆盖），不再读取本地可编辑的设置。
   final String? _fixedBaseUrl;
-  final BackendBaseUrlReader? _baseUrlReader;
   final http.Client _client;
 
-  Future<String> _resolveBaseUrl() async {
-    if (_fixedBaseUrl != null) return _fixedBaseUrl;
-    return normalizeBackendBaseUrl(
-      await _baseUrlReader?.call() ?? defaultBackendBaseUrl,
-    );
-  }
+  String get _baseUrl =>
+      _fixedBaseUrl ?? normalizeBackendBaseUrl(defaultBackendBaseUrl);
 
   @override
   Future<BackendSession> signIn({
@@ -130,9 +119,9 @@ class HttpBackendGateway implements BackendGateway {
     String? token,
     Map<String, dynamic>? body,
   }) async {
-    final baseUrl = await _resolveBaseUrl();
+    final baseUrl = _baseUrl;
     if (baseUrl.isEmpty) {
-      throw const BackendException('尚未配置服务器地址，请在账号页填写后端地址。');
+      throw const BackendException('尚未配置服务器地址，请重新安装或使用 --dart-define 指定。');
     }
     final headers = <String, String>{
       'Accept': 'application/json',

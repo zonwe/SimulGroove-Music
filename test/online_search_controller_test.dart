@@ -76,18 +76,38 @@ void main() {
     controller.dispose();
   });
 
-  test('清空输入会保持空闲并忽略尚未返回的搜索', () async {
+  test('空关键字不会清空已有结果', () async {
+    final repository = _QueuedRepository();
+    final controller = OnlineSearchController(repository);
+
+    repository.completeNext(_result('Song'));
+    await controller.searchNow('Song');
+
+    await controller.searchNow('');
+    expect(controller.state.query, 'Song');
+    expect(_titles(controller), ['Song']);
+
+    await controller.searchNow('   ');
+    expect(controller.state.query, 'Song');
+    expect(_titles(controller), ['Song']);
+    controller.dispose();
+  });
+
+  test('空关键字不会取消尚未返回的搜索', () async {
     final repository = _DeferredRepository();
     final controller = OnlineSearchController(repository);
 
     final search = controller.searchNow('Song');
     await Future<void>.delayed(Duration.zero);
-    controller.clear();
+    await controller.searchNow('');
+
+    expect(controller.state.status, OnlineSearchStatus.loading);
+
     repository.complete('Song', _result('Late Song'));
     await search;
 
-    expect(controller.state.status, OnlineSearchStatus.idle);
-    expect(controller.state.items, isEmpty);
+    expect(controller.state.status, OnlineSearchStatus.data);
+    expect(_titles(controller), ['Late Song']);
     controller.dispose();
   });
 

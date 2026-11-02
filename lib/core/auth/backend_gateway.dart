@@ -1,22 +1,18 @@
 import '../database/app_database.dart';
 import 'track_match_token.dart';
 
-/// 编译期注入的后端地址兜底值。仓库内不再包含任何真实内网 IP，
-/// 运行时地址优先读取 AppSettings（backend.base_url，账号页可配置）。
+/// 客户端连接的后端地址。
+///
+/// 默认固定指向正式服务器，账号页不再提供可编辑的运行时地址，避免客户端
+/// 连到未知主机；本地联调仍可用 `--dart-define=MUSIC_API_URL=...` 覆盖。
 const defaultBackendBaseUrl = String.fromEnvironment(
   'MUSIC_API_URL',
-  defaultValue: '',
+  defaultValue: 'https://music.zonwe.top',
 );
 
-/// AppSettings 中保存后端服务器地址的键。
-const backendBaseUrlSettingKey = 'backend.base_url';
-
-/// 规范化用户输入或存储的服务器地址：去空白并去掉结尾多余的斜杠。
+/// 规范化服务器地址：去空白并去掉结尾多余的斜杠。
 String normalizeBackendBaseUrl(String value) =>
     value.trim().replaceFirst(RegExp(r'/+$'), '');
-
-/// 每次请求前读取运行时配置的后端地址（AppSettings）。
-typedef BackendBaseUrlReader = Future<String?> Function();
 
 class BackendAccount {
   const BackendAccount({

@@ -70,9 +70,10 @@ class _OnlineSearchPageState extends ConsumerState<OnlineSearchPage> {
   }
 
   void _clearQuery() {
+    // 清空关键字只重置输入框：上次搜索的结果继续留在页面上，
+    // 直到用户提交新的关键字才被替换。
     _query.clear();
     if (_selectionMode) _exitSelection();
-    _controller.clear();
   }
 
   Future<void> _loadMore() async {
@@ -342,13 +343,13 @@ class _OnlineSearchPageState extends ConsumerState<OnlineSearchPage> {
                             final loading =
                                 _controller.state.status ==
                                 OnlineSearchStatus.loading;
+                            final hasQuery = value.text.trim().isNotEmpty;
                             return TextField(
                               controller: _query,
                               enabled: !_batchBusy,
                               textInputAction: TextInputAction.search,
                               decoration: InputDecoration(
                                 labelText: '歌曲、专辑或艺术家',
-                                hintText: '输入关键字后点击搜索',
                                 prefixIcon: const Icon(Icons.travel_explore),
                                 suffixIcon: Row(
                                   mainAxisSize: MainAxisSize.min,
@@ -361,7 +362,8 @@ class _OnlineSearchPageState extends ConsumerState<OnlineSearchPage> {
                                       ),
                                     IconButton(
                                       tooltip: '立即搜索',
-                                      onPressed: loading || _batchBusy
+                                      onPressed:
+                                          loading || _batchBusy || !hasQuery
                                           ? null
                                           : () => _controller.searchNow(
                                               _query.text,

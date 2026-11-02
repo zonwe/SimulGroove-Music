@@ -73,6 +73,31 @@ void main() {
     expect(result.warnings.single.provider, 'source-b');
   });
 
+  test('匿名搜索不发送 Authorization 头', () async {
+    final gateway = HttpOnlineMusicGateway(
+      baseUrl: 'http://localhost:5080',
+      client: MockClient((request) async {
+        expect(request.url.path, '/api/online-music/search');
+        expect(request.headers.containsKey('authorization'), isFalse);
+        return http.Response(
+          jsonEncode({
+            'items': <Object>[],
+            'partial': false,
+            'warnings': <Object>[],
+            'nextCursor': null,
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+
+    final result = await gateway.search(null, query: 'Song');
+
+    expect(result.items, isEmpty);
+    expect(result.partial, isFalse);
+  });
+
   test('稳定错误码会映射为中文提示', () async {
     final gateway = HttpOnlineMusicGateway(
       baseUrl: 'http://localhost:5080',
@@ -179,8 +204,9 @@ void main() {
     ]);
   });
 
-  test('未配置服务器地址时给出可操作的中文引导', () async {
+  test('空地址时给出可操作的中文引导', () async {
     final gateway = HttpOnlineMusicGateway(
+      baseUrl: '',
       client: MockClient((_) async => fail('未配置地址时不应发出任何请求')),
     );
 
@@ -196,20 +222,15 @@ void main() {
             .having(
               (error) => error.message,
               'message',
-              '尚未配置服务器地址，请先在账号页登录后端。',
+              '尚未配置服务器地址，请重新安装或使用 --dart-define 指定。',
             ),
       ),
     );
   });
 
-  test('运行时地址解析器会在每次请求前读取', () async {
-    var reads = 0;
+  test('默认连接正式后端地址', () async {
     final urls = <Uri>[];
     final gateway = HttpOnlineMusicGateway(
-      readBaseUrl: () async {
-        reads++;
-        return 'http://runtime-host:5080/';
-      },
       client: MockClient((request) async {
         urls.add(request.url);
         return http.Response.bytes(
@@ -229,10 +250,9 @@ void main() {
 
     await gateway.search(session, query: 'Song');
 
-    expect(reads, 1);
     expect(
       urls.single.toString(),
-      'http://runtime-host:5080/api/online-music/search',
+      'https://music.zonwe.top/api/online-music/search',
     );
   });
 }

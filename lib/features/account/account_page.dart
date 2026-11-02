@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
-import '../../core/auth/backend_gateway.dart';
 
 class AccountPage extends ConsumerStatefulWidget {
   const AccountPage({super.key});
@@ -12,31 +11,15 @@ class AccountPage extends ConsumerStatefulWidget {
 }
 
 class _AccountPageState extends ConsumerState<AccountPage> {
-  final _serverAddress = TextEditingController();
   final _username = TextEditingController();
   final _password = TextEditingController();
-  bool _addressEdited = false;
-  bool _showServerSettings = false;
   bool _busy = false;
   bool _syncing = false;
   String? _error;
   String? _syncMessage;
 
   @override
-  void initState() {
-    super.initState();
-    // 把已保存的地址同步进输入框（含初始值）；用户一旦手动编辑就不再覆盖。
-    ref.listenManual(backendBaseUrlProvider, (previous, next) {
-      if (_addressEdited) return;
-      final value = next.value;
-      if (value == null || _serverAddress.text == value) return;
-      _serverAddress.text = value;
-    }, fireImmediately: true);
-  }
-
-  @override
   void dispose() {
-    _serverAddress.dispose();
     _username.dispose();
     _password.dispose();
     super.dispose();
@@ -45,7 +28,6 @@ class _AccountPageState extends ConsumerState<AccountPage> {
   @override
   Widget build(BuildContext context) {
     final account = ref.watch(accountProvider);
-    final savedAddress = ref.watch(backendBaseUrlProvider).value ?? '';
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -58,7 +40,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (error, _) => Text('账号读取失败：$error'),
                 data: (value) => value == null
-                    ? _loginForm(context, savedAddress)
+                    ? _loginForm(context)
                     : _profile(context, value.displayName, value.username),
               ),
             ),
@@ -68,10 +50,8 @@ class _AccountPageState extends ConsumerState<AccountPage> {
     );
   }
 
-  Widget _loginForm(BuildContext context, String savedAddress) {
-    // 服务器地址默认收进「高级设置」：登录页不再直接摊开后端地址，
-    // 只有未配置或用户正在编辑时才展开，避免首次使用没有入口。
-    final showServerField = _showServerSettings || savedAddress.isEmpty;
+  Widget _loginForm(BuildContext context) {
+    // 服务器地址固定为编译期默认值，登录页不再提供地址输入框。
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -88,41 +68,16 @@ class _AccountPageState extends ConsumerState<AccountPage> {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 22),
-        if (showServerField) ...[
-          TextField(
-            controller: _serverAddress,
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            enabled: !_busy,
-            decoration: const InputDecoration(
-              labelText: '服务器地址',
-              hintText: 'https://music.example.com',
-              helperText: '后端 Music.Api 的地址，保存后立即生效',
-            ),
-            onChanged: (_) {
-              _addressEdited = true;
-              if (!_showServerSettings) {
-                setState(() => _showServerSettings = true);
-              }
-            },
-          ),
-          if (savedAddress.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                '请填写服务器地址后登录',
-                style: TextStyle(color: Theme.of(context).colorScheme.primary),
-              ),
-            ),
-          const SizedBox(height: 12),
-        ],
         TextField(
           controller: _username,
+          enabled: !_busy,
+          autocorrect: false,
           decoration: const InputDecoration(labelText: '账号或邮箱'),
         ),
         const SizedBox(height: 12),
         TextField(
           controller: _password,
+          enabled: !_busy,
           obscureText: true,
           decoration: const InputDecoration(labelText: '密码'),
           onSubmitted: (_) => _signIn(),
@@ -140,28 +95,6 @@ class _AccountPageState extends ConsumerState<AccountPage> {
           onPressed: _busy ? null : _signIn,
           child: Text(_busy ? '登录中…' : '登录'),
         ),
-        if (savedAddress.isNotEmpty)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: _busy
-                  ? null
-                  : () => setState(() {
-                      final open = !showServerField;
-                      _showServerSettings = open;
-                      if (!open) {
-                        // 收起时丢弃未保存的草稿，下次展开仍是已保存的地址。
-                        _addressEdited = false;
-                        _serverAddress.text = savedAddress;
-                      }
-                    }),
-              icon: Icon(
-                showServerField ? Icons.expand_less : Icons.tune,
-                size: 18,
-              ),
-              label: Text(showServerField ? '收起服务器设置' : '高级设置'),
-            ),
-          ),
       ],
     );
   }
@@ -212,14 +145,10 @@ class _AccountPageState extends ConsumerState<AccountPage> {
       );
 
   Future<void> _signIn() async {
-    final address = normalizeBackendBaseUrl(_serverAddress.text);
-    final parsed = Uri.tryParse(address);
-    if (address.isEmpty || parsed == null || parsed.host.isEmpty) {
-      setState(() => _error = '请填写服务器地址，例如 https://music.example.com。');
-      return;
-    }
-    if (parsed.scheme != 'http' && parsed.scheme != 'https') {
-      setState(() => _error = '服务器地址需要以 http:// 或 https:// 开头。');
+    final username = _username.text.trim();
+    final password = _password.text;
+    if (username.isEmpty || password.isEmpty) {
+      setState(() => _error = '请输入账号和密码。');
       return;
     }
     setState(() {
@@ -228,13 +157,9 @@ class _AccountPageState extends ConsumerState<AccountPage> {
       _syncMessage = null;
     });
     try {
-      // 先持久化地址；网关每次请求都会读取该设置，下一次登录立即生效。
-      await ref
-          .read(databaseProvider)
-          .setSetting(backendBaseUrlSettingKey, address);
       await ref
           .read(authRepositoryProvider)
-          .signIn(username: _username.text, password: _password.text);
+          .signIn(username: username, password: password);
       final result = await ref.read(authRepositoryProvider).syncNow();
       if (mounted) {
         setState(

@@ -22,6 +22,44 @@ void main() {
     expect(result.items.single.title, 'Song');
   });
 
+  test('未登录时直接匿名搜索且不强制刷新会话', () async {
+    final auth = _FakeAuthRepository(hasSession: false);
+    final gateway = _RetryGateway(failFirst: false);
+    final repository = AuthenticatedOnlineMusicRepository(auth, gateway);
+
+    final result = await repository.search('Song');
+
+    expect(auth.forceRefreshCount, 0);
+    expect(gateway.tokens, [null]);
+    expect(gateway.cursors, [null]);
+    expect(result.items.single.title, 'Song');
+  });
+
+  test('会话刷新后仍没有会话时退回匿名搜索', () async {
+    final auth = _FakeAuthRepository(refreshDropsSession: true);
+    final gateway = _RetryGateway();
+    final repository = AuthenticatedOnlineMusicRepository(auth, gateway);
+
+    final result = await repository.search('Song');
+
+    expect(auth.forceRefreshCount, 1);
+    expect(gateway.tokens, ['expired-token', null]);
+    expect(result.items.single.title, 'Song');
+  });
+
+  test('会话读取失败时仍退回匿名搜索', () async {
+    final gateway = _RetryGateway(failFirst: false);
+    final repository = AuthenticatedOnlineMusicRepository(
+      _ThrowingAuthRepository(),
+      gateway,
+    );
+
+    final result = await repository.search('Song');
+
+    expect(gateway.tokens, [null]);
+    expect(result.items.single.title, 'Song');
+  });
+
   test('播放票据请求同样只刷新并重试一次', () async {
     final auth = _FakeAuthRepository();
     final gateway = _RetryGateway();
@@ -46,11 +84,22 @@ void main() {
 }
 
 class _FakeAuthRepository implements AuthRepository {
+  _FakeAuthRepository({
+    this.hasSession = true,
+    this.refreshDropsSession = false,
+  });
+
+  final bool hasSession;
+  final bool refreshDropsSession;
   var forceRefreshCount = 0;
 
   @override
   Future<BackendSession?> currentSession({bool forceRefresh = false}) async {
-    if (forceRefresh) forceRefreshCount++;
+    if (!hasSession) return null;
+    if (forceRefresh) {
+      forceRefreshCount++;
+      if (refreshDropsSession) return null;
+    }
     return BackendSession(
       token: forceRefresh ? 'refreshed-token' : 'expired-token',
       refreshToken: 'refresh-token',
@@ -74,21 +123,40 @@ class _FakeAuthRepository implements AuthRepository {
   Future<SyncResult> syncNow() => throw UnimplementedError();
 }
 
+class _ThrowingAuthRepository implements AuthRepository {
+  @override
+  Future<BackendSession?> currentSession({bool forceRefresh = false}) async =>
+      throw const BackendException('无法连接后端服务。');
+
+  @override
+  Future<void> signIn({required String username, required String password}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> signOut() => throw UnimplementedError();
+
+  @override
+  Future<SyncResult> syncNow() => throw UnimplementedError();
+}
+
 class _RetryGateway implements OnlineMusicGateway {
-  final tokens = <String>[];
+  _RetryGateway({this.failFirst = true});
+
+  final bool failFirst;
+  final tokens = <String?>[];
   final cursors = <String?>[];
 
   @override
   Future<OnlineMusicSearchResult> search(
-    BackendSession session, {
+    BackendSession? session, {
     required String query,
     List<String> sources = const [],
     int limit = 20,
     String? cursor,
   }) async {
-    tokens.add(session.token);
+    tokens.add(session?.token);
     cursors.add(cursor);
-    if (tokens.length == 1) {
+    if (failFirst && tokens.length == 1) {
       throw const OnlineMusicException('Unauthorized', statusCode: 401);
     }
     return const OnlineMusicSearchResult(

@@ -54,11 +54,8 @@ class OnlineSearchBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => switch (state.status) {
-    OnlineSearchStatus.idle => const OnlineSearchMessage(
-      icon: Icons.manage_search_rounded,
-      title: '输入关键字后点击搜索',
-      message: '需要先在账号页登录，并由服务端启用允许的音乐来源。',
-    ),
+    // 首次搜索前不摆放任何引导文案：搜索框本身已经说明了用法。
+    OnlineSearchStatus.idle => const SizedBox.shrink(),
     OnlineSearchStatus.loading => const _LoadingState(),
     OnlineSearchStatus.empty => OnlineSearchMessage(
       icon: Icons.search_off_rounded,

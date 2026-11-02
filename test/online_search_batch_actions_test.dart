@@ -33,6 +33,7 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField), 'Song');
+    await tester.pump();
     await tester.tap(find.byTooltip('立即搜索'));
     await tester.pumpAndSettle();
     expect(find.byType(Checkbox), findsNothing);

@@ -26,14 +26,28 @@ class AuthenticatedOnlineMusicRepository
 
   @override
   Future<OnlineMusicSearchResult> search(String query, {String? cursor}) async {
-    var session = await _requireSession();
+    // 搜索不要求登录：拿不到会话时直接匿名请求，登录后仍带上会话以便服务端按账号限流。
+    var session = await _currentSessionOrNull();
 
     try {
       return await _gateway.search(session, query: query, cursor: cursor);
     } on OnlineMusicException catch (error) {
-      if (!error.isUnauthorized) rethrow;
-      session = await _requireSession(forceRefresh: true);
+      if (!error.isUnauthorized || session == null) rethrow;
+      // 刷新后仍拿不到会话（已退出或刷新失败）时退回匿名搜索，
+      // 不因为账号状态把用户挡在搜索页外。
+      session = await _currentSessionOrNull(forceRefresh: true);
       return _gateway.search(session, query: query, cursor: cursor);
+    }
+  }
+
+  /// 搜索可以匿名：会话读取或刷新失败都不应阻断搜索。
+  Future<BackendSession?> _currentSessionOrNull({
+    bool forceRefresh = false,
+  }) async {
+    try {
+      return await _auth.currentSession(forceRefresh: forceRefresh);
+    } on BackendException {
+      return null;
     }
   }
 

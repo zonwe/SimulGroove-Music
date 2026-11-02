@@ -32,7 +32,9 @@ void main() {
       ),
     );
 
-    expect(find.text('输入关键字后点击搜索'), findsNWidgets(2));
+    // 首次搜索前不摆放任何引导文案：在线搜索不要求登录。
+    expect(find.text('输入关键字后点击搜索'), findsNothing);
+    expect(find.textContaining('登录'), findsNothing);
     await tester.enterText(find.byType(TextField), 'Song');
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('Test Song'), findsNothing);
@@ -53,6 +55,54 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('清空关键字后保留上次结果，直到下一次搜索', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          onlineMusicRepositoryProvider.overrideWithValue(
+            const _EchoRepository(),
+          ),
+          onlineTrackPlaybackProvider.overrideWithValue(_FakePlayback()),
+          onlineSearchShowArtworkProvider.overrideWithValue(
+            const AsyncData(true),
+          ),
+        ],
+        child: const MaterialApp(home: Scaffold(body: OnlineSearchPage())),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'Song');
+    await tester.pump();
+    await tester.tap(find.byTooltip('立即搜索'));
+    await tester.pumpAndSettle();
+    expect(find.text('Song 结果'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('清空搜索'));
+    await tester.pump();
+
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller?.text,
+      isEmpty,
+    );
+    expect(find.text('Song 结果'), findsOneWidget);
+    expect(find.byTooltip('清空搜索'), findsNothing);
+    expect(
+      tester
+          .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.search))
+          .onPressed,
+      isNull,
+    );
+
+    await tester.enterText(find.byType(TextField), 'Album');
+    await tester.pump();
+    await tester.tap(find.byTooltip('立即搜索'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Song 结果'), findsNothing);
+    expect(find.text('Album 结果'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('错误状态提供可访问的重试操作', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -70,6 +120,7 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField), 'Song');
+    await tester.pump();
     await tester.tap(find.byTooltip('立即搜索'));
     await tester.pumpAndSettle();
 
@@ -108,6 +159,7 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField), 'Song');
+    await tester.pump();
     await tester.tap(find.byTooltip('立即搜索'));
     await tester.pumpAndSettle();
 
@@ -146,6 +198,7 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField), 'Song');
+    await tester.pump();
     await tester.tap(find.byTooltip('立即搜索'));
     await tester.pumpAndSettle();
     expect(find.text('Test Song'), findsOneWidget);
@@ -177,6 +230,7 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField), 'Song');
+    await tester.pump();
     await tester.tap(find.byTooltip('立即搜索'));
     await tester.pumpAndSettle();
 
@@ -206,6 +260,7 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField), 'Song');
+    await tester.pump();
     await tester.tap(find.byTooltip('立即搜索'));
     await tester.pumpAndSettle();
 
@@ -239,6 +294,7 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField), 'Song');
+    await tester.pump();
     await tester.tap(find.byTooltip('立即搜索'));
     await tester.pumpAndSettle();
 
@@ -256,6 +312,40 @@ void main() {
     expect(find.text('Song 21'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+}
+
+class _EchoRepository implements OnlineMusicSearchRepository {
+  const _EchoRepository();
+
+  @override
+  Future<OnlineMusicSearchResult> search(
+    String query, {
+    String? cursor,
+  }) async => OnlineMusicSearchResult(
+    items: [
+      OnlineTrack(
+        provider: 'source-a',
+        trackId: 'track-$query',
+        title: '$query 结果',
+        artists: const ['Artist'],
+        album: 'Album',
+        playable: true,
+        capabilities: const {'playback'},
+      ),
+    ],
+    partial: false,
+    warnings: const [],
+  );
+
+  @override
+  Future<OnlinePlaybackSource> preparePlayback(OnlineTrack track) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String?> loadLyrics(OnlineTrack track) async => null;
+
+  @override
+  Future<Uint8List?> loadArtwork(OnlineTrack track) async => null;
 }
 
 class _ResultRepository implements OnlineMusicSearchRepository {

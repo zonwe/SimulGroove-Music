@@ -140,8 +140,9 @@ void main() {
     expect(result.deletions.single.remoteKey, deletion.remoteKey);
   });
 
-  test('未配置服务器地址时给出可操作的中文引导', () async {
+  test('空地址时给出可操作的中文引导', () async {
     final gateway = HttpBackendGateway(
+      baseUrl: '',
       client: MockClient((_) async => fail('未配置地址时不应发出任何请求')),
     );
 
@@ -151,19 +152,18 @@ void main() {
         isA<BackendException>().having(
           (error) => error.message,
           'message',
-          '尚未配置服务器地址，请在账号页填写后端地址。',
+          '尚未配置服务器地址，请重新安装或使用 --dart-define 指定。',
         ),
       ),
     );
   });
 
-  test('运行时地址解析器会覆盖编译期默认值', () async {
+  test('默认连接正式后端地址', () async {
     final gateway = HttpBackendGateway(
-      readBaseUrl: () async => 'http://runtime-host:5080/',
       client: MockClient((request) async {
         expect(
           request.url.toString(),
-          'http://runtime-host:5080/api/auth/login',
+          'https://music.zonwe.top/api/auth/login',
         );
         return http.Response(
           jsonEncode({
@@ -186,5 +186,6 @@ void main() {
     final session = await gateway.signIn(username: 'user', password: 'secret');
 
     expect(session.token, 'access-token');
+    expect(defaultBackendBaseUrl, 'https://music.zonwe.top');
   });
 }

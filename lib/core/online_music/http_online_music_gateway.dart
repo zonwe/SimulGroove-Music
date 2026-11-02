@@ -11,32 +11,25 @@ import 'online_track.dart';
 
 class HttpOnlineMusicGateway
     implements OnlineMusicGateway, OnlineMusicDownloadGateway {
-  HttpOnlineMusicGateway({
-    String? baseUrl,
-    http.Client? client,
-    BackendBaseUrlReader? readBaseUrl,
-  }) : _fixedBaseUrl = baseUrl == null
-           ? null
-           : normalizeBackendBaseUrl(baseUrl),
-       _client = client ?? http.Client(),
-       _baseUrlReader = readBaseUrl;
+  HttpOnlineMusicGateway({String? baseUrl, http.Client? client})
+    : _fixedBaseUrl = baseUrl == null ? null : normalizeBackendBaseUrl(baseUrl),
+      _client = client ?? http.Client();
 
   static const _timeout = Duration(seconds: 15);
 
-  // 固定地址用于测试；生产路径每次请求读取 AppSettings，
-  // 与 HttpBackendGateway 保持一致的地址解析语义。
+  // 与 HttpBackendGateway 使用同一套地址语义：测试可传固定地址，
+  // 生产固定连接编译期默认后端。
   final String? _fixedBaseUrl;
-  final BackendBaseUrlReader? _baseUrlReader;
   final http.Client _client;
 
-  Future<String> _requireBaseUrl() async {
-    if (_fixedBaseUrl != null) return _fixedBaseUrl;
-    final resolved = normalizeBackendBaseUrl(
-      await _baseUrlReader?.call() ?? defaultBackendBaseUrl,
-    );
+  String get _baseUrl =>
+      _fixedBaseUrl ?? normalizeBackendBaseUrl(defaultBackendBaseUrl);
+
+  String _requireBaseUrl() {
+    final resolved = _baseUrl;
     if (resolved.isEmpty) {
       throw const OnlineMusicException(
-        '尚未配置服务器地址，请先在账号页登录后端。',
+        '尚未配置服务器地址，请重新安装或使用 --dart-define 指定。',
         code: 'online_music_server_not_configured',
       );
     }
@@ -45,7 +38,7 @@ class HttpOnlineMusicGateway
 
   @override
   Future<OnlineMusicSearchResult> search(
-    BackendSession session, {
+    BackendSession? session, {
     required String query,
     List<String> sources = const [],
     int limit = 20,
@@ -53,7 +46,7 @@ class HttpOnlineMusicGateway
   }) async {
     final response = await _send(
       '/api/online-music/search',
-      token: session.token,
+      token: session?.token,
       body: {
         'query': query,
         'sources': sources,
@@ -70,7 +63,7 @@ class HttpOnlineMusicGateway
     BackendSession session,
     OnlineTrack track,
   ) async {
-    final baseUrl = await _requireBaseUrl();
+    final baseUrl = _requireBaseUrl();
     final provider = Uri.encodeComponent(track.provider);
     final trackId = Uri.encodeComponent(track.trackId);
     final response = await _send(
@@ -102,7 +95,7 @@ class HttpOnlineMusicGateway
     BackendSession session,
     OnlineTrack track,
   ) async {
-    final baseUrl = await _requireBaseUrl();
+    final baseUrl = _requireBaseUrl();
     final provider = Uri.encodeComponent(track.provider);
     final trackId = Uri.encodeComponent(track.trackId);
     return OnlinePlaybackSource(
@@ -168,16 +161,17 @@ class HttpOnlineMusicGateway
 
   Future<http.Response> _send(
     String path, {
-    required String token,
+    String? token,
     Map<String, dynamic>? body,
     String method = 'POST',
   }) async {
-    final baseUrl = await _requireBaseUrl();
+    final baseUrl = _requireBaseUrl();
     try {
       final uri = Uri.parse('$baseUrl$path');
       final headers = {
         'Accept': method == 'GET' ? '*/*' : 'application/json',
-        'Authorization': 'Bearer $token',
+        // 匿名搜索不带 Authorization：服务端按来源 IP 限流。
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
         if (method != 'GET') 'Content-Type': 'application/json',
       };
       final request = method == 'GET'

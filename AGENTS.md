@@ -19,7 +19,7 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 
 以下内容尚未视为完整产品能力：
 
-- Flutter 账号页通过 `HttpBackendGateway` 连接真实后端，运行时服务器地址保存在 `AppSettings`，令牌由安全存储保存；修改认证时必须继续保持刷新轮换和 401 单次重试。
+- Flutter 账号页通过 `HttpBackendGateway` 连接真实后端，后端地址默认固定为 `https://music.zonwe.top`（只能用 `--dart-define=MUSIC_API_URL` 在编译期覆盖），令牌由安全存储保存；修改认证时必须继续保持刷新轮换和 401 单次重试。
 - 服务器扫描管理位于 `backend/Music.Api/Pages/Admin/` Razor Pages，不放入 Flutter 客户端；扫描的是后端机器目录，已索引曲目可在管理页试听，也可通过账号隔离且支持 Range 的 API 播放。
 - 在线搜索、歌词/封面、下载与 Windows/Linux/Android 在线播放已通过 `Music.Api` 接入受控 sidecar 契约；播放使用账号绑定短期票据与 Range 代理，Web 因认证请求头限制暂不开放在线播放和下载。仓库提供非 root API 镜像与单机 Compose 编排模板，但生产指标导出、告警和 HTTPS 入口仍由部署环境提供；听歌识曲仍是占位页。
 - Web 本地文件扫描和播放未实现。
@@ -55,7 +55,7 @@ SimulGroove Music 是一个面向 Android、Windows、Linux 和 Web 的私人本
 | `lib/features/library/` | 音乐库、喜欢、专辑/艺术家集合和封面组件 | `library_page.dart` 较大，新增逻辑时优先抽取可测试单元 |
 | `lib/features/player/` | 迷你播放器、正在播放页、队列、音量和歌曲信息 | UI 状态来自 `MusicAudioHandler` 的流和值流 |
 | `lib/features/playlists/` | 歌单列表和详情 | 写操作经 `AppDatabase`，不要在页面内维护另一份事实源 |
-| `lib/features/account/` | 服务器地址、真实登录和资料库同步 UI | 页面不直接持有 Token 或 HTTP 客户端 |
+| `lib/features/account/` | 真实登录和资料库同步 UI | 页面不直接持有 Token 或 HTTP 客户端；服务器地址不可在运行时修改 |
 | `lib/features/placeholders/` | 听歌识曲占位页 | 识曲功能仍未实现，不应主动调用麦克风 |
 | `lib/features/settings/` | 实际设置页：外观、播放界面、音效、扫描、在线音乐、托盘与快捷键区块 | 各区块独立成文件；新增设置优先加区块而不是往 `settings_page.dart` 堆叠 |
 | `lib/features/online_search/` | 在线音乐搜索状态、页面和结果项 | 只调用 `Music.Api`；不得直连 sidecar 或保存第三方 URL/Cookie |

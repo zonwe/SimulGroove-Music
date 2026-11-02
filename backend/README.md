@@ -117,7 +117,7 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 | `OnlineMusic:CircuitBreakerFailureThreshold` | `5` | 连续瞬时失败达到该次数后打开熔断，运行时限制为 2–20 |
 | `OnlineMusic:CircuitBreakerBreakSeconds` | `30` | 熔断持续秒数，运行时限制为 5–300；恢复窗口仅允许一个探测请求 |
 | `OnlineMusic:AllowedSources` | `[]` | sidecar 规范来源 ID 白名单 |
-| `OnlineMusic:RequestsPerMinute` | `30` | 每账号和每 IP 的搜索限额 |
+| `OnlineMusic:RequestsPerMinute` | `30` | 每账号和每 IP 的搜索限额；匿名搜索只按来源 IP 计数 |
 | `OnlineMusic:PlaybackTicketSeconds` | `300` | 账号绑定播放票据的有效秒数，限制为 60–300 |
 | `OnlineMusic:LyricsCacheSeconds` | `900` | 歌词缓存秒数，运行时限制为 30–86400 |
 | `OnlineMusic:ArtworkCacheSeconds` | `21600` | 封面缓存秒数，运行时限制为 60–86400 |
@@ -127,7 +127,7 @@ $env:Administration__Password = "使用密码管理器生成的管理员密码"
 
 ## API 概览
 
-除 `/`、`/health`、`/health/ready` 和 `/openapi.json` 外，业务接口需要 `Authorization: Bearer <access-token>`。`/health` 仅表示 API 进程存活；`/health/ready` 在在线音乐启用时探测私有 sidecar，不可用时返回 `503`：
+除 `/`、`/health`、`/health/ready`、`/openapi.json` 和允许匿名的 `POST /api/online-music/search` 外，业务接口需要 `Authorization: Bearer <access-token>`。匿名搜索按来源 IP 限流，搜索之外的在线上行接口（播放票据、歌词、封面、下载）仍需要登录。`/health` 仅表示 API 进程存活；`/health/ready` 在在线音乐启用时探测私有 sidecar，不可用时返回 `503`：
 
 客户端可以传入最多 64 个字符的 `X-Correlation-ID`（仅允许 ASCII 字母、数字、点、下划线和连字符）。服务端会拒绝不安全的值并生成替代 ID，在响应、账号审计记录和发往 sidecar 的请求中复用该 ID。
 

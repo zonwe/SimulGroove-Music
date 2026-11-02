@@ -30,7 +30,6 @@ public static class OnlineMusicEndpoints
             CancellationToken cancellationToken) =>
         {
             var account = auth.Authenticate(httpContext.Request.ReadBearerToken());
-            if (account is null) return Results.Unauthorized();
 
             if (!search.Enabled)
             {
@@ -39,7 +38,12 @@ public static class OnlineMusicEndpoints
                     statusCode: StatusCodes.Status503ServiceUnavailable);
             }
 
-            if (!limiter.TryAcquire(account.Username, httpContext.Connection.RemoteIpAddress?.ToString()))
+            // 搜索不要求登录：匿名请求按来源 IP 限流，登录请求仍按账号 + IP 限流。
+            var ipAddress = httpContext.Connection.RemoteIpAddress?.ToString();
+            var withinLimit = account is null
+                ? limiter.TryAcquireAnonymous(ipAddress)
+                : limiter.TryAcquire(account.Username, ipAddress);
+            if (!withinLimit)
             {
                 return Results.Json(
                     new ProblemResponse("online_music_rate_limited", "在线搜索请求过于频繁，请稍后重试。"),

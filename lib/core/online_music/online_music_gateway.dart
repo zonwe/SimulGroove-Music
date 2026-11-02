@@ -4,8 +4,9 @@ import '../auth/backend_gateway.dart';
 import 'online_track.dart';
 
 abstract interface class OnlineMusicGateway {
+  /// 搜索允许匿名：[session] 为 null 时不发送 Authorization，服务端按来源 IP 限流。
   Future<OnlineMusicSearchResult> search(
-    BackendSession session, {
+    BackendSession? session, {
     required String query,
     List<String> sources = const [],
     int limit = 20,

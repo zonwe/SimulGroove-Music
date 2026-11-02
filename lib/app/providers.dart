@@ -62,11 +62,8 @@ final libraryScanControllerProvider = Provider<LibraryScanController>((ref) {
   return controller;
 });
 final backendGatewayProvider = Provider<BackendGateway>(
-  // 每次请求从 AppSettings 解析服务器地址，账号页保存后立即生效。
-  (ref) => HttpBackendGateway(
-    readBaseUrl: () =>
-        ref.read(databaseProvider).readSetting(backendBaseUrlSettingKey),
-  ),
+  // 后端地址固定为编译期默认值（正式服务器），不再读取可编辑的运行时设置。
+  (ref) => HttpBackendGateway(),
 );
 final authTokenStoreProvider = Provider<AuthTokenStore>(
   (ref) => SecureAuthTokenStore(),
@@ -82,10 +79,7 @@ final authSessionBootstrapProvider = FutureProvider<BackendSession?>(
   (ref) => ref.watch(authRepositoryProvider).currentSession(),
 );
 final onlineMusicGatewayProvider = Provider<OnlineMusicGateway>(
-  (ref) => HttpOnlineMusicGateway(
-    readBaseUrl: () =>
-        ref.read(databaseProvider).readSetting(backendBaseUrlSettingKey),
-  ),
+  (ref) => HttpOnlineMusicGateway(),
 );
 final onlineMusicRepositoryProvider = Provider<OnlineMusicSearchRepository>(
   (ref) => AuthenticatedOnlineMusicRepository(
@@ -161,16 +155,6 @@ final accountProvider = StreamProvider<Account?>(
   (ref) => ref.watch(databaseProvider).watchCurrentAccount(),
 );
 
-/// 当前生效的后端服务器地址（AppSettings 优先，编译期注入兜底），供账号页展示与编辑。
-final backendBaseUrlProvider = Provider<AsyncValue<String>>(
-  (ref) => ref
-      .watch(settingsProvider)
-      .whenData(
-        (settings) => normalizeBackendBaseUrl(
-          settings[backendBaseUrlSettingKey] ?? defaultBackendBaseUrl,
-        ),
-      ),
-);
 final playlistsProvider = StreamProvider<List<Playlist>>(
   (ref) => ref.watch(databaseProvider).watchPlaylists(),
 );
